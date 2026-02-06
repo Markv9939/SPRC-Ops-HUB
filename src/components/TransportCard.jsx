@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, setDoc, orderBy, limit } from 'firebase/firestore'
 import DCCheckModal from './DCCheckModal'
 
 function TransportCard({ transportId, onReturn, onClose }) {
@@ -18,6 +18,12 @@ function TransportCard({ transportId, onReturn, onClose }) {
   const [newStopName, setNewStopName] = useState('')
   const [newStopAddress, setNewStopAddress] = useState('')
   const [newClient, setNewClient] = useState('')
+
+  // Suggestions
+  const [clientSuggestions, setClientSuggestions] = useState([])
+  const [destinationSuggestions, setDestinationSuggestions] = useState([])
+  const [showClientSuggestions, setShowClientSuggestions] = useState(false)
+  const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false)
 
   const reasonOptions = [
     'Medical X appointment',
@@ -69,11 +75,97 @@ function TransportCard({ transportId, onReturn, onClose }) {
     })
   }
 
-  const handleAddClient = () => {
-    if (newClient.trim()) {
-      setClients([...clients, newClient.trim()])
+  const normalizeText = (text) => {
+    return text.toLowerCase().trim().replace(/\s+/g, ' ')
+  }
+
+  const searchClientSuggestions = async (searchTerm) => {
+    if (!searchTerm.trim()) {
+      setClientSuggestions([])
+      return
+    }
+
+    try {
+      const clientsRef = collection(db, 'clients')
+      const q = query(clientsRef, orderBy('label'), limit(5))
+      const snapshot = await getDocs(q)
+
+      const results = snapshot.docs
+        .map(doc => doc.data())
+        .filter(client =>
+          client.normalizedLabel.includes(normalizeText(searchTerm))
+        )
+        .slice(0, 5)
+
+      setClientSuggestions(results)
+    } catch (error) {
+      console.error('Error searching clients:', error)
+    }
+  }
+
+  const searchDestinationSuggestions = async (searchTerm) => {
+    if (!searchTerm.trim()) {
+      setDestinationSuggestions([])
+      return
+    }
+
+    try {
+      const destRef = collection(db, 'destinations')
+      const q = query(destRef, orderBy('name'), limit(5))
+      const snapshot = await getDocs(q)
+
+      const results = snapshot.docs
+        .map(doc => doc.data())
+        .filter(dest =>
+          dest.normalizedName?.includes(normalizeText(searchTerm)) ||
+          dest.normalizedAddress?.includes(normalizeText(searchTerm))
+        )
+        .slice(0, 5)
+
+      setDestinationSuggestions(results)
+    } catch (error) {
+      console.error('Error searching destinations:', error)
+    }
+  }
+
+  const saveClientToFirestore = async (clientName) => {
+    try {
+      const normalized = normalizeText(clientName)
+      const clientRef = doc(db, 'clients', normalized)
+      await setDoc(clientRef, {
+        label: clientName,
+        normalizedLabel: normalized,
+        createdAt: serverTimestamp()
+      }, { merge: true })
+    } catch (error) {
+      console.error('Error saving client:', error)
+    }
+  }
+
+  const saveDestinationToFirestore = async (name, address) => {
+    try {
+      const normalizedAddress = normalizeText(address)
+      const destRef = doc(db, 'destinations', normalizedAddress)
+      await setDoc(destRef, {
+        name: name || '',
+        address,
+        normalizedName: normalizeText(name || ''),
+        normalizedAddress,
+        createdAt: serverTimestamp()
+      }, { merge: true })
+    } catch (error) {
+      console.error('Error saving destination:', error)
+    }
+  }
+
+  const handleAddClient = async (clientName = newClient) => {
+    const trimmed = clientName.trim()
+    if (trimmed) {
+      setClients([...clients, trimmed])
       setNewClient('')
-      saveToFirestore({ clients: [...clients, newClient.trim()] })
+      setShowClientSuggestions(false)
+      await saveClientToFirestore(trimmed)
+      await saveToFirestore({ clients: [...clients, trimmed] })
     }
   }
 
@@ -112,6 +204,10 @@ function TransportCard({ transportId, onReturn, onClose }) {
     setStops(updatedStops)
     setPendingStopIndex(updatedStops.length - 1)
     setShowDCCheck(true)
+    setShowDestinationSuggestions(false)
+
+    // Save destination to Firestore
+    await saveDestinationToFirestore(newStopName.trim(), newStopAddress.trim())
   }
 
   const handleDCCheckComplete = async (dcCheckData) => {
@@ -264,37 +360,79 @@ function TransportCard({ transportId, onReturn, onClose }) {
             </div>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <input
-            type="text"
-            value={newClient}
-            onChange={(e) => setNewClient(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
-            placeholder="Add client name..."
-            style={{
-              flex: 1,
-              padding: '10px',
+        <div style={{ position: 'relative' }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              type="text"
+              value={newClient}
+              onChange={(e) => {
+                setNewClient(e.target.value)
+                searchClientSuggestions(e.target.value)
+                setShowClientSuggestions(true)
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
+              onFocus={() => newClient && setShowClientSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowClientSuggestions(false), 200)}
+              placeholder="Add client name..."
+              style={{
+                flex: 1,
+                padding: '10px',
+                border: '2px solid #eee',
+                borderRadius: '8px',
+                fontSize: '14px',
+                outline: 'none'
+              }}
+            />
+            <button
+              onClick={() => handleAddClient()}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: '#4CAF50',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                cursor: 'pointer'
+              }}
+            >
+              + Add
+            </button>
+          </div>
+          {showClientSuggestions && clientSuggestions.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              right: '90px',
+              backgroundColor: 'white',
               border: '2px solid #eee',
               borderRadius: '8px',
-              fontSize: '14px',
-              outline: 'none'
-            }}
-          />
-          <button
-            onClick={handleAddClient}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#4CAF50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: 'bold',
-              cursor: 'pointer'
-            }}
-          >
-            + Add
-          </button>
+              marginTop: '4px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              zIndex: 10,
+              maxHeight: '200px',
+              overflowY: 'auto'
+            }}>
+              {clientSuggestions.map((suggestion, index) => (
+                <div
+                  key={index}
+                  onClick={() => handleAddClient(suggestion.label)}
+                  style={{
+                    padding: '10px 12px',
+                    cursor: 'pointer',
+                    borderBottom: index < clientSuggestions.length - 1 ? '1px solid #eee' : 'none',
+                    fontSize: '14px',
+                    color: '#333'
+                  }}
+                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                  onMouseLeave={(e) => e.target.style.backgroundColor = 'white'}
+                >
+                  {suggestion.label}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -391,11 +529,17 @@ function TransportCard({ transportId, onReturn, onClose }) {
           </div>
         ))}
 
-        <div style={{ marginTop: '12px' }}>
+        <div style={{ marginTop: '12px', position: 'relative' }}>
           <input
             type="text"
             value={newStopName}
-            onChange={(e) => setNewStopName(e.target.value)}
+            onChange={(e) => {
+              setNewStopName(e.target.value)
+              searchDestinationSuggestions(e.target.value)
+              setShowDestinationSuggestions(true)
+            }}
+            onFocus={() => newStopName && setShowDestinationSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowDestinationSuggestions(false), 200)}
             placeholder="Location name (optional)"
             style={{
               width: '100%',
@@ -411,7 +555,13 @@ function TransportCard({ transportId, onReturn, onClose }) {
           <input
             type="text"
             value={newStopAddress}
-            onChange={(e) => setNewStopAddress(e.target.value)}
+            onChange={(e) => {
+              setNewStopAddress(e.target.value)
+              searchDestinationSuggestions(e.target.value)
+              setShowDestinationSuggestions(true)
+            }}
+            onFocus={() => newStopAddress && setShowDestinationSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowDestinationSuggestions(false), 200)}
             placeholder="Address *"
             style={{
               width: '100%',
@@ -423,6 +573,45 @@ function TransportCard({ transportId, onReturn, onClose }) {
               boxSizing: 'border-box'
             }}
           />
+          {showDestinationSuggestions && destinationSuggestions.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              right: 0,
+              backgroundColor: 'white',
+              border: '2px solid #eee',
+              borderRadius: '8px',
+              marginTop: '4px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              zIndex: 10,
+              maxHeight: '200px',
+              overflowY: 'auto'
+            }}>
+              {destinationSuggestions.map((suggestion, index) => (
+                <div
+                  key={index}
+                  onClick={() => {
+                    setNewStopName(suggestion.name)
+                    setNewStopAddress(suggestion.address)
+                    setShowDestinationSuggestions(false)
+                  }}
+                  style={{
+                    padding: '10px 12px',
+                    cursor: 'pointer',
+                    borderBottom: index < destinationSuggestions.length - 1 ? '1px solid #eee' : 'none',
+                    fontSize: '14px',
+                    color: '#333'
+                  }}
+                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                  onMouseLeave={(e) => e.target.style.backgroundColor = 'white'}
+                >
+                  <div style={{ fontWeight: 'bold' }}>{suggestion.name || 'Unnamed'}</div>
+                  <div style={{ fontSize: '12px', color: '#666' }}>{suggestion.address}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

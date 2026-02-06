@@ -6,6 +6,7 @@ import Header from './components/Header'
 import TransportList from './components/TransportList'
 import TransportCard from './components/TransportCard'
 import CloseChecklist from './components/CloseChecklist'
+import SupervisorDashboard from './components/SupervisorDashboard'
 
 function App() {
   const [user, setUser] = useState(null)
@@ -136,6 +137,24 @@ function App() {
     )
   }
 
+  // Show supervisor dashboard for supervisor role
+  if (user.role === 'supervisor') {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        backgroundColor: '#f5f5f5'
+      }}>
+        <Header userName={user.name} onLogout={handleLogout} />
+        <SupervisorDashboard
+          onNewTransport={handleNewTransport}
+          onLogout={handleLogout}
+          userName={user.name}
+        />
+      </div>
+    )
+  }
+
+  // Regular tech view
   return (
     <div style={{
       minHeight: '100vh',

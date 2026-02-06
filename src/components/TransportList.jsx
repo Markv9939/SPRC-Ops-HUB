@@ -22,6 +22,20 @@ function TransportList({ transports, onNewTransport }) {
     return transport.stops[0].destinationAddress || transport.stops[0].destinationName || 'No destination'
   }
 
+  const isOverdue = (transport) => {
+    if (transport.status === 'closed' || transport.status === 'returned') {
+      return false
+    }
+
+    if (!transport.departedAt) return false
+
+    const departedDate = transport.departedAt.toDate ? transport.departedAt.toDate() : new Date(transport.departedAt)
+    const hoursSinceDeparted = (Date.now() - departedDate.getTime()) / (1000 * 60 * 60)
+
+    // Consider overdue if more than 8 hours since departure and not returned
+    return hoursSinceDeparted > 8
+  }
+
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
 
@@ -85,15 +99,32 @@ function TransportList({ transports, onNewTransport }) {
                 backgroundColor: 'white',
                 borderRadius: '12px',
                 padding: '16px',
-                border: '1px solid #eee',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                border: isOverdue(t) ? '2px solid #FF5722' : '1px solid #eee',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                position: 'relative'
               }}
             >
+              {isOverdue(t) && (
+                <div style={{
+                  position: 'absolute',
+                  top: '-8px',
+                  right: '12px',
+                  backgroundColor: '#FF5722',
+                  color: 'white',
+                  padding: '4px 12px',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  fontWeight: 'bold'
+                }}>
+                  OVERDUE
+                </div>
+              )}
               <div style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                marginBottom: '8px'
+                marginBottom: '8px',
+                marginTop: isOverdue(t) ? '12px' : '0'
               }}>
                 <span style={{
                   fontWeight: 'bold',
@@ -111,11 +142,13 @@ function TransportList({ transports, onNewTransport }) {
                     t.status === 'open' ? '#FFF3CD' :
                     t.status === 'arrived' ? '#D1ECF1' :
                     t.status === 'returned' ? '#D4EDDA' :
+                    t.status === 'closed' ? '#E8F5E9' :
                     '#f0f0f0',
                   color:
                     t.status === 'open' ? '#856404' :
                     t.status === 'arrived' ? '#0C5460' :
                     t.status === 'returned' ? '#155724' :
+                    t.status === 'closed' ? '#2E7D32' :
                     '#666'
                 }}>
                   {t.status || 'open'}

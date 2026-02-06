@@ -81,46 +81,47 @@ Firestore is initialized in [src/firebase.js](src/firebase.js) but not yet used 
 
 ---
 
-## Phase 3 — Suggestions and dedupe
+## Phase 3 — Suggestions and dedupe ✅ COMPLETED
 
 **Goal:** Clients and destinations become autosuggest; dedupe destinations by address.
 
-1. **Clients**
-  - On adding a client (e.g. when blurring input or adding chip), upsert into `clients` (e.g. by `normalizedLabel` or merge). When typing in client field, query `clients` for suggestions (prefix match on `normalizedLabel`), show as dropdown or chips. No formatting enforcement.
-2. **Destinations**
-  - When user enters name + address for a stop, save to `destinations` (with `normalizedAddress` for dedupe). When adding a stop, suggest from `destinations` (e.g. match on name or address). If new address matches existing `normalizedAddress`, suggest "Use existing: …" and link to that destination.
-3. **UI**
-  - "Add another" chips for both clients and stops; suggestions appear from Firestore as user types (client search) or when adding a destination (pick or create new).
+1. **Clients** ✅ COMPLETED
+  - ✅ Updated [TransportCard.jsx](src/components/TransportCard.jsx): saves clients to `clients` collection on add, searches with normalized text matching, shows dropdown suggestions
+2. **Destinations** ✅ COMPLETED
+  - ✅ Saves destinations to `destinations` collection with `normalizedAddress` for dedupe, shows suggestions when typing name or address
+3. **UI** ✅ COMPLETED
+  - ✅ Autocomplete dropdowns for both clients and destinations with fuzzy matching
 
-**Done when:** Previously used clients and destinations appear as suggestions; re-entering same address suggests using existing destination.
+**Done when:** Previously used clients and destinations appear as suggestions; re-entering same address suggests using existing destination. ✅ READY TO TEST
 
 ---
 
-## Phase 4 — Overdue and notifications
+## Phase 4 — Overdue and notifications ✅ PARTIALLY COMPLETED
 
 **Goal:** Overdue state visible in UI; hourly push to tech + supervisor until resolved.
 
-1. **Overdue definition**
-  - Define rule (e.g. no `returnedAt` within X hours of `departedAt`, or past a wall-clock cutoff). Store computed `overdue: boolean` or derive in UI/Cloud Function.
-2. **UI**
-  - In Transport List and supervisor view, show overdue badge/state; filters in Phase 5 can include "overdue".
-3. **Push notifications**
-  - Firebase Cloud Messaging (FCM): request permission, store FCM token per user (e.g. in `users` or a `tokens` subcollection). Backend: scheduled function (e.g. Cloud Scheduler + Cloud Function) runs every hour, finds overdue transports, resolves tech + supervisor and sends push (one per user, deduplicated by transport). Logs retained per spec.
+1. **Overdue definition** ✅ COMPLETED
+  - ✅ Updated [TransportList.jsx](src/components/TransportList.jsx): defines overdue as >8 hours since departure without return
+2. **UI** ✅ COMPLETED
+  - ✅ Shows red border and "OVERDUE" badge on transport cards, included in supervisor dashboard filters
+3. **Push notifications** ⏸️ SKIPPED (requires Cloud Functions / paid Firebase plan)
+  - Not implemented - would require Firebase Cloud Messaging + Cloud Functions for scheduled hourly notifications
 
-**Done when:** Overdue transports are clearly indicated and tech + supervisor receive hourly push until return/close.
+**Done when:** Overdue transports are clearly indicated ✅ UI indicators complete. Push notifications skipped (requires paid plan).
 
 ---
 
-## Phase 5 — Supervisor dashboard and Excel export
+## Phase 5 — Supervisor dashboard and Excel export ✅ COMPLETED
 
 **Goal:** Default current-month view, filters, fuzzy client search, Excel export (one row per transport).
 
-1. **Supervisor dashboard**
-  - Default date range: current month. Filters: date range, driver (createdByUserId/name), overdue (yes/no). Sort by date (then driver/overdue as needed). Fuzzy client search: query transports where `clients` array contains a string matching search (e.g. lowercase partial match); consider `normalizedLabel` in `clients` if you index by client later.
-2. **Export**
-  - Button "Export Excel": build a table with one row per transport (flatten stops into columns or a single cell per transport, per spec). Use a client-side library (e.g. xlsx / SheetJS) to generate file and trigger download. No server-side requirement if all data is loaded.
+1. **Supervisor dashboard** ✅ COMPLETED
+  - ✅ Created [SupervisorDashboard.jsx](src/components/SupervisorDashboard.jsx): defaults to current month, filters by date range, driver dropdown, overdue status (all/yes/no), fuzzy client search
+  - ✅ Updated [App.jsx](src/App.jsx): shows dashboard for supervisor role users
+2. **Export** ✅ COMPLETED
+  - ✅ "Export to Excel" button with xlsx library, one row per transport, includes all fields (date, driver, clients, stops, status, overdue, notes)
 
-**Done when:** Supervisor can filter by date/driver/overdue, search client fuzzily, and download current view as Excel (one row per transport).
+**Done when:** Supervisor can filter by date/driver/overdue, search client fuzzily, and download current view as Excel (one row per transport). ✅ READY TO TEST
 
 ---
 
