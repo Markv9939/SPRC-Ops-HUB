@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { db } from './firebase'
-import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, updateDoc, doc } from 'firebase/firestore'
+import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore'
 import PinLogin from './components/PinLogin'
 import Header from './components/Header'
 import TransportList from './components/TransportList'
 import TransportCard from './components/TransportCard'
+import CloseChecklist from './components/CloseChecklist'
 
 function App() {
   const [user, setUser] = useState(null)
@@ -79,23 +80,20 @@ function App() {
     }
   }
 
-  async function handleSave(transportData) {
-    try {
-      if (currentTransportId) {
-        await updateDoc(doc(db, 'transports', currentTransportId), {
-          ...transportData,
-          updatedAt: serverTimestamp()
-        })
-      }
-      setCurrentTransportId(null)
-      setPage('home')
-    } catch (error) {
-      console.error('Error saving transport:', error)
-      alert('Failed to save transport. Please try again.')
-    }
+  function handleReturn() {
+    setPage('closeChecklist')
   }
 
-  function handleClose() {
+  function handleCloseTransportCard() {
+    setCurrentTransportId(null)
+    setPage('home')
+  }
+
+  function handleCloseChecklistBack() {
+    setPage('transport')
+  }
+
+  function handleCloseChecklistComplete() {
     setCurrentTransportId(null)
     setPage('home')
   }
@@ -115,8 +113,24 @@ function App() {
         <Header userName={user.name} onLogout={handleLogout} />
         <TransportCard
           transportId={currentTransportId}
-          onSave={handleSave}
-          onClose={handleClose}
+          onReturn={handleReturn}
+          onClose={handleCloseTransportCard}
+        />
+      </div>
+    )
+  }
+
+  if (page === 'closeChecklist') {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        backgroundColor: '#f5f5f5'
+      }}>
+        <Header userName={user.name} onLogout={handleLogout} />
+        <CloseChecklist
+          transportId={currentTransportId}
+          onClose={handleCloseChecklistBack}
+          onComplete={handleCloseChecklistComplete}
         />
       </div>
     )

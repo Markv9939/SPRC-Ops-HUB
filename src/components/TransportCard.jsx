@@ -1,17 +1,34 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import DCCheckModal from './DCCheckModal'
 
-function TransportCard({ transportId, onSave, onClose }) {
+function TransportCard({ transportId, onReturn, onClose }) {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('open')
   const [departedAt, setDepartedAt] = useState(null)
-  const [arriveTime, setArriveTime] = useState(null)
-  const [returnedAt, setReturnedAt] = useState(null)
-  const [clients, setClients] = useState('')
-  const [destination, setDestination] = useState('')
+  const [clients, setClients] = useState([])
   const [reasons, setReasons] = useState([])
+  const [stops, setStops] = useState([])
   const [notes, setNotes] = useState('')
+  const [showDCCheck, setShowDCCheck] = useState(false)
+  const [pendingStopIndex, setPendingStopIndex] = useState(null)
+
+  // Form inputs for new stop
+  const [newStopName, setNewStopName] = useState('')
+  const [newStopAddress, setNewStopAddress] = useState('')
+  const [newClient, setNewClient] = useState('')
+
+  const reasonOptions = [
+    'Medical X appointment',
+    'Outside Provider',
+    'Job interview',
+    'Court',
+    'Pharmacy',
+    'Lab Work',
+    'Dental',
+    'Other'
+  ]
 
   useEffect(() => {
     async function loadTransport() {
@@ -28,11 +45,9 @@ function TransportCard({ transportId, onSave, onClose }) {
           const data = docSnap.data()
           setStatus(data.status || 'open')
           setDepartedAt(data.departedAt)
-          setArriveTime(data.arriveTime || null)
-          setReturnedAt(data.returnedAt || null)
-          setClients(data.clients?.join(', ') || '')
-          setDestination(data.stops?.[0]?.destinationAddress || '')
+          setClients(data.clients || [])
           setReasons(data.reasons || [])
+          setStops(data.stops || [])
           setNotes(data.notes || '')
         }
       } catch (error) {
@@ -45,17 +60,6 @@ function TransportCard({ transportId, onSave, onClose }) {
     loadTransport()
   }, [transportId])
 
-  const reasonOptions = [
-    'Medical Appointment',
-    'Outside Provider',
-    'Court',
-    'Job Interview',
-    'Pharmacy',
-    'Lab Work',
-    'Dental',
-    'Other'
-  ]
-
   const formatTime = (timestamp) => {
     if (!timestamp) return '--:--'
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
@@ -65,49 +69,92 @@ function TransportCard({ transportId, onSave, onClose }) {
     })
   }
 
-  const now = () => {
-    return new Date().toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+  const handleAddClient = () => {
+    if (newClient.trim()) {
+      setClients([...clients, newClient.trim()])
+      setNewClient('')
+      saveToFirestore({ clients: [...clients, newClient.trim()] })
+    }
   }
 
-  const handleArrive = () => {
-    setArriveTime(now())
-    setStatus('arrived')
-  }
-
-  const handleReturn = () => {
-    setReturnedAt(serverTimestamp())
-    setStatus('returned')
+  const handleRemoveClient = (index) => {
+    const updated = clients.filter((_, i) => i !== index)
+    setClients(updated)
+    saveToFirestore({ clients: updated })
   }
 
   const toggleReason = (reason) => {
+    let updated
     if (reasons.includes(reason)) {
-      setReasons(reasons.filter((r) => r !== reason))
+      updated = reasons.filter((r) => r !== reason)
     } else {
-      setReasons([...reasons, reason])
+      updated = [...reasons, reason]
+    }
+    setReasons(updated)
+    saveToFirestore({ reasons: updated })
+  }
+
+  const handleArrive = async () => {
+    if (!newStopAddress.trim()) {
+      alert('Please enter a destination address before arriving')
+      return
+    }
+
+    const newStop = {
+      destinationName: newStopName.trim(),
+      destinationAddress: newStopAddress.trim(),
+      arrivedAt: new Date().toISOString(),
+      dcCheck: null,
+      note: ''
+    }
+
+    const updatedStops = [...stops, newStop]
+    setStops(updatedStops)
+    setPendingStopIndex(updatedStops.length - 1)
+    setShowDCCheck(true)
+  }
+
+  const handleDCCheckComplete = async (dcCheckData) => {
+    const updatedStops = [...stops]
+    updatedStops[pendingStopIndex].dcCheck = dcCheckData
+
+    setStops(updatedStops)
+    setShowDCCheck(false)
+    setPendingStopIndex(null)
+    setNewStopName('')
+    setNewStopAddress('')
+    setStatus('arrived')
+
+    await saveToFirestore({
+      stops: updatedStops,
+      status: 'arrived'
+    })
+  }
+
+  const handleReturn = async () => {
+    await saveToFirestore({
+      status: 'returned',
+      returnedAt: serverTimestamp()
+    })
+    onReturn()
+  }
+
+  const saveToFirestore = async (updates) => {
+    if (!transportId) return
+
+    try {
+      await updateDoc(doc(db, 'transports', transportId), {
+        ...updates,
+        notes,
+        updatedAt: serverTimestamp()
+      })
+    } catch (error) {
+      console.error('Error saving transport:', error)
     }
   }
 
-  const handleClose = () => {
-    const clientsArray = clients.split(',').map(c => c.trim()).filter(c => c)
-    const stops = destination ? [{
-      destinationName: '',
-      destinationAddress: destination,
-      arrivedAt: arriveTime ? new Date() : null,
-      dcCheck: null
-    }] : []
-
-    const transportData = {
-      clients: clientsArray,
-      reasons,
-      notes,
-      stops,
-      returnedAt: returnedAt || serverTimestamp(),
-      status: 'returned'
-    }
-    onSave(transportData)
+  const handleNotesBlur = () => {
+    saveToFirestore({ notes })
   }
 
   if (loading) {
@@ -162,74 +209,7 @@ function TransportCard({ transportId, onSave, onClose }) {
         }}>{formatTime(departedAt)}</span>
       </div>
 
-      <div style={{
-        display: 'flex',
-        gap: '10px',
-        marginBottom: '24px'
-      }}>
-        <button
-          onClick={handleArrive}
-          disabled={status !== 'open'}
-          style={{
-            flex: 1,
-            padding: '16px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            borderRadius: '10px',
-            border: 'none',
-            cursor: status === 'open'
-              ? 'pointer' : 'default',
-            backgroundColor:
-              status === 'open' ? '#2196F3' :
-              '#e8e8e8',
-            color:
-              status === 'open' ? 'white' : '#999'
-          }}
-        >
-          ARRIVE
-          {arriveTime && (
-            <div style={{
-              fontSize: '12px',
-              fontWeight: 'normal',
-              marginTop: '4px'
-            }}>
-              {arriveTime}
-            </div>
-          )}
-        </button>
-
-        <button
-          onClick={handleReturn}
-          disabled={status !== 'arrived'}
-          style={{
-            flex: 1,
-            padding: '16px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            borderRadius: '10px',
-            border: 'none',
-            cursor: status === 'arrived'
-              ? 'pointer' : 'default',
-            backgroundColor:
-              status === 'arrived' ? '#4CAF50' :
-              '#e8e8e8',
-            color:
-              status === 'arrived' ? 'white' : '#999'
-          }}
-        >
-          RETURN
-          {returnedAt && (
-            <div style={{
-              fontSize: '12px',
-              fontWeight: 'normal',
-              marginTop: '4px'
-            }}>
-              {formatTime(returnedAt)}
-            </div>
-          )}
-        </button>
-      </div>
-
+      {/* Clients Section */}
       <div style={{
         backgroundColor: 'white',
         borderRadius: '12px',
@@ -241,59 +221,84 @@ function TransportCard({ transportId, onSave, onClose }) {
           fontSize: '13px',
           color: '#888',
           display: 'block',
-          marginBottom: '6px'
+          marginBottom: '10px'
         }}>
-          Client(s)
+          Client(s) *
         </label>
-        <input
-          type="text"
-          value={clients}
-          onChange={(e) => setClients(e.target.value)}
-          placeholder="e.g. John D, Sarah M"
-          style={{
-            width: '100%',
-            padding: '12px',
-            border: '2px solid #eee',
-            borderRadius: '8px',
-            fontSize: '15px',
-            outline: 'none',
-            boxSizing: 'border-box'
-          }}
-        />
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '8px',
+          marginBottom: '10px'
+        }}>
+          {clients.map((client, index) => (
+            <div
+              key={index}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '20px',
+                backgroundColor: '#E8F5E9',
+                border: '2px solid #4CAF50',
+                color: '#2E7D32',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <span>{client}</span>
+              <button
+                onClick={() => handleRemoveClient(index)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#2E7D32',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  padding: 0,
+                  lineHeight: 1
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            type="text"
+            value={newClient}
+            onChange={(e) => setNewClient(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
+            placeholder="Add client name..."
+            style={{
+              flex: 1,
+              padding: '10px',
+              border: '2px solid #eee',
+              borderRadius: '8px',
+              fontSize: '14px',
+              outline: 'none'
+            }}
+          />
+          <button
+            onClick={handleAddClient}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#4CAF50',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            + Add
+          </button>
+        </div>
       </div>
 
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '20px',
-        border: '1px solid #eee',
-        marginBottom: '16px'
-      }}>
-        <label style={{
-          fontSize: '13px',
-          color: '#888',
-          display: 'block',
-          marginBottom: '6px'
-        }}>
-          Destination
-        </label>
-        <input
-          type="text"
-          value={destination}
-          onChange={(e) => setDestination(e.target.value)}
-          placeholder="Name or address"
-          style={{
-            width: '100%',
-            padding: '12px',
-            border: '2px solid #eee',
-            borderRadius: '8px',
-            fontSize: '15px',
-            outline: 'none',
-            boxSizing: 'border-box'
-          }}
-        />
-      </div>
-
+      {/* Reasons Section */}
       <div style={{
         backgroundColor: 'white',
         borderRadius: '12px',
@@ -340,6 +345,88 @@ function TransportCard({ transportId, onSave, onClose }) {
         </div>
       </div>
 
+      {/* Stops Section */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '12px',
+        padding: '20px',
+        border: '1px solid #eee',
+        marginBottom: '16px'
+      }}>
+        <label style={{
+          fontSize: '13px',
+          color: '#888',
+          display: 'block',
+          marginBottom: '10px'
+        }}>
+          Destination(s) / Stops
+        </label>
+
+        {stops.map((stop, index) => (
+          <div
+            key={index}
+            style={{
+              padding: '12px',
+              borderRadius: '8px',
+              backgroundColor: '#F5F5F5',
+              marginBottom: '8px',
+              border: '1px solid #ddd'
+            }}
+          >
+            <div style={{ fontWeight: 'bold', fontSize: '14px', marginBottom: '4px' }}>
+              Stop {index + 1}
+              {stop.destinationName && ` - ${stop.destinationName}`}
+            </div>
+            <div style={{ fontSize: '13px', color: '#666', marginBottom: '4px' }}>
+              {stop.destinationAddress}
+            </div>
+            <div style={{ fontSize: '12px', color: '#999' }}>
+              Arrived: {new Date(stop.arrivedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+            </div>
+            {stop.dcCheck && (
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                DC Check: {stop.dcCheck.option}
+              </div>
+            )}
+          </div>
+        ))}
+
+        <div style={{ marginTop: '12px' }}>
+          <input
+            type="text"
+            value={newStopName}
+            onChange={(e) => setNewStopName(e.target.value)}
+            placeholder="Location name (optional)"
+            style={{
+              width: '100%',
+              padding: '10px',
+              border: '2px solid #eee',
+              borderRadius: '8px',
+              fontSize: '14px',
+              outline: 'none',
+              marginBottom: '8px',
+              boxSizing: 'border-box'
+            }}
+          />
+          <input
+            type="text"
+            value={newStopAddress}
+            onChange={(e) => setNewStopAddress(e.target.value)}
+            placeholder="Address *"
+            style={{
+              width: '100%',
+              padding: '10px',
+              border: '2px solid #eee',
+              borderRadius: '8px',
+              fontSize: '14px',
+              outline: 'none',
+              boxSizing: 'border-box'
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Notes Section */}
       <div style={{
         backgroundColor: 'white',
         borderRadius: '12px',
@@ -358,6 +445,7 @@ function TransportCard({ transportId, onSave, onClose }) {
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
+          onBlur={handleNotesBlur}
           placeholder="Any additional notes..."
           rows={3}
           style={{
@@ -374,23 +462,60 @@ function TransportCard({ transportId, onSave, onClose }) {
         />
       </div>
 
-      {status === 'returned' && (
+      {/* Action Buttons */}
+      <div style={{
+        display: 'flex',
+        gap: '10px',
+        marginBottom: '24px'
+      }}>
         <button
-          onClick={handleClose}
+          onClick={handleArrive}
+          disabled={!newStopAddress.trim()}
           style={{
-            width: '100%',
+            flex: 1,
             padding: '16px',
-            backgroundColor: '#4CAF50',
-            color: 'white',
-            border: 'none',
-            borderRadius: '12px',
-            fontSize: '18px',
+            fontSize: '16px',
             fontWeight: 'bold',
-            cursor: 'pointer'
+            borderRadius: '10px',
+            border: 'none',
+            cursor: newStopAddress.trim() ? 'pointer' : 'not-allowed',
+            backgroundColor: newStopAddress.trim() ? '#2196F3' : '#e8e8e8',
+            color: newStopAddress.trim() ? 'white' : '#999'
           }}
         >
-          Close Transport
+          ARRIVE
         </button>
+
+        <button
+          onClick={handleReturn}
+          disabled={stops.length === 0}
+          style={{
+            flex: 1,
+            padding: '16px',
+            fontSize: '16px',
+            fontWeight: 'bold',
+            borderRadius: '10px',
+            border: 'none',
+            cursor: stops.length > 0 ? 'pointer' : 'not-allowed',
+            backgroundColor: stops.length > 0 ? '#4CAF50' : '#e8e8e8',
+            color: stops.length > 0 ? 'white' : '#999'
+          }}
+        >
+          RETURN
+        </button>
+      </div>
+
+      {showDCCheck && (
+        <DCCheckModal
+          onComplete={handleDCCheckComplete}
+          onCancel={() => {
+            // Remove the pending stop if they cancel
+            const updatedStops = stops.slice(0, -1)
+            setStops(updatedStops)
+            setShowDCCheck(false)
+            setPendingStopIndex(null)
+          }}
+        />
       )}
     </div>
   )

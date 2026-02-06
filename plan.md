@@ -56,26 +56,28 @@ Firestore is initialized in [src/firebase.js](src/firebase.js) but not yet used 
 
 ---
 
-## Phase 2 — Real workflow (multi-stop, DC check, Close Checklist)
+## Phase 2 — Real workflow (multi-stop, DC check, Close Checklist) ✅ COMPLETED
 
 **Goal:** One transport = multiple stops; ARRIVE adds a stop and triggers DC check; RETURN → Close Checklist; required fields enforced before Close.
 
-1. **Transport document shape**
-  - Align with spec: `stops[]` per transport; each stop has `destinationName`, `destinationAddress`, `arrivedAt`, `dcCheck: { completed, option, note }`, optional `note`. No single `destination` field.
-2. **Transport Card (quick start)**
-  - **Entry:** New Transport still opens card with prominent **DEPART**. On DEPART, set `departedAt` and `status: 'open'` (already in Phase 1).
-  - **Header order:** Clients, Reasons, Destinations (stops) at top.
-  - **Clients:** Keep free text; store as array of strings (e.g. one chip per client). Required before Close (enforced on Close Checklist).
-  - **Reasons:** Keep multi-select chips; use spec list: "Medical X appointment", "Outside Provider", "Job interview", "Court", "Pharmacy", "Lab Work", "Dental", "Other".
-  - **Stops/destinations:** Replace single destination with "Add another" chips. Each stop must have at least **address** (and preferably name). For Phase 2, manual name + address per stop is enough; suggestions come in Phase 3.
-  - **ARRIVE:** Tapping ARRIVE adds a **new** stop to `stops` with `arrivedAt: now`, and immediately open **DC Paperwork Check** modal/screen. Do not allow "skip"; save `dcCheck` on that stop (option required; if option is "Other", note required). After DC check, return to Transport Card; ARRIVE can be pressed again for another stop.
-  - **RETURN:** Set `returnedAt`, `status: 'returned'`, then **navigate to dedicated Close Checklist screen** (not inline close).
-3. **Close Checklist screen (new)**
-  - New component/screen shown after RETURN. Checks: at least one client, at least one stop with address. If missing, show what's missing and block Close. On Close: set `status: 'closed'`, `closedAt`, then redirect to home.
-4. **Persistence**
-  - All transport updates (stops, clients, reasons, status, closeChecklist) write to the same Firestore `transports` document so list and card stay in sync.
+1. **Transport document shape** ✅ COMPLETED
+  - ✅ `stops[]` array structure: each stop has `destinationName`, `destinationAddress`, `arrivedAt`, `dcCheck: { completed, option, note }`
+2. **Transport Card (quick start)** ✅ COMPLETED
+  - ✅ Updated [TransportCard.jsx](src/components/TransportCard.jsx): Clients as chips (add/remove), multi-select reasons with spec list ("Medical X appointment", etc.), multi-stop support
+  - ✅ Stops: Name (optional) + Address (required) input fields, displays all previous stops
+  - ✅ ARRIVE: Requires address, adds stop, immediately opens DC Check modal (cannot skip)
+  - ✅ RETURN: Sets `returnedAt`, navigates to Close Checklist screen
+3. **Close Checklist screen (new)** ✅ COMPLETED
+  - ✅ Created [CloseChecklist.jsx](src/components/CloseChecklist.jsx): validates at least one client + at least one stop with address
+  - ✅ Shows validation errors, blocks Close button if requirements not met
+  - ✅ On Close: sets `status: 'closed'`, `closedAt`, redirects to home
+4. **DC Check Modal** ✅ COMPLETED
+  - ✅ Created [DCCheckModal.jsx](src/components/DCCheckModal.jsx): options (All signed, Missing signature, Incomplete, Other), requires note if "Other" selected
+5. **Persistence** ✅ COMPLETED
+  - ✅ Real-time Firestore updates for all transport changes (clients, reasons, stops, notes, status)
+  - ✅ Updated [App.jsx](src/App.jsx): routing between transport, closeChecklist, and home
 
-**Done when:** One transport can have multiple ARRIVEs (multiple stops with addresses), each ARRIVE forces DC check (Other → note required), RETURN sends user to Close Checklist, and Close is blocked until requirements are met.
+**Done when:** One transport can have multiple ARRIVEs (multiple stops with addresses), each ARRIVE forces DC check (Other → note required), RETURN sends user to Close Checklist, and Close is blocked until requirements are met. ✅ READY TO TEST
 
 ---
 
