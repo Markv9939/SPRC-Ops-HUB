@@ -43,14 +43,16 @@ Firestore is initialized in [src/firebase.js](src/firebase.js) but not yet used 
   - ✅ Updated [PinLogin.jsx](src/components/PinLogin.jsx): queries Firestore for user by PIN + active status, implements 5-failure lockout (5 minutes), tracks attempts in localStorage, returns full user object `{ id, name, role, site }`
   - ✅ Updated [App.jsx](src/App.jsx): now receives and stores full user object with `id`, `role`, `site`
   - **To setup:** Run `npm run seed` to reset users collection, then `npm run dev` to test with PINs: 1234, 5678, or 9999
-2. **Create and list transports in Firestore** 🔄 IN PROGRESS
-  - New transport: on "New Transport" → open Transport Card; on DEPART, create a Firestore document in `transports` with `site` from user, `createdByUserId`, `createdByName`, `status: 'open'`, `departedAt: serverTimestamp()`, `stops: []`, etc. Keep editing in memory or in Firestore (single source of truth).
-  - Tech home: query `transports` where `createdByUserId === user.id`, order by `departedAt` desc. Show in [TransportList.jsx](src/components/TransportList.jsx) (today or all; month filter can come in Phase 5).
-  - Supervisor: add a separate view (route or role-based screen) that lists all transports (same collection, no filter by `createdByUserId`).
-3. **Navigation and "current transport"**
-  - App state: `currentTransportId` (or null). New Transport → create in Firestore, set `currentTransportId`, show Transport Card. From list, "Continue" an open transport → set `currentTransportId`, show Transport Card loading that document.
+2. **Create and list transports in Firestore** ✅ COMPLETED
+  - ✅ Updated [App.jsx](src/App.jsx): creates Firestore transport on "New Transport" with full data structure
+  - ✅ Tech home: real-time query of own transports only (`createdByUserId === user.id`)
+  - ✅ Supervisor: real-time query of all transports (no user filter)
+  - ✅ Updated [TransportList.jsx](src/components/TransportList.jsx): displays Firestore data with proper formatting
+3. **Navigation and "current transport"** ✅ COMPLETED
+  - ✅ App manages `currentTransportId` state for editing
+  - ✅ Updated [TransportCard.jsx](src/components/TransportCard.jsx): loads/saves from/to Firestore
 
-**Done when:** Two techs can log in with different PINs and each sees only their own transports; supervisor sees all.
+**Done when:** Two techs can log in with different PINs and each sees only their own transports; supervisor sees all. ✅ READY TO TEST
 
 ---
 

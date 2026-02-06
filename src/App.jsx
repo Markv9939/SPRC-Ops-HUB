@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { db } from './firebase'
+import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, updateDoc, doc } from 'firebase/firestore'
 import PinLogin from './components/PinLogin'
 import Header from './components/Header'
 import TransportList from './components/TransportList'
@@ -8,7 +10,7 @@ function App() {
   const [user, setUser] = useState(null)
   const [page, setPage] = useState('home')
   const [transports, setTransports] = useState([])
-  const [startTimeHolder, setStartTimeHolder] = useState('')
+  const [currentTransportId, setCurrentTransportId] = useState(null)
 
   function handleLogin(user) {
     setUser(user)
@@ -18,24 +20,83 @@ function App() {
   function handleLogout() {
     setUser(null)
     setPage('home')
+    setTransports([])
+    setCurrentTransportId(null)
   }
 
-  function handleNewTransport() {
-    var time = new Date().toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
+  // Load transports from Firestore based on user role
+  useEffect(() => {
+    if (!user) return
+
+    const transportsRef = collection(db, 'transports')
+    let q
+
+    if (user.role === 'supervisor') {
+      // Supervisor sees all transports
+      q = query(transportsRef, orderBy('departedAt', 'desc'))
+    } else {
+      // Tech sees only their own transports
+      q = query(
+        transportsRef,
+        where('createdByUserId', '==', user.id),
+        orderBy('departedAt', 'desc')
+      )
+    }
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const transportData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }))
+      setTransports(transportData)
     })
-    setStartTimeHolder(time)
-    setPage('transport')
+
+    return () => unsubscribe()
+  }, [user])
+
+  async function handleNewTransport() {
+    try {
+      const newTransport = {
+        site: user.site,
+        createdByUserId: user.id,
+        createdByName: user.name,
+        status: 'open',
+        departedAt: serverTimestamp(),
+        clients: [],
+        reasons: [],
+        stops: [],
+        notes: '',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }
+
+      const docRef = await addDoc(collection(db, 'transports'), newTransport)
+      setCurrentTransportId(docRef.id)
+      setPage('transport')
+    } catch (error) {
+      console.error('Error creating transport:', error)
+      alert('Failed to create transport. Please try again.')
+    }
   }
 
-  function handleSave(transport) {
-    var updated = [transport].concat(transports)
-    setTransports(updated)
-    setPage('home')
+  async function handleSave(transportData) {
+    try {
+      if (currentTransportId) {
+        await updateDoc(doc(db, 'transports', currentTransportId), {
+          ...transportData,
+          updatedAt: serverTimestamp()
+        })
+      }
+      setCurrentTransportId(null)
+      setPage('home')
+    } catch (error) {
+      console.error('Error saving transport:', error)
+      alert('Failed to save transport. Please try again.')
+    }
   }
 
   function handleClose() {
+    setCurrentTransportId(null)
     setPage('home')
   }
 
@@ -53,7 +114,7 @@ function App() {
       }}>
         <Header userName={user.name} onLogout={handleLogout} />
         <TransportCard
-          startTime={startTimeHolder}
+          transportId={currentTransportId}
           onSave={handleSave}
           onClose={handleClose}
         />

@@ -1,14 +1,49 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { db } from '../firebase'
+import { doc, getDoc, serverTimestamp } from 'firebase/firestore'
 
-function TransportCard({ onSave, onClose, startTime }) {
-  const [status, setStatus] = useState('departed')
-  const [departTime] = useState(startTime)
+function TransportCard({ transportId, onSave, onClose }) {
+  const [loading, setLoading] = useState(true)
+  const [status, setStatus] = useState('open')
+  const [departedAt, setDepartedAt] = useState(null)
   const [arriveTime, setArriveTime] = useState(null)
-  const [returnTime, setReturnTime] = useState(null)
+  const [returnedAt, setReturnedAt] = useState(null)
   const [clients, setClients] = useState('')
   const [destination, setDestination] = useState('')
   const [reasons, setReasons] = useState([])
   const [notes, setNotes] = useState('')
+
+  useEffect(() => {
+    async function loadTransport() {
+      if (!transportId) {
+        setLoading(false)
+        return
+      }
+
+      try {
+        const docRef = doc(db, 'transports', transportId)
+        const docSnap = await getDoc(docRef)
+
+        if (docSnap.exists()) {
+          const data = docSnap.data()
+          setStatus(data.status || 'open')
+          setDepartedAt(data.departedAt)
+          setArriveTime(data.arriveTime || null)
+          setReturnedAt(data.returnedAt || null)
+          setClients(data.clients?.join(', ') || '')
+          setDestination(data.stops?.[0]?.destinationAddress || '')
+          setReasons(data.reasons || [])
+          setNotes(data.notes || '')
+        }
+      } catch (error) {
+        console.error('Error loading transport:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadTransport()
+  }, [transportId])
 
   const reasonOptions = [
     'Medical Appointment',
@@ -20,6 +55,15 @@ function TransportCard({ onSave, onClose, startTime }) {
     'Dental',
     'Other'
   ]
+
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '--:--'
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
 
   const now = () => {
     return new Date().toLocaleTimeString('en-US', {
@@ -34,7 +78,7 @@ function TransportCard({ onSave, onClose, startTime }) {
   }
 
   const handleReturn = () => {
-    setReturnTime(now())
+    setReturnedAt(serverTimestamp())
     setStatus('returned')
   }
 
@@ -47,18 +91,31 @@ function TransportCard({ onSave, onClose, startTime }) {
   }
 
   const handleClose = () => {
-    const transport = {
-      id: Date.now(),
-      clients,
-      destination,
+    const clientsArray = clients.split(',').map(c => c.trim()).filter(c => c)
+    const stops = destination ? [{
+      destinationName: '',
+      destinationAddress: destination,
+      arrivedAt: arriveTime ? new Date() : null,
+      dcCheck: null
+    }] : []
+
+    const transportData = {
+      clients: clientsArray,
       reasons,
       notes,
-      departTime,
-      arriveTime,
-      returnTime,
-      status
+      stops,
+      returnedAt: returnedAt || serverTimestamp(),
+      status: 'returned'
     }
-    onSave(transport)
+    onSave(transportData)
+  }
+
+  if (loading) {
+    return (
+      <div style={{ padding: '20px', textAlign: 'center' }}>
+        <p>Loading transport...</p>
+      </div>
+    )
   }
 
   return (
@@ -102,7 +159,7 @@ function TransportCard({ onSave, onClose, startTime }) {
         Departed at <span style={{
           fontWeight: 'bold',
           color: '#C94A3F'
-        }}>{departTime}</span>
+        }}>{formatTime(departedAt)}</span>
       </div>
 
       <div style={{
@@ -112,7 +169,7 @@ function TransportCard({ onSave, onClose, startTime }) {
       }}>
         <button
           onClick={handleArrive}
-          disabled={status !== 'departed'}
+          disabled={status !== 'open'}
           style={{
             flex: 1,
             padding: '16px',
@@ -120,13 +177,13 @@ function TransportCard({ onSave, onClose, startTime }) {
             fontWeight: 'bold',
             borderRadius: '10px',
             border: 'none',
-            cursor: status === 'departed'
+            cursor: status === 'open'
               ? 'pointer' : 'default',
             backgroundColor:
-              status === 'departed' ? '#2196F3' :
+              status === 'open' ? '#2196F3' :
               '#e8e8e8',
             color:
-              status === 'departed' ? 'white' : '#999'
+              status === 'open' ? 'white' : '#999'
           }}
         >
           ARRIVE
@@ -161,13 +218,13 @@ function TransportCard({ onSave, onClose, startTime }) {
           }}
         >
           RETURN
-          {returnTime && (
+          {returnedAt && (
             <div style={{
               fontSize: '12px',
               fontWeight: 'normal',
               marginTop: '4px'
             }}>
-              {returnTime}
+              {formatTime(returnedAt)}
             </div>
           )}
         </button>

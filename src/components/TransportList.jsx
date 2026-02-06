@@ -1,4 +1,27 @@
 function TransportList({ transports, onNewTransport }) {
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '--:--'
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
+  const getClientDisplay = (transport) => {
+    if (!transport.clients || transport.clients.length === 0) {
+      return 'No client entered'
+    }
+    return transport.clients.join(', ')
+  }
+
+  const getDestinationDisplay = (transport) => {
+    if (!transport.stops || transport.stops.length === 0) {
+      return 'No destination entered'
+    }
+    return transport.stops[0].destinationAddress || transport.stops[0].destinationName || 'No destination'
+  }
+
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
 
@@ -77,7 +100,7 @@ function TransportList({ transports, onNewTransport }) {
                   fontSize: '15px',
                   color: '#333'
                 }}>
-                  {t.clients || 'No client entered'}
+                  {getClientDisplay(t)}
                 </span>
                 <span style={{
                   fontSize: '12px',
@@ -85,22 +108,22 @@ function TransportList({ transports, onNewTransport }) {
                   borderRadius: '20px',
                   fontWeight: 'bold',
                   backgroundColor:
-                    t.status === 'departed' ? '#FFF3CD' :
+                    t.status === 'open' ? '#FFF3CD' :
                     t.status === 'arrived' ? '#D1ECF1' :
                     t.status === 'returned' ? '#D4EDDA' :
                     '#f0f0f0',
                   color:
-                    t.status === 'departed' ? '#856404' :
+                    t.status === 'open' ? '#856404' :
                     t.status === 'arrived' ? '#0C5460' :
                     t.status === 'returned' ? '#155724' :
                     '#666'
                 }}>
-                  {t.status || 'started'}
+                  {t.status || 'open'}
                 </span>
               </div>
 
               <div style={{ fontSize: '13px', color: '#666' }}>
-                {t.destination || 'No destination entered'}
+                {getDestinationDisplay(t)}
               </div>
 
               <div style={{
@@ -108,7 +131,7 @@ function TransportList({ transports, onNewTransport }) {
                 color: '#999',
                 marginTop: '6px'
               }}>
-                Departed: {t.departTime || '--:--'}
+                Departed: {formatTime(t.departedAt)}
               </div>
             </div>
           ))}
