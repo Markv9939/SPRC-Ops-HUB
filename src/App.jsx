@@ -8,15 +8,19 @@ import TransportCard from './components/TransportCard'
 import CloseChecklist from './components/CloseChecklist'
 import SupervisorDashboard from './components/SupervisorDashboard'
 
+const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
+
 function App() {
   const [user, setUser] = useState(null)
   const [page, setPage] = useState('home')
   const [transports, setTransports] = useState([])
   const [currentTransportId, setCurrentTransportId] = useState(null)
+  const [lastActivity, setLastActivity] = useState(Date.now())
 
   function handleLogin(user) {
     setUser(user)
     setPage('home')
+    setLastActivity(Date.now())
   }
 
   function handleLogout() {
@@ -24,7 +28,42 @@ function App() {
     setPage('home')
     setTransports([])
     setCurrentTransportId(null)
+    localStorage.removeItem('lastActivity')
   }
+
+  // Track user activity for auto-lock
+  useEffect(() => {
+    if (!user) return
+
+    const updateActivity = () => {
+      setLastActivity(Date.now())
+      localStorage.setItem('lastActivity', Date.now().toString())
+    }
+
+    // Update activity on user interaction
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart']
+    events.forEach(event => {
+      document.addEventListener(event, updateActivity)
+    })
+
+    // Check for inactivity every minute
+    const inactivityCheck = setInterval(() => {
+      const lastActivityTime = parseInt(localStorage.getItem('lastActivity') || Date.now().toString())
+      const timeSinceActivity = Date.now() - lastActivityTime
+
+      if (timeSinceActivity > AUTO_LOCK_TIMEOUT) {
+        alert('Session expired due to inactivity. Please log in again.')
+        handleLogout()
+      }
+    }, 60000) // Check every minute
+
+    return () => {
+      events.forEach(event => {
+        document.removeEventListener(event, updateActivity)
+      })
+      clearInterval(inactivityCheck)
+    }
+  }, [user])
 
   // Load transports from Firestore based on user role
   useEffect(() => {

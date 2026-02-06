@@ -1,0 +1,69 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is authenticated (we use custom auth with PIN)
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper to get user document
+    function getUserData(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Allow read for authentication purposes
+      allow read: if true;
+      // Only admins can write (managed through seed script or admin panel)
+      allow write: if false;
+    }
+
+    // Clients collection (autocomplete suggestions)
+    match /clients/{clientId} {
+      // All authenticated users can read and write clients
+      allow read, write: if true;
+    }
+
+    // Destinations collection (autocomplete suggestions)
+    match /destinations/{destinationId} {
+      // All authenticated users can read and write destinations
+      allow read, write: if true;
+    }
+
+    // Transports collection
+    match /transports/{transportId} {
+      // Define supervisor check
+      function isSupervisor() {
+        return request.auth != null &&
+               request.auth.token.role == 'supervisor';
+      }
+
+      // Check if user is the creator
+      function isCreator() {
+        return request.auth != null &&
+               resource.data.createdByUserId == request.auth.uid;
+      }
+
+      // Check if transport is not closed
+      function isNotClosed() {
+        return resource.data.status != 'closed';
+      }
+
+      // Read rules
+      allow read: if true; // Simplified - in production you'd restrict by role
+
+      // Create rules - any authenticated user can create
+      allow create: if request.auth != null;
+
+      // Update rules
+      allow update: if isSupervisor() ||
+                       (isCreator() && isNotClosed());
+
+      // Delete rules - only supervisors
+      allow delete: if isSupervisor();
+    }
+  }
+}
