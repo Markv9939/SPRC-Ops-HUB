@@ -39,10 +39,10 @@ Firestore is initialized in [src/firebase.js](src/firebase.js) but not yet used 
 **Goal:** Real PIN login and transports in Firestore; tech sees only own, supervisor sees all.
 
 1. **Firestore `users` and PIN login** ✅ COMPLETED
-  - ✅ Added seed script [scripts/seedUsers.js](scripts/seedUsers.js) with 3 test users (2 techs, 1 supervisor)
+  - ✅ Using existing Firestore users collection
   - ✅ Updated [PinLogin.jsx](src/components/PinLogin.jsx): queries Firestore for user by PIN + active status, implements 5-failure lockout (5 minutes), tracks attempts in localStorage, returns full user object `{ id, name, role, site }`
   - ✅ Updated [App.jsx](src/App.jsx): now receives and stores full user object with `id`, `role`, `site`
-  - **To test:** Run `npm run seed` to populate users, then test login with PINs 1234, 5678, or 9999
+  - **Required user fields:** Each user document must have: `pin` (string), `name` (string), `role` ('tech' or 'supervisor'), `site` (string), `active` (boolean)
 2. **Create and list transports in Firestore** 🔄 IN PROGRESS
   - New transport: on "New Transport" → open Transport Card; on DEPART, create a Firestore document in `transports` with `site` from user, `createdByUserId`, `createdByName`, `status: 'open'`, `departedAt: serverTimestamp()`, `stops: []`, etc. Keep editing in memory or in Firestore (single source of truth).
   - Tech home: query `transports` where `createdByUserId === user.id`, order by `departedAt` desc. Show in [TransportList.jsx](src/components/TransportList.jsx) (today or all; month filter can come in Phase 5).
