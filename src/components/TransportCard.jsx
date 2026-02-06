@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, setDoc, orderBy, limit } from 'firebase/firestore'
+import { doc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, setDoc, orderBy, limit } from 'firebase/firestore'
 import DCCheckModal from './DCCheckModal'
 
 function TransportCard({ transportId, onReturn, onClose }) {
@@ -14,16 +14,14 @@ function TransportCard({ transportId, onReturn, onClose }) {
   const [showDCCheck, setShowDCCheck] = useState(false)
   const [pendingStopIndex, setPendingStopIndex] = useState(null)
 
-  // Form inputs for new stop
-  const [newStopName, setNewStopName] = useState('')
-  const [newStopAddress, setNewStopAddress] = useState('')
+  // Client input
   const [newClient, setNewClient] = useState('')
-
-  // Suggestions
   const [clientSuggestions, setClientSuggestions] = useState([])
-  const [destinationSuggestions, setDestinationSuggestions] = useState([])
   const [showClientSuggestions, setShowClientSuggestions] = useState(false)
-  const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false)
+
+  // Destination suggestions
+  const [destinationSuggestions, setDestinationSuggestions] = useState([])
+  const [showDestSuggestionsFor, setShowDestSuggestionsFor] = useState(null)
 
   const reasonOptions = [
     'Medical X appointment',
@@ -79,6 +77,8 @@ function TransportCard({ transportId, onReturn, onClose }) {
     return text.toLowerCase().trim().replace(/\s+/g, ' ')
   }
 
+  // --- Suggestions ---
+
   const searchClientSuggestions = async (searchTerm) => {
     if (!searchTerm.trim()) {
       setClientSuggestions([])
@@ -87,11 +87,11 @@ function TransportCard({ transportId, onReturn, onClose }) {
 
     try {
       const clientsRef = collection(db, 'clients')
-      const q = query(clientsRef, orderBy('label'), limit(5))
+      const q = query(clientsRef, orderBy('label'), limit(20))
       const snapshot = await getDocs(q)
 
       const results = snapshot.docs
-        .map(doc => doc.data())
+        .map(d => d.data())
         .filter(client =>
           client.normalizedLabel.includes(normalizeText(searchTerm))
         )
@@ -111,11 +111,11 @@ function TransportCard({ transportId, onReturn, onClose }) {
 
     try {
       const destRef = collection(db, 'destinations')
-      const q = query(destRef, orderBy('name'), limit(5))
+      const q = query(destRef, orderBy('name'), limit(20))
       const snapshot = await getDocs(q)
 
       const results = snapshot.docs
-        .map(doc => doc.data())
+        .map(d => d.data())
         .filter(dest =>
           dest.normalizedName?.includes(normalizeText(searchTerm)) ||
           dest.normalizedAddress?.includes(normalizeText(searchTerm))
@@ -143,6 +143,7 @@ function TransportCard({ transportId, onReturn, onClose }) {
   }
 
   const saveDestinationToFirestore = async (name, address) => {
+    if (!address) return
     try {
       const normalizedAddress = normalizeText(address)
       const destRef = doc(db, 'destinations', normalizedAddress)
@@ -158,14 +159,17 @@ function TransportCard({ transportId, onReturn, onClose }) {
     }
   }
 
+  // --- Client handlers ---
+
   const handleAddClient = async (clientName = newClient) => {
     const trimmed = clientName.trim()
     if (trimmed) {
-      setClients([...clients, trimmed])
+      const updated = [...clients, trimmed]
+      setClients(updated)
       setNewClient('')
       setShowClientSuggestions(false)
       await saveClientToFirestore(trimmed)
-      await saveToFirestore({ clients: [...clients, trimmed] })
+      await saveToFirestore({ clients: updated })
     }
   }
 
@@ -186,15 +190,12 @@ function TransportCard({ transportId, onReturn, onClose }) {
     saveToFirestore({ reasons: updated })
   }
 
-  const handleArrive = async () => {
-    if (!newStopAddress.trim()) {
-      alert('Please enter a destination address before arriving')
-      return
-    }
+  // --- Stop handlers ---
 
+  const handleArrive = () => {
     const newStop = {
-      destinationName: newStopName.trim(),
-      destinationAddress: newStopAddress.trim(),
+      destinationName: '',
+      destinationAddress: '',
       arrivedAt: new Date().toISOString(),
       dcCheck: null,
       note: ''
@@ -204,10 +205,6 @@ function TransportCard({ transportId, onReturn, onClose }) {
     setStops(updatedStops)
     setPendingStopIndex(updatedStops.length - 1)
     setShowDCCheck(true)
-    setShowDestinationSuggestions(false)
-
-    // Save destination to Firestore
-    await saveDestinationToFirestore(newStopName.trim(), newStopAddress.trim())
   }
 
   const handleDCCheckComplete = async (dcCheckData) => {
@@ -217,8 +214,6 @@ function TransportCard({ transportId, onReturn, onClose }) {
     setStops(updatedStops)
     setShowDCCheck(false)
     setPendingStopIndex(null)
-    setNewStopName('')
-    setNewStopAddress('')
     setStatus('arrived')
 
     await saveToFirestore({
@@ -227,13 +222,59 @@ function TransportCard({ transportId, onReturn, onClose }) {
     })
   }
 
+  const handleStopFieldChange = (index, field, value) => {
+    const updatedStops = [...stops]
+    updatedStops[index][field] = value
+    setStops(updatedStops)
+  }
+
+  const handleStopFieldBlur = async (index) => {
+    const stop = stops[index]
+    await saveToFirestore({ stops })
+
+    // Save destination for future suggestions if address is filled
+    if (stop.destinationAddress?.trim()) {
+      await saveDestinationToFirestore(stop.destinationName, stop.destinationAddress)
+    }
+  }
+
+  const handlePickDestSuggestion = (stopIndex, suggestion) => {
+    const updatedStops = [...stops]
+    updatedStops[stopIndex].destinationName = suggestion.name
+    updatedStops[stopIndex].destinationAddress = suggestion.address
+    setStops(updatedStops)
+    setShowDestSuggestionsFor(null)
+    saveToFirestore({ stops: updatedStops })
+  }
+
+  // --- Return ---
+
+  const allStopsHaveAddress = stops.length > 0 && stops.every(s => s.destinationAddress?.trim())
+  const hasClients = clients.length > 0
+  const canReturn = stops.length > 0 && allStopsHaveAddress && hasClients
+
+  const getReturnBlockedReason = () => {
+    const missing = []
+    if (stops.length === 0) missing.push('at least one stop (click ARRIVE)')
+    if (!allStopsHaveAddress && stops.length > 0) missing.push('address for all stops')
+    if (!hasClients) missing.push('at least one client')
+    return missing.join(', ')
+  }
+
   const handleReturn = async () => {
+    if (!canReturn) {
+      alert('Cannot return yet. Missing: ' + getReturnBlockedReason())
+      return
+    }
+
     await saveToFirestore({
       status: 'returned',
       returnedAt: serverTimestamp()
     })
     onReturn()
   }
+
+  // --- Firestore persistence ---
 
   const saveToFirestore = async (updates) => {
     if (!transportId) return
@@ -267,6 +308,7 @@ function TransportCard({ transportId, onReturn, onClose }) {
       maxWidth: '600px',
       margin: '0 auto'
     }}>
+      {/* Header */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -290,6 +332,7 @@ function TransportCard({ transportId, onReturn, onClose }) {
         </button>
       </div>
 
+      {/* Departed banner */}
       <div style={{
         backgroundColor: 'white',
         borderRadius: '10px',
@@ -304,6 +347,172 @@ function TransportCard({ transportId, onReturn, onClose }) {
           color: '#C94A3F'
         }}>{formatTime(departedAt)}</span>
       </div>
+
+      {/* ARRIVE button — always enabled */}
+      <button
+        onClick={handleArrive}
+        style={{
+          width: '100%',
+          padding: '16px',
+          fontSize: '18px',
+          fontWeight: 'bold',
+          borderRadius: '10px',
+          border: 'none',
+          cursor: 'pointer',
+          backgroundColor: '#2196F3',
+          color: 'white',
+          marginBottom: '16px'
+        }}
+      >
+        ARRIVE{stops.length > 0 ? ` (Stop ${stops.length + 1})` : ''}
+      </button>
+
+      {/* Stops Section — editable after arrival */}
+      {stops.length > 0 && (
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          padding: '20px',
+          border: '1px solid #eee',
+          marginBottom: '16px'
+        }}>
+          <label style={{
+            fontSize: '13px',
+            color: '#888',
+            display: 'block',
+            marginBottom: '10px'
+          }}>
+            Stop(s)
+          </label>
+
+          {stops.map((stop, index) => (
+            <div
+              key={index}
+              style={{
+                padding: '12px',
+                borderRadius: '8px',
+                backgroundColor: stop.destinationAddress?.trim() ? '#F5F5F5' : '#FFF8E1',
+                marginBottom: '10px',
+                border: stop.destinationAddress?.trim() ? '1px solid #ddd' : '2px solid #FFB300'
+              }}
+            >
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '8px'
+              }}>
+                <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333' }}>
+                  Stop {index + 1}
+                </span>
+                <span style={{ fontSize: '12px', color: '#999' }}>
+                  Arrived: {new Date(stop.arrivedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+
+              {stop.dcCheck && (
+                <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
+                  DC Check: {stop.dcCheck.option}
+                  {stop.dcCheck.note && ` — ${stop.dcCheck.note}`}
+                </div>
+              )}
+
+              {/* Editable location fields */}
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  value={stop.destinationName}
+                  onChange={(e) => {
+                    handleStopFieldChange(index, 'destinationName', e.target.value)
+                    searchDestinationSuggestions(e.target.value)
+                    setShowDestSuggestionsFor(index)
+                  }}
+                  onBlur={() => {
+                    handleStopFieldBlur(index)
+                    setTimeout(() => setShowDestSuggestionsFor(null), 200)
+                  }}
+                  placeholder="Location name (optional)"
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '2px solid #eee',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    outline: 'none',
+                    marginBottom: '6px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <input
+                  type="text"
+                  value={stop.destinationAddress}
+                  onChange={(e) => {
+                    handleStopFieldChange(index, 'destinationAddress', e.target.value)
+                    searchDestinationSuggestions(e.target.value)
+                    setShowDestSuggestionsFor(index)
+                  }}
+                  onBlur={() => {
+                    handleStopFieldBlur(index)
+                    setTimeout(() => setShowDestSuggestionsFor(null), 200)
+                  }}
+                  placeholder="Address *"
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: !stop.destinationAddress?.trim() ? '2px solid #FFB300' : '2px solid #eee',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+
+                {showDestSuggestionsFor === index && destinationSuggestions.length > 0 && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    backgroundColor: 'white',
+                    border: '2px solid #eee',
+                    borderRadius: '8px',
+                    marginTop: '4px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    zIndex: 10,
+                    maxHeight: '160px',
+                    overflowY: 'auto'
+                  }}>
+                    {destinationSuggestions.map((suggestion, si) => (
+                      <div
+                        key={si}
+                        onMouseDown={() => handlePickDestSuggestion(index, suggestion)}
+                        style={{
+                          padding: '8px 12px',
+                          cursor: 'pointer',
+                          borderBottom: si < destinationSuggestions.length - 1 ? '1px solid #eee' : 'none',
+                          fontSize: '13px',
+                          color: '#333'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'white'}
+                      >
+                        <div style={{ fontWeight: 'bold' }}>{suggestion.name || 'Unnamed'}</div>
+                        <div style={{ fontSize: '11px', color: '#666' }}>{suggestion.address}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {!stop.destinationAddress?.trim() && (
+                <div style={{ fontSize: '11px', color: '#F57C00', marginTop: '6px' }}>
+                  Address required before returning
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Clients Section */}
       <div style={{
@@ -325,7 +534,7 @@ function TransportCard({ transportId, onReturn, onClose }) {
           display: 'flex',
           flexWrap: 'wrap',
           gap: '8px',
-          marginBottom: '10px'
+          marginBottom: clients.length > 0 ? '10px' : '0'
         }}>
           {clients.map((client, index) => (
             <div
@@ -417,7 +626,7 @@ function TransportCard({ transportId, onReturn, onClose }) {
               {clientSuggestions.map((suggestion, index) => (
                 <div
                   key={index}
-                  onClick={() => handleAddClient(suggestion.label)}
+                  onMouseDown={() => handleAddClient(suggestion.label)}
                   style={{
                     padding: '10px 12px',
                     cursor: 'pointer',
@@ -483,138 +692,6 @@ function TransportCard({ transportId, onReturn, onClose }) {
         </div>
       </div>
 
-      {/* Stops Section */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '20px',
-        border: '1px solid #eee',
-        marginBottom: '16px'
-      }}>
-        <label style={{
-          fontSize: '13px',
-          color: '#888',
-          display: 'block',
-          marginBottom: '10px'
-        }}>
-          Destination(s) / Stops
-        </label>
-
-        {stops.map((stop, index) => (
-          <div
-            key={index}
-            style={{
-              padding: '12px',
-              borderRadius: '8px',
-              backgroundColor: '#F5F5F5',
-              marginBottom: '8px',
-              border: '1px solid #ddd'
-            }}
-          >
-            <div style={{ fontWeight: 'bold', fontSize: '14px', marginBottom: '4px' }}>
-              Stop {index + 1}
-              {stop.destinationName && ` - ${stop.destinationName}`}
-            </div>
-            <div style={{ fontSize: '13px', color: '#666', marginBottom: '4px' }}>
-              {stop.destinationAddress}
-            </div>
-            <div style={{ fontSize: '12px', color: '#999' }}>
-              Arrived: {new Date(stop.arrivedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-            </div>
-            {stop.dcCheck && (
-              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                DC Check: {stop.dcCheck.option}
-              </div>
-            )}
-          </div>
-        ))}
-
-        <div style={{ marginTop: '12px', position: 'relative' }}>
-          <input
-            type="text"
-            value={newStopName}
-            onChange={(e) => {
-              setNewStopName(e.target.value)
-              searchDestinationSuggestions(e.target.value)
-              setShowDestinationSuggestions(true)
-            }}
-            onFocus={() => newStopName && setShowDestinationSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowDestinationSuggestions(false), 200)}
-            placeholder="Location name (optional)"
-            style={{
-              width: '100%',
-              padding: '10px',
-              border: '2px solid #eee',
-              borderRadius: '8px',
-              fontSize: '14px',
-              outline: 'none',
-              marginBottom: '8px',
-              boxSizing: 'border-box'
-            }}
-          />
-          <input
-            type="text"
-            value={newStopAddress}
-            onChange={(e) => {
-              setNewStopAddress(e.target.value)
-              searchDestinationSuggestions(e.target.value)
-              setShowDestinationSuggestions(true)
-            }}
-            onFocus={() => newStopAddress && setShowDestinationSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowDestinationSuggestions(false), 200)}
-            placeholder="Address *"
-            style={{
-              width: '100%',
-              padding: '10px',
-              border: '2px solid #eee',
-              borderRadius: '8px',
-              fontSize: '14px',
-              outline: 'none',
-              boxSizing: 'border-box'
-            }}
-          />
-          {showDestinationSuggestions && destinationSuggestions.length > 0 && (
-            <div style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              right: 0,
-              backgroundColor: 'white',
-              border: '2px solid #eee',
-              borderRadius: '8px',
-              marginTop: '4px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-              zIndex: 10,
-              maxHeight: '200px',
-              overflowY: 'auto'
-            }}>
-              {destinationSuggestions.map((suggestion, index) => (
-                <div
-                  key={index}
-                  onClick={() => {
-                    setNewStopName(suggestion.name)
-                    setNewStopAddress(suggestion.address)
-                    setShowDestinationSuggestions(false)
-                  }}
-                  style={{
-                    padding: '10px 12px',
-                    cursor: 'pointer',
-                    borderBottom: index < destinationSuggestions.length - 1 ? '1px solid #eee' : 'none',
-                    fontSize: '14px',
-                    color: '#333'
-                  }}
-                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
-                  onMouseLeave={(e) => e.target.style.backgroundColor = 'white'}
-                >
-                  <div style={{ fontWeight: 'bold' }}>{suggestion.name || 'Unnamed'}</div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>{suggestion.address}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Notes Section */}
       <div style={{
         backgroundColor: 'white',
@@ -651,54 +728,42 @@ function TransportCard({ transportId, onReturn, onClose }) {
         />
       </div>
 
-      {/* Action Buttons */}
-      <div style={{
-        display: 'flex',
-        gap: '10px',
-        marginBottom: '24px'
-      }}>
-        <button
-          onClick={handleArrive}
-          disabled={!newStopAddress.trim()}
-          style={{
-            flex: 1,
-            padding: '16px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            borderRadius: '10px',
-            border: 'none',
-            cursor: newStopAddress.trim() ? 'pointer' : 'not-allowed',
-            backgroundColor: newStopAddress.trim() ? '#2196F3' : '#e8e8e8',
-            color: newStopAddress.trim() ? 'white' : '#999'
-          }}
-        >
-          ARRIVE
-        </button>
+      {/* RETURN button — blocked until mandatory fields complete */}
+      <button
+        onClick={handleReturn}
+        disabled={!canReturn}
+        style={{
+          width: '100%',
+          padding: '16px',
+          fontSize: '18px',
+          fontWeight: 'bold',
+          borderRadius: '10px',
+          border: 'none',
+          cursor: canReturn ? 'pointer' : 'not-allowed',
+          backgroundColor: canReturn ? '#4CAF50' : '#e8e8e8',
+          color: canReturn ? 'white' : '#999',
+          marginBottom: '8px'
+        }}
+      >
+        RETURN
+      </button>
 
-        <button
-          onClick={handleReturn}
-          disabled={stops.length === 0}
-          style={{
-            flex: 1,
-            padding: '16px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            borderRadius: '10px',
-            border: 'none',
-            cursor: stops.length > 0 ? 'pointer' : 'not-allowed',
-            backgroundColor: stops.length > 0 ? '#4CAF50' : '#e8e8e8',
-            color: stops.length > 0 ? 'white' : '#999'
-          }}
-        >
-          RETURN
-        </button>
-      </div>
+      {!canReturn && stops.length > 0 && (
+        <div style={{
+          fontSize: '12px',
+          color: '#F57C00',
+          textAlign: 'center',
+          marginBottom: '16px'
+        }}>
+          Missing: {getReturnBlockedReason()}
+        </div>
+      )}
 
+      {/* DC Check Modal */}
       {showDCCheck && (
         <DCCheckModal
           onComplete={handleDCCheckComplete}
           onCancel={() => {
-            // Remove the pending stop if they cancel
             const updatedStops = stops.slice(0, -1)
             setStops(updatedStops)
             setShowDCCheck(false)
