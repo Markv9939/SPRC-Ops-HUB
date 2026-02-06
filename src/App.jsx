@@ -10,8 +10,8 @@ function App() {
   const [transports, setTransports] = useState([])
   const [startTimeHolder, setStartTimeHolder] = useState('')
 
-  function handleLogin(pin) {
-    setUser({ pin: pin, name: 'Tech' })
+  function handleLogin(user) {
+    setUser(user)
     setPage('home')
   }
 
