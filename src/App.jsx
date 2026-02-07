@@ -106,6 +106,7 @@ function App() {
         clients: [],
         reasons: [],
         stops: [],
+        destinations: [],
         notes: '',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -146,10 +147,7 @@ function App() {
 
   if (page === 'transport') {
     return (
-      <div style={{
-        minHeight: '100vh',
-        backgroundColor: '#f5f5f5'
-      }}>
+      <div className="app-bg">
         <Header userName={user.name} onLogout={handleLogout} />
         <TransportCard
           transportId={currentTransportId}
@@ -162,10 +160,7 @@ function App() {
 
   if (page === 'closeChecklist') {
     return (
-      <div style={{
-        minHeight: '100vh',
-        backgroundColor: '#f5f5f5'
-      }}>
+      <div className="app-bg">
         <Header userName={user.name} onLogout={handleLogout} />
         <CloseChecklist
           transportId={currentTransportId}
@@ -179,10 +174,7 @@ function App() {
   // Show supervisor dashboard for supervisor role
   if (user.role === 'supervisor') {
     return (
-      <div style={{
-        minHeight: '100vh',
-        backgroundColor: '#f5f5f5'
-      }}>
+      <div className="app-bg">
         <Header userName={user.name} onLogout={handleLogout} />
         <SupervisorDashboard
           onNewTransport={handleNewTransport}

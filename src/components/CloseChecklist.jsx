@@ -34,15 +34,12 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
       validationErrors.push('At least one client is required')
     }
 
-    if (!data.stops || data.stops.length === 0) {
-      validationErrors.push('At least one stop with address is required')
-    } else {
-      const hasValidStop = data.stops.some(
-        stop => stop.destinationAddress && stop.destinationAddress.trim()
-      )
-      if (!hasValidStop) {
-        validationErrors.push('At least one stop must have an address')
-      }
+    // Check destinations array (new model) or fall back to stops
+    const dests = data.destinations || []
+    const stopsWithAddr = (data.stops || []).filter(s => s.destinationAddress?.trim())
+
+    if (dests.length === 0 && stopsWithAddr.length === 0) {
+      validationErrors.push('At least one destination is required')
     }
 
     setErrors(validationErrors)

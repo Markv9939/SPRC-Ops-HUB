@@ -10,6 +10,7 @@ function TransportCard({ transportId, onReturn, onClose }) {
   const [clients, setClients] = useState([])
   const [reasons, setReasons] = useState([])
   const [stops, setStops] = useState([])
+  const [destinations, setDestinations] = useState([])
   const [notes, setNotes] = useState('')
   const [showDCCheck, setShowDCCheck] = useState(false)
   const [pendingStopIndex, setPendingStopIndex] = useState(null)
@@ -19,9 +20,11 @@ function TransportCard({ transportId, onReturn, onClose }) {
   const [clientSuggestions, setClientSuggestions] = useState([])
   const [showClientSuggestions, setShowClientSuggestions] = useState(false)
 
-  // Destination suggestions
+  // Destination input
+  const [newDestName, setNewDestName] = useState('')
+  const [newDestAddress, setNewDestAddress] = useState('')
   const [destinationSuggestions, setDestinationSuggestions] = useState([])
-  const [showDestSuggestionsFor, setShowDestSuggestionsFor] = useState(null)
+  const [showDestSuggestions, setShowDestSuggestions] = useState(false)
 
   const reasonOptions = [
     'Medical X appointment',
@@ -36,739 +39,349 @@ function TransportCard({ transportId, onReturn, onClose }) {
 
   useEffect(() => {
     async function loadTransport() {
-      if (!transportId) {
-        setLoading(false)
-        return
-      }
-
+      if (!transportId) { setLoading(false); return }
       try {
-        const docRef = doc(db, 'transports', transportId)
-        const docSnap = await getDoc(docRef)
-
+        const docSnap = await getDoc(doc(db, 'transports', transportId))
         if (docSnap.exists()) {
-          const data = docSnap.data()
-          setStatus(data.status || 'open')
-          setDepartedAt(data.departedAt)
-          setClients(data.clients || [])
-          setReasons(data.reasons || [])
-          setStops(data.stops || [])
-          setNotes(data.notes || '')
+          const d = docSnap.data()
+          setStatus(d.status || 'open')
+          setDepartedAt(d.departedAt)
+          setClients(d.clients || [])
+          setReasons(d.reasons || [])
+          setStops(d.stops || [])
+          setDestinations(d.destinations || [])
+          setNotes(d.notes || '')
         }
-      } catch (error) {
-        console.error('Error loading transport:', error)
-      } finally {
-        setLoading(false)
-      }
+      } catch (err) { console.error('Error loading transport:', err) }
+      finally { setLoading(false) }
     }
-
     loadTransport()
   }, [transportId])
 
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '--:--'
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+  // --- helpers ---
+  const fmt = (ts) => {
+    if (!ts) return '--:--'
+    const d = ts.toDate ? ts.toDate() : new Date(ts)
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   }
+  const norm = (t) => t.toLowerCase().trim().replace(/\s+/g, ' ')
 
-  const normalizeText = (text) => {
-    return text.toLowerCase().trim().replace(/\s+/g, ' ')
-  }
-
-  // --- Suggestions ---
-
-  const searchClientSuggestions = async (searchTerm) => {
-    if (!searchTerm.trim()) {
-      setClientSuggestions([])
-      return
-    }
-
+  const save = async (updates) => {
+    if (!transportId) return
     try {
-      const clientsRef = collection(db, 'clients')
-      const q = query(clientsRef, orderBy('label'), limit(20))
-      const snapshot = await getDocs(q)
-
-      const results = snapshot.docs
-        .map(d => d.data())
-        .filter(client =>
-          client.normalizedLabel.includes(normalizeText(searchTerm))
-        )
-        .slice(0, 5)
-
-      setClientSuggestions(results)
-    } catch (error) {
-      console.error('Error searching clients:', error)
-    }
+      await updateDoc(doc(db, 'transports', transportId), { ...updates, notes, updatedAt: serverTimestamp() })
+    } catch (err) { console.error('Save error:', err) }
   }
 
-  const searchDestinationSuggestions = async (searchTerm) => {
-    if (!searchTerm.trim()) {
-      setDestinationSuggestions([])
-      return
-    }
-
+  // --- suggestions ---
+  const searchClients = async (term) => {
+    if (!term.trim()) { setClientSuggestions([]); return }
     try {
-      const destRef = collection(db, 'destinations')
-      const q = query(destRef, orderBy('name'), limit(20))
-      const snapshot = await getDocs(q)
-
-      const results = snapshot.docs
-        .map(d => d.data())
-        .filter(dest =>
-          dest.normalizedName?.includes(normalizeText(searchTerm)) ||
-          dest.normalizedAddress?.includes(normalizeText(searchTerm))
-        )
-        .slice(0, 5)
-
-      setDestinationSuggestions(results)
-    } catch (error) {
-      console.error('Error searching destinations:', error)
-    }
+      const snap = await getDocs(query(collection(db, 'clients'), orderBy('label'), limit(20)))
+      setClientSuggestions(snap.docs.map(d => d.data()).filter(c => c.normalizedLabel.includes(norm(term))).slice(0, 5))
+    } catch (e) { console.error(e) }
   }
 
-  const saveClientToFirestore = async (clientName) => {
+  const searchDests = async (term) => {
+    if (!term.trim()) { setDestinationSuggestions([]); return }
     try {
-      const normalized = normalizeText(clientName)
-      const clientRef = doc(db, 'clients', normalized)
-      await setDoc(clientRef, {
-        label: clientName,
-        normalizedLabel: normalized,
-        createdAt: serverTimestamp()
-      }, { merge: true })
-    } catch (error) {
-      console.error('Error saving client:', error)
-    }
+      const snap = await getDocs(query(collection(db, 'destinations'), orderBy('name'), limit(20)))
+      setDestinationSuggestions(snap.docs.map(d => d.data()).filter(dest =>
+        dest.normalizedName?.includes(norm(term)) || dest.normalizedAddress?.includes(norm(term))
+      ).slice(0, 5))
+    } catch (e) { console.error(e) }
   }
 
-  const saveDestinationToFirestore = async (name, address) => {
-    if (!address) return
+  const persistClient = async (name) => {
     try {
-      const normalizedAddress = normalizeText(address)
-      const destRef = doc(db, 'destinations', normalizedAddress)
-      await setDoc(destRef, {
-        name: name || '',
-        address,
-        normalizedName: normalizeText(name || ''),
-        normalizedAddress,
-        createdAt: serverTimestamp()
-      }, { merge: true })
-    } catch (error) {
-      console.error('Error saving destination:', error)
-    }
+      const n = norm(name)
+      await setDoc(doc(db, 'clients', n), { label: name, normalizedLabel: n, createdAt: serverTimestamp() }, { merge: true })
+    } catch (e) { console.error(e) }
   }
 
-  // --- Client handlers ---
-
-  const handleAddClient = async (clientName = newClient) => {
-    const trimmed = clientName.trim()
-    if (trimmed) {
-      const updated = [...clients, trimmed]
-      setClients(updated)
-      setNewClient('')
-      setShowClientSuggestions(false)
-      await saveClientToFirestore(trimmed)
-      await saveToFirestore({ clients: updated })
-    }
+  const persistDest = async (name, addr) => {
+    if (!addr) return
+    try {
+      const n = norm(addr)
+      await setDoc(doc(db, 'destinations', n), { name: name||'', address: addr, normalizedName: norm(name||''), normalizedAddress: n, createdAt: serverTimestamp() }, { merge: true })
+    } catch (e) { console.error(e) }
   }
 
-  const handleRemoveClient = (index) => {
-    const updated = clients.filter((_, i) => i !== index)
-    setClients(updated)
-    saveToFirestore({ clients: updated })
+  // --- clients ---
+  const addClient = async (val = newClient) => {
+    const t = val.trim()
+    if (!t) return
+    const updated = [...clients, t]
+    setClients(updated); setNewClient(''); setShowClientSuggestions(false)
+    await persistClient(t)
+    await save({ clients: updated })
   }
 
-  const toggleReason = (reason) => {
-    let updated
-    if (reasons.includes(reason)) {
-      updated = reasons.filter((r) => r !== reason)
-    } else {
-      updated = [...reasons, reason]
-    }
-    setReasons(updated)
-    saveToFirestore({ reasons: updated })
+  const removeClient = (i) => {
+    const updated = clients.filter((_, idx) => idx !== i)
+    setClients(updated); save({ clients: updated })
   }
 
-  // --- Stop handlers ---
+  // --- reasons ---
+  const toggleReason = (r) => {
+    const updated = reasons.includes(r) ? reasons.filter(x => x !== r) : [...reasons, r]
+    setReasons(updated); save({ reasons: updated })
+  }
 
+  // --- destinations (always visible, independent of ARRIVE) ---
+  const addDestination = async () => {
+    if (!newDestAddress.trim()) return
+    const dest = { name: newDestName.trim(), address: newDestAddress.trim() }
+    const updated = [...destinations, dest]
+    setDestinations(updated)
+    setNewDestName(''); setNewDestAddress(''); setShowDestSuggestions(false)
+    await persistDest(dest.name, dest.address)
+    await save({ destinations: updated })
+  }
+
+  const removeDest = (i) => {
+    const updated = destinations.filter((_, idx) => idx !== i)
+    setDestinations(updated); save({ destinations: updated })
+  }
+
+  const pickDestSuggestion = (s) => {
+    setNewDestName(s.name); setNewDestAddress(s.address); setShowDestSuggestions(false)
+  }
+
+  // --- arrive (logs time, triggers DC check) ---
   const handleArrive = () => {
-    const newStop = {
-      destinationName: '',
-      destinationAddress: '',
-      arrivedAt: new Date().toISOString(),
-      dcCheck: null,
-      note: ''
-    }
-
-    const updatedStops = [...stops, newStop]
-    setStops(updatedStops)
-    setPendingStopIndex(updatedStops.length - 1)
+    const stop = { arrivedAt: new Date().toISOString(), dcCheck: null, note: '' }
+    const updated = [...stops, stop]
+    setStops(updated)
+    setPendingStopIndex(updated.length - 1)
     setShowDCCheck(true)
   }
 
-  const handleDCCheckComplete = async (dcCheckData) => {
-    const updatedStops = [...stops]
-    updatedStops[pendingStopIndex].dcCheck = dcCheckData
-
-    setStops(updatedStops)
-    setShowDCCheck(false)
-    setPendingStopIndex(null)
-    setStatus('arrived')
-
-    await saveToFirestore({
-      stops: updatedStops,
-      status: 'arrived'
-    })
+  const handleDCComplete = async (dc) => {
+    const updated = [...stops]
+    updated[pendingStopIndex].dcCheck = dc
+    setStops(updated); setShowDCCheck(false); setPendingStopIndex(null); setStatus('arrived')
+    await save({ stops: updated, status: 'arrived' })
   }
 
-  const handleStopFieldChange = (index, field, value) => {
-    const updatedStops = [...stops]
-    updatedStops[index][field] = value
-    setStops(updatedStops)
+  // --- finish ---
+  const hasDest = destinations.length > 0 && destinations.every(d => d.address?.trim())
+  const hasClient = clients.length > 0
+  const hasStop = stops.length > 0
+  const canFinish = hasDest && hasClient && hasStop
+
+  const missingMsg = () => {
+    const m = []
+    if (!hasStop) m.push('at least one arrival (click ARRIVE)')
+    if (!hasClient) m.push('at least one client')
+    if (destinations.length === 0) m.push('at least one destination')
+    else if (!hasDest) m.push('address for all destinations')
+    return m.join(', ')
   }
 
-  const handleStopFieldBlur = async (index) => {
-    const stop = stops[index]
-    await saveToFirestore({ stops })
-
-    // Save destination for future suggestions if address is filled
-    if (stop.destinationAddress?.trim()) {
-      await saveDestinationToFirestore(stop.destinationName, stop.destinationAddress)
-    }
-  }
-
-  const handlePickDestSuggestion = (stopIndex, suggestion) => {
-    const updatedStops = [...stops]
-    updatedStops[stopIndex].destinationName = suggestion.name
-    updatedStops[stopIndex].destinationAddress = suggestion.address
-    setStops(updatedStops)
-    setShowDestSuggestionsFor(null)
-    saveToFirestore({ stops: updatedStops })
-  }
-
-  // --- Return ---
-
-  const allStopsHaveAddress = stops.length > 0 && stops.every(s => s.destinationAddress?.trim())
-  const hasClients = clients.length > 0
-  const canReturn = stops.length > 0 && allStopsHaveAddress && hasClients
-
-  const getReturnBlockedReason = () => {
-    const missing = []
-    if (stops.length === 0) missing.push('at least one stop (click ARRIVE)')
-    if (!allStopsHaveAddress && stops.length > 0) missing.push('address for all stops')
-    if (!hasClients) missing.push('at least one client')
-    return missing.join(', ')
-  }
-
-  const handleReturn = async () => {
-    if (!canReturn) {
-      alert('Cannot return yet. Missing: ' + getReturnBlockedReason())
-      return
-    }
-
-    await saveToFirestore({
-      status: 'returned',
-      returnedAt: serverTimestamp()
-    })
+  const handleFinish = async () => {
+    if (!canFinish) { alert('Missing: ' + missingMsg()); return }
+    await save({ status: 'returned', returnedAt: serverTimestamp(), destinations })
     onReturn()
-  }
-
-  // --- Firestore persistence ---
-
-  const saveToFirestore = async (updates) => {
-    if (!transportId) return
-
-    try {
-      await updateDoc(doc(db, 'transports', transportId), {
-        ...updates,
-        notes,
-        updatedAt: serverTimestamp()
-      })
-    } catch (error) {
-      console.error('Error saving transport:', error)
-    }
-  }
-
-  const handleNotesBlur = () => {
-    saveToFirestore({ notes })
   }
 
   if (loading) {
     return (
-      <div style={{ padding: '20px', textAlign: 'center' }}>
-        <p>Loading transport...</p>
+      <div style={{ padding: '40px', textAlign: 'center' }}>
+        <p style={{ color: '#888' }}>Loading transport...</p>
       </div>
     )
   }
 
   return (
-    <div style={{
-      padding: '20px',
-      maxWidth: '600px',
-      margin: '0 auto'
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '20px'
-      }}>
-        <h2 style={{ margin: 0, color: '#333' }}>
-          Transport
-        </h2>
-        <button
-          onClick={onClose}
-          style={{
-            background: 'none',
-            border: 'none',
-            fontSize: '24px',
-            cursor: 'pointer',
-            color: '#999'
-          }}
-        >
-          X
-        </button>
+    <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', paddingBottom: '40px' }}>
+
+      {/* Title row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }} className="animate-in">
+        <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: '#333' }}>Transport</h2>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#aaa', padding: '4px 8px', borderRadius: '6px' }}>✕</button>
       </div>
 
       {/* Departed banner */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '10px',
-        padding: '10px 16px',
-        border: '1px solid #eee',
-        marginBottom: '16px',
-        fontSize: '13px',
-        color: '#888'
-      }}>
-        Departed at <span style={{
-          fontWeight: 'bold',
-          color: '#C94A3F'
-        }}>{formatTime(departedAt)}</span>
+      <div className="departed-banner animate-in" style={{ marginBottom: '16px' }}>
+        Departed at <strong style={{ marginLeft: '4px' }}>{fmt(departedAt)}</strong>
       </div>
 
-      {/* ARRIVE button — always enabled */}
+      {/* ARRIVE */}
       <button
+        className={`btn btn-arrive pulse`}
         onClick={handleArrive}
-        style={{
-          width: '100%',
-          padding: '16px',
-          fontSize: '18px',
-          fontWeight: 'bold',
-          borderRadius: '10px',
-          border: 'none',
-          cursor: 'pointer',
-          backgroundColor: '#2196F3',
-          color: 'white',
-          marginBottom: '16px'
-        }}
+        style={{ width: '100%', fontSize: '18px', marginBottom: '6px', borderRadius: 'var(--radius)' }}
       >
-        ARRIVE{stops.length > 0 ? ` (Stop ${stops.length + 1})` : ''}
+        ARRIVE{stops.length > 0 ? ` (${stops.length} logged)` : ''}
       </button>
+      <p style={{ textAlign: 'center', fontSize: '11px', color: '#999', marginBottom: '16px' }}>Tap to log an arrival time</p>
 
-      {/* Stops Section — editable after arrival */}
+      {/* Arrivals */}
       {stops.length > 0 && (
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          padding: '20px',
-          border: '1px solid #eee',
-          marginBottom: '16px'
-        }}>
-          <label style={{
-            fontSize: '13px',
-            color: '#888',
-            display: 'block',
-            marginBottom: '10px'
-          }}>
-            Stop(s)
-          </label>
-
-          {stops.map((stop, index) => (
-            <div
-              key={index}
-              style={{
-                padding: '12px',
-                borderRadius: '8px',
-                backgroundColor: stop.destinationAddress?.trim() ? '#F5F5F5' : '#FFF8E1',
-                marginBottom: '10px',
-                border: stop.destinationAddress?.trim() ? '1px solid #ddd' : '2px solid #FFB300'
-              }}
-            >
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '8px'
-              }}>
-                <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333' }}>
-                  Stop {index + 1}
-                </span>
-                <span style={{ fontSize: '12px', color: '#999' }}>
-                  Arrived: {new Date(stop.arrivedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+        <div className="glass-card animate-in" style={{ marginBottom: '16px' }}>
+          <div className="section-label">Arrivals</div>
+          {stops.map((s, i) => (
+            <div key={i} className="stop-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <span style={{ fontWeight: 700, fontSize: '14px' }}>Arrival {i + 1}</span>
+                <span style={{ marginLeft: '10px', fontSize: '12px', color: '#999' }}>
+                  {new Date(s.arrivedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
-
-              {stop.dcCheck && (
-                <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
-                  DC Check: {stop.dcCheck.option}
-                  {stop.dcCheck.note && ` — ${stop.dcCheck.note}`}
-                </div>
-              )}
-
-              {/* Editable location fields */}
-              <div style={{ position: 'relative' }}>
-                <input
-                  type="text"
-                  value={stop.destinationName}
-                  onChange={(e) => {
-                    handleStopFieldChange(index, 'destinationName', e.target.value)
-                    searchDestinationSuggestions(e.target.value)
-                    setShowDestSuggestionsFor(index)
-                  }}
-                  onBlur={() => {
-                    handleStopFieldBlur(index)
-                    setTimeout(() => setShowDestSuggestionsFor(null), 200)
-                  }}
-                  placeholder="Location name (optional)"
-                  style={{
-                    width: '100%',
-                    padding: '8px',
-                    border: '2px solid #eee',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                    outline: 'none',
-                    marginBottom: '6px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-                <input
-                  type="text"
-                  value={stop.destinationAddress}
-                  onChange={(e) => {
-                    handleStopFieldChange(index, 'destinationAddress', e.target.value)
-                    searchDestinationSuggestions(e.target.value)
-                    setShowDestSuggestionsFor(index)
-                  }}
-                  onBlur={() => {
-                    handleStopFieldBlur(index)
-                    setTimeout(() => setShowDestSuggestionsFor(null), 200)
-                  }}
-                  placeholder="Address *"
-                  style={{
-                    width: '100%',
-                    padding: '8px',
-                    border: !stop.destinationAddress?.trim() ? '2px solid #FFB300' : '2px solid #eee',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                    outline: 'none',
-                    boxSizing: 'border-box'
-                  }}
-                />
-
-                {showDestSuggestionsFor === index && destinationSuggestions.length > 0 && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    right: 0,
-                    backgroundColor: 'white',
-                    border: '2px solid #eee',
-                    borderRadius: '8px',
-                    marginTop: '4px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                    zIndex: 10,
-                    maxHeight: '160px',
-                    overflowY: 'auto'
-                  }}>
-                    {destinationSuggestions.map((suggestion, si) => (
-                      <div
-                        key={si}
-                        onMouseDown={() => handlePickDestSuggestion(index, suggestion)}
-                        style={{
-                          padding: '8px 12px',
-                          cursor: 'pointer',
-                          borderBottom: si < destinationSuggestions.length - 1 ? '1px solid #eee' : 'none',
-                          fontSize: '13px',
-                          color: '#333'
-                        }}
-                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
-                        onMouseLeave={(e) => e.target.style.backgroundColor = 'white'}
-                      >
-                        <div style={{ fontWeight: 'bold' }}>{suggestion.name || 'Unnamed'}</div>
-                        <div style={{ fontSize: '11px', color: '#666' }}>{suggestion.address}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {!stop.destinationAddress?.trim() && (
-                <div style={{ fontSize: '11px', color: '#F57C00', marginTop: '6px' }}>
-                  Address required before returning
-                </div>
+              {s.dcCheck && (
+                <span className="badge badge-arrived">{s.dcCheck.option}</span>
               )}
             </div>
           ))}
         </div>
       )}
 
-      {/* Clients Section */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '20px',
-        border: '1px solid #eee',
-        marginBottom: '16px'
-      }}>
-        <label style={{
-          fontSize: '13px',
-          color: '#888',
-          display: 'block',
-          marginBottom: '10px'
-        }}>
-          Client(s) *
-        </label>
-        <div style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '8px',
-          marginBottom: clients.length > 0 ? '10px' : '0'
-        }}>
-          {clients.map((client, index) => (
-            <div
-              key={index}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '20px',
-                backgroundColor: '#E8F5E9',
-                border: '2px solid #4CAF50',
-                color: '#2E7D32',
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              <span>{client}</span>
-              <button
-                onClick={() => handleRemoveClient(index)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#2E7D32',
-                  cursor: 'pointer',
-                  fontSize: '16px',
-                  padding: 0,
-                  lineHeight: 1
-                }}
-              >
-                ×
-              </button>
+      {/* Destinations — always visible */}
+      <div className="glass-card animate-in" style={{ marginBottom: '16px' }}>
+        <div className="section-label">Destination(s) *</div>
+
+        {destinations.map((d, i) => (
+          <div key={i} className="dest-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              {d.name && <div style={{ fontWeight: 700, fontSize: '14px' }}>{d.name}</div>}
+              <div style={{ fontSize: '13px', color: '#666' }}>{d.address}</div>
+            </div>
+            <button
+              onClick={() => removeDest(i)}
+              style={{ background: 'none', border: 'none', color: '#C94A3F', cursor: 'pointer', fontSize: '18px', padding: '0 4px', lineHeight: 1 }}
+            >×</button>
+          </div>
+        ))}
+
+        <div style={{ position: 'relative', marginTop: destinations.length > 0 ? '10px' : '0' }}>
+          <input
+            className="input"
+            type="text"
+            value={newDestName}
+            onChange={(e) => { setNewDestName(e.target.value); searchDests(e.target.value); setShowDestSuggestions(true) }}
+            onFocus={() => newDestName && setShowDestSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
+            placeholder="Location name (optional)"
+            style={{ marginBottom: '8px' }}
+          />
+          <input
+            className={`input ${!newDestAddress.trim() && destinations.length === 0 ? '' : ''}`}
+            type="text"
+            value={newDestAddress}
+            onChange={(e) => { setNewDestAddress(e.target.value); searchDests(e.target.value); setShowDestSuggestions(true) }}
+            onFocus={() => newDestAddress && setShowDestSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
+            onKeyDown={(e) => e.key === 'Enter' && addDestination()}
+            placeholder="Address *"
+            style={{ marginBottom: '10px' }}
+          />
+
+          {showDestSuggestions && destinationSuggestions.length > 0 && (
+            <div className="suggestion-dropdown">
+              {destinationSuggestions.map((s, i) => (
+                <div key={i} className="suggestion-item" onMouseDown={() => pickDestSuggestion(s)}>
+                  <div style={{ fontWeight: 700 }}>{s.name || 'Unnamed'}</div>
+                  <div style={{ fontSize: '12px', color: '#666' }}>{s.address}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button
+            className={`btn ${newDestAddress.trim() ? 'btn-primary' : 'btn-disabled'}`}
+            onClick={addDestination}
+            disabled={!newDestAddress.trim()}
+            style={{ width: '100%', fontSize: '14px', padding: '12px' }}
+          >
+            + Add Destination
+          </button>
+        </div>
+      </div>
+
+      {/* Clients */}
+      <div className="glass-card animate-in" style={{ marginBottom: '16px' }}>
+        <div className="section-label">Client(s) *</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: clients.length > 0 ? '10px' : '0' }}>
+          {clients.map((c, i) => (
+            <div key={i} className="chip chip-client">
+              <span>{c}</span>
+              <button onClick={() => removeClient(i)} style={{ background: 'none', border: 'none', color: '#2E7D32', cursor: 'pointer', fontSize: '16px', padding: 0, lineHeight: 1 }}>×</button>
             </div>
           ))}
         </div>
         <div style={{ position: 'relative' }}>
           <div style={{ display: 'flex', gap: '8px' }}>
             <input
+              className="input"
               type="text"
               value={newClient}
-              onChange={(e) => {
-                setNewClient(e.target.value)
-                searchClientSuggestions(e.target.value)
-                setShowClientSuggestions(true)
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
+              onChange={(e) => { setNewClient(e.target.value); searchClients(e.target.value); setShowClientSuggestions(true) }}
+              onKeyDown={(e) => e.key === 'Enter' && addClient()}
               onFocus={() => newClient && setShowClientSuggestions(true)}
               onBlur={() => setTimeout(() => setShowClientSuggestions(false), 200)}
               placeholder="Add client name..."
-              style={{
-                flex: 1,
-                padding: '10px',
-                border: '2px solid #eee',
-                borderRadius: '8px',
-                fontSize: '14px',
-                outline: 'none'
-              }}
+              style={{ flex: 1 }}
             />
-            <button
-              onClick={() => handleAddClient()}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: '#4CAF50',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: 'bold',
-                cursor: 'pointer'
-              }}
-            >
-              + Add
-            </button>
+            <button className="btn btn-finish" onClick={() => addClient()} style={{ padding: '10px 18px', fontSize: '14px' }}>+ Add</button>
           </div>
           {showClientSuggestions && clientSuggestions.length > 0 && (
-            <div style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              right: '90px',
-              backgroundColor: 'white',
-              border: '2px solid #eee',
-              borderRadius: '8px',
-              marginTop: '4px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-              zIndex: 10,
-              maxHeight: '200px',
-              overflowY: 'auto'
-            }}>
-              {clientSuggestions.map((suggestion, index) => (
-                <div
-                  key={index}
-                  onMouseDown={() => handleAddClient(suggestion.label)}
-                  style={{
-                    padding: '10px 12px',
-                    cursor: 'pointer',
-                    borderBottom: index < clientSuggestions.length - 1 ? '1px solid #eee' : 'none',
-                    fontSize: '14px',
-                    color: '#333'
-                  }}
-                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
-                  onMouseLeave={(e) => e.target.style.backgroundColor = 'white'}
-                >
-                  {suggestion.label}
-                </div>
+            <div className="suggestion-dropdown" style={{ right: '90px' }}>
+              {clientSuggestions.map((s, i) => (
+                <div key={i} className="suggestion-item" onMouseDown={() => addClient(s.label)}>{s.label}</div>
               ))}
             </div>
           )}
         </div>
       </div>
 
-      {/* Reasons Section */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '20px',
-        border: '1px solid #eee',
-        marginBottom: '16px'
-      }}>
-        <label style={{
-          fontSize: '13px',
-          color: '#888',
-          display: 'block',
-          marginBottom: '10px'
-        }}>
-          Reason(s)
-        </label>
-        <div style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '8px'
-        }}>
-          {reasonOptions.map((reason) => (
-            <button
-              key={reason}
-              onClick={() => toggleReason(reason)}
-              style={{
-                padding: '8px 14px',
-                borderRadius: '20px',
-                fontSize: '13px',
-                cursor: 'pointer',
-                border: reasons.includes(reason)
-                  ? '2px solid #C94A3F'
-                  : '2px solid #ddd',
-                backgroundColor: reasons.includes(reason)
-                  ? '#FDE8E7'
-                  : 'white',
-                color: reasons.includes(reason)
-                  ? '#C94A3F'
-                  : '#666'
-              }}
-            >
-              {reason}
+      {/* Reasons */}
+      <div className="glass-card animate-in" style={{ marginBottom: '16px' }}>
+        <div className="section-label">Reason(s)</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          {reasonOptions.map((r) => (
+            <button key={r} className={`chip ${reasons.includes(r) ? 'chip-selected' : 'chip-unselected'}`} onClick={() => toggleReason(r)}>
+              {r}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Notes Section */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '20px',
-        border: '1px solid #eee',
-        marginBottom: '16px'
-      }}>
-        <label style={{
-          fontSize: '13px',
-          color: '#888',
-          display: 'block',
-          marginBottom: '6px'
-        }}>
-          Notes (optional)
-        </label>
+      {/* Notes */}
+      <div className="glass-card animate-in" style={{ marginBottom: '20px' }}>
+        <div className="section-label">Notes (optional)</div>
         <textarea
+          className="input"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          onBlur={handleNotesBlur}
+          onBlur={() => save({ notes })}
           placeholder="Any additional notes..."
           rows={3}
-          style={{
-            width: '100%',
-            padding: '12px',
-            border: '2px solid #eee',
-            borderRadius: '8px',
-            fontSize: '15px',
-            outline: 'none',
-            boxSizing: 'border-box',
-            resize: 'vertical',
-            fontFamily: 'inherit'
-          }}
+          style={{ resize: 'vertical', fontFamily: 'inherit' }}
         />
       </div>
 
-      {/* RETURN button — blocked until mandatory fields complete */}
+      {/* FINISH TX */}
       <button
-        onClick={handleReturn}
-        disabled={!canReturn}
-        style={{
-          width: '100%',
-          padding: '16px',
-          fontSize: '18px',
-          fontWeight: 'bold',
-          borderRadius: '10px',
-          border: 'none',
-          cursor: canReturn ? 'pointer' : 'not-allowed',
-          backgroundColor: canReturn ? '#4CAF50' : '#e8e8e8',
-          color: canReturn ? 'white' : '#999',
-          marginBottom: '8px'
-        }}
+        className={`btn ${canFinish ? 'btn-finish' : 'btn-disabled'}`}
+        onClick={handleFinish}
+        disabled={!canFinish}
+        style={{ width: '100%', fontSize: '18px', padding: '16px', borderRadius: 'var(--radius)' }}
       >
-        RETURN
+        Finish TX
       </button>
 
-      {!canReturn && stops.length > 0 && (
-        <div style={{
-          fontSize: '12px',
-          color: '#F57C00',
-          textAlign: 'center',
-          marginBottom: '16px'
-        }}>
-          Missing: {getReturnBlockedReason()}
-        </div>
+      {!canFinish && (stops.length > 0 || clients.length > 0 || destinations.length > 0) && (
+        <p style={{ fontSize: '12px', color: 'var(--orange)', textAlign: 'center', marginTop: '8px' }}>
+          Missing: {missingMsg()}
+        </p>
       )}
 
       {/* DC Check Modal */}
       {showDCCheck && (
         <DCCheckModal
-          onComplete={handleDCCheckComplete}
-          onCancel={() => {
-            const updatedStops = stops.slice(0, -1)
-            setStops(updatedStops)
-            setShowDCCheck(false)
-            setPendingStopIndex(null)
-          }}
+          onComplete={handleDCComplete}
+          onCancel={() => { setStops(stops.slice(0, -1)); setShowDCCheck(false); setPendingStopIndex(null) }}
         />
       )}
     </div>
