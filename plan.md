@@ -37,9 +37,9 @@ All core phases (1–6) are implemented. The app is built and ready for Firebase
 | Transport Card | [TransportCard.jsx](src/components/TransportCard.jsx) | Full transport workflow: uses ClientAutocomplete and DestinationAutocomplete components, tracks client usage with lastUsedAt timestamps |
 | Client Autocomplete | [ClientAutocomplete.jsx](src/components/ClientAutocomplete.jsx) | Reusable client autocomplete: input + "+ Add" button, filters active clients, updates lastUsedAt on use |
 | Destination Autocomplete | [DestinationAutocomplete.jsx](src/components/DestinationAutocomplete.jsx) | Reusable destination autocomplete: two-field input (name optional, address required), dedupes by address |
-| Autocomplete Dropdown | [AutocompleteDropdown.jsx](src/components/AutocompleteDropdown.jsx) | Base dropdown UI: positioned below input, z-index 1000, mobile-optimized |
+| Autocomplete Dropdown | [AutocompleteDropdown.jsx](src/components/AutocompleteDropdown.jsx) | Base dropdown UI: rendered via portal to document.body, positioned with getBoundingClientRect(), z-index 9999, mobile-optimized |
 | Autocomplete Hook | [useAutocomplete.js](src/hooks/useAutocomplete.js) | Custom hook: debounced search (150ms), Firestore queries, active filter, max 5 results |
-| DC Check Modal | [DCCheckModal.jsx](src/components/DCCheckModal.jsx) | Post-ARRIVE modal: All signed / Missing signature / Incomplete / Other (note required) |
+| DC Paperwork Modal | [DCCheckModal.jsx](src/components/DCCheckModal.jsx) | Pre-RETURN modal: Collected / N/A / Other (note required). Triggers at Finish, saves status to transport |
 | Close Checklist | [CloseChecklist.jsx](src/components/CloseChecklist.jsx) | Validates clients + stops, blocks Close until requirements met, sets status to `closed` |
 | Supervisor Dashboard | [SupervisorDashboard.jsx](src/components/SupervisorDashboard.jsx) | Two tabs: Transports (filters, Excel export) and Manage Users (CRUD) |
 | Firebase Config | [firebase.js](src/firebase.js) | Firestore init, project config |
@@ -56,7 +56,7 @@ All core phases (1–6) are implemented. The app is built and ready for Firebase
 - **users**: `id`, `name`, `pin`, `role` (`tech` | `supervisor`), `site` (`PHP` | `RTC`), `active`
 - **clients**: `id`, `label`, `normalizedLabel`, `active`, `lastUsedAt`, `createdAt`
 - **destinations**: `id`, `name`, `address`, `normalizedName`, `normalizedAddress`, `createdAt`
-- **transports**: `id`, `site`, `createdByUserId`, `createdByName`, `status` (`open` | `returned` | `closed`), `departedAt`, `returnedAt`, `clients[]`, `reasons[]`, `destinations[]` (name + address), `stops[]` (arrivedAt + dcCheck), `closeChecklist`, `createdAt`, `updatedAt`, `closedAt`
+- **transports**: `id`, `site`, `createdByUserId`, `createdByName`, `status` (`open` | `returned` | `closed`), `departedAt`, `returnedAt`, `clients[]`, `reasons[]`, `destinations[]` (name + address), `stops[]` (arrivedAt), `dcPaperworkStatus` (`collected` | `na` | `other`), `dcPaperworkOtherNote`, `closeChecklist`, `createdAt`, `updatedAt`, `closedAt`
 
 ---
 
@@ -70,12 +70,14 @@ All core phases (1–6) are implemented. The app is built and ready for Firebase
 
 ---
 
-## Phase 2 — Multi-Stop Workflow, DC Check, Close Checklist ✅ COMPLETE
+## Phase 2 — Multi-Stop Workflow, DC Paperwork, Close Checklist ✅ COMPLETE
 
-- Multi-stop support: ARRIVE logs time first, then fill in destination details
-- DC Check modal after each ARRIVE (cannot skip)
+- Multi-stop support: ARRIVE logs time with DC paperwork reminder modal
+- DC Paperwork modal triggers at Finish (pre-return): Collected / N/A / Other (note required for Other)
+- `dcPaperworkStatus` and `dcPaperworkOtherNote` saved to transport document
+- Firestore rules enforce dcPaperworkStatus is set when status changes to `returned` or `closed`
 - RETURN sets `returnedAt`, navigates to Close Checklist
-- Close Checklist validates clients + stops before allowing close
+- Close Checklist validates clients + stops, displays DC paperwork status, blocks Close until requirements met
 - Clients as chips (add/remove), multi-select reasons from spec list
 
 ---
@@ -132,7 +134,7 @@ All core phases (1–6) are implemented. The app is built and ready for Firebase
 - Updated Firestore rules to allow user collection writes
 - Updated seed script with current user data
 
-### App-Wide Autocomplete System (current commit)
+### App-Wide Autocomplete System (commit d31cb45)
 - **New reusable components:** ClientAutocomplete, DestinationAutocomplete, AutocompleteDropdown
 - **Custom hook:** useAutocomplete for debounced Firestore queries
 - **Client lifecycle management:** active/inactive status with 90-day auto-cleanup
@@ -143,6 +145,22 @@ All core phases (1–6) are implemented. The app is built and ready for Firebase
 - **Firestore indexes:** composite indexes for active + normalizedLabel/lastUsedAt queries
 - **Mobile-optimized:** 16px font (prevents iOS zoom), 44px tap targets, keyboard-aware
 - **DRY architecture:** all autocompletes use shared components and hooks
+
+### DC Paperwork Flow Restructure + Autocomplete Portal Fix (commit 1822c8d)
+- **DC paperwork moved from per-arrive to finish/return step:** No longer prompts after each ARRIVE; instead triggers once when clicking Finish
+- **Arrive reminder modal:** ARRIVE now shows a "DC Paperwork Reminder" confirmation before logging arrival time
+- **DC Paperwork modal options:** Collected / N/A / Other (with required note)
+- **Firestore fields:** `dcPaperworkStatus` and `dcPaperworkOtherNote` saved to transport document on return
+- **Firestore rules updated:** Enforce `dcPaperworkStatus` must be set when status changes to `returned` or `closed`
+- **Close Checklist:** Displays DC paperwork status as a green confirmation card
+- **AutocompleteDropdown portal rendering:** Now uses `createPortal(document.body)` to escape parent `overflow` constraints
+- **Portal positioning:** Uses `getBoundingClientRect()` on inputRef, updates on scroll/resize events
+- **CSS fix:** `.glass-card` changed from `backdrop-filter: blur(8px)` to `overflow: visible` to support dropdown visibility
+- **User prop passed to TransportCard** from App.jsx
+
+### Auto-Add Destination on Autocomplete Selection (commit d7ddc51)
+- **Destination autocomplete now auto-adds on selection:** Selecting a suggestion immediately adds it to the transport (matches client autocomplete behavior)
+- No need to click "+ Add Destination" after selecting a suggestion
 
 ---
 
