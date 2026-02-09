@@ -8,7 +8,9 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "seed": "node scripts/seedUsers.js"
+    "seed": "node scripts/seedUsers.js",
+    "migrate-clients": "node scripts/migrateExistingClients.js",
+    "cleanup-clients": "node scripts/deactivateStaleClients.js"
   },
   "dependencies": {
     "firebase": "^12.9.0",

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { doc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, setDoc, orderBy, limit } from 'firebase/firestore'
 import DCCheckModal from './DCCheckModal'
+import ClientAutocomplete from './ClientAutocomplete'
+import DestinationAutocomplete from './DestinationAutocomplete'
 
 function TransportCard({ transportId, onReturn, onClose }) {
   const [loading, setLoading] = useState(true)
@@ -14,17 +16,6 @@ function TransportCard({ transportId, onReturn, onClose }) {
   const [notes, setNotes] = useState('')
   const [showDCCheck, setShowDCCheck] = useState(false)
   const [pendingStopIndex, setPendingStopIndex] = useState(null)
-
-  // Client input
-  const [newClient, setNewClient] = useState('')
-  const [clientSuggestions, setClientSuggestions] = useState([])
-  const [showClientSuggestions, setShowClientSuggestions] = useState(false)
-
-  // Destination input
-  const [newDestName, setNewDestName] = useState('')
-  const [newDestAddress, setNewDestAddress] = useState('')
-  const [destinationSuggestions, setDestinationSuggestions] = useState([])
-  const [showDestSuggestions, setShowDestSuggestions] = useState(false)
 
   const reasonOptions = [
     'Medical X appointment',
@@ -73,53 +64,38 @@ function TransportCard({ transportId, onReturn, onClose }) {
     } catch (err) { console.error('Save error:', err) }
   }
 
-  // --- suggestions ---
-  const searchClients = async (term) => {
-    if (!term.trim()) { setClientSuggestions([]); return }
+  // --- client usage tracking ---
+  const touchClientUsage = async (clientName) => {
     try {
-      const snap = await getDocs(query(collection(db, 'clients'), orderBy('label'), limit(20)))
-      setClientSuggestions(snap.docs.map(d => d.data()).filter(c => c.normalizedLabel.includes(norm(term))).slice(0, 5))
-    } catch (e) { console.error(e) }
-  }
-
-  const searchDests = async (term) => {
-    if (!term.trim()) { setDestinationSuggestions([]); return }
-    try {
-      const snap = await getDocs(query(collection(db, 'destinations'), orderBy('name'), limit(20)))
-      setDestinationSuggestions(snap.docs.map(d => d.data()).filter(dest =>
-        dest.normalizedName?.includes(norm(term)) || dest.normalizedAddress?.includes(norm(term))
-      ).slice(0, 5))
-    } catch (e) { console.error(e) }
-  }
-
-  const persistClient = async (name) => {
-    try {
-      const n = norm(name)
-      await setDoc(doc(db, 'clients', n), { label: name, normalizedLabel: n, createdAt: serverTimestamp() }, { merge: true })
-    } catch (e) { console.error(e) }
-  }
-
-  const persistDest = async (name, addr) => {
-    if (!addr) return
-    try {
-      const n = norm(addr)
-      await setDoc(doc(db, 'destinations', n), { name: name||'', address: addr, normalizedName: norm(name||''), normalizedAddress: n, createdAt: serverTimestamp() }, { merge: true })
-    } catch (e) { console.error(e) }
+      const n = norm(clientName)
+      await setDoc(
+        doc(db, 'clients', n),
+        {
+          label: clientName,
+          normalizedLabel: n,
+          active: true,
+          lastUsedAt: serverTimestamp(),
+          createdAt: serverTimestamp()
+        },
+        { merge: true }
+      )
+    } catch (e) {
+      console.error('Error updating client usage:', e)
+    }
   }
 
   // --- clients ---
-  const addClient = async (val = newClient) => {
-    const t = val.trim()
-    if (!t) return
-    const updated = [...clients, t]
-    setClients(updated); setNewClient(''); setShowClientSuggestions(false)
-    await persistClient(t)
+  const handleAddClient = async (clientName) => {
+    const updated = [...clients, clientName]
+    setClients(updated)
+    await touchClientUsage(clientName) // Update lastUsedAt
     await save({ clients: updated })
   }
 
   const removeClient = (i) => {
     const updated = clients.filter((_, idx) => idx !== i)
-    setClients(updated); save({ clients: updated })
+    setClients(updated)
+    save({ clients: updated })
   }
 
   // --- reasons ---
@@ -128,24 +104,17 @@ function TransportCard({ transportId, onReturn, onClose }) {
     setReasons(updated); save({ reasons: updated })
   }
 
-  // --- destinations (always visible, independent of ARRIVE) ---
-  const addDestination = async () => {
-    if (!newDestAddress.trim()) return
-    const dest = { name: newDestName.trim(), address: newDestAddress.trim() }
-    const updated = [...destinations, dest]
+  // --- destinations ---
+  const handleAddDestination = async (destination) => {
+    const updated = [...destinations, destination]
     setDestinations(updated)
-    setNewDestName(''); setNewDestAddress(''); setShowDestSuggestions(false)
-    await persistDest(dest.name, dest.address)
     await save({ destinations: updated })
   }
 
   const removeDest = (i) => {
     const updated = destinations.filter((_, idx) => idx !== i)
-    setDestinations(updated); save({ destinations: updated })
-  }
-
-  const pickDestSuggestion = (s) => {
-    setNewDestName(s.name); setNewDestAddress(s.address); setShowDestSuggestions(false)
+    setDestinations(updated)
+    save({ destinations: updated })
   }
 
   // --- arrive (logs time, triggers DC check) ---
@@ -254,49 +223,10 @@ function TransportCard({ transportId, onReturn, onClose }) {
           </div>
         ))}
 
-        <div style={{ position: 'relative', marginTop: destinations.length > 0 ? '10px' : '0' }}>
-          <input
-            className="input"
-            type="text"
-            value={newDestName}
-            onChange={(e) => { setNewDestName(e.target.value); searchDests(e.target.value); setShowDestSuggestions(true) }}
-            onFocus={() => newDestName && setShowDestSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
-            placeholder="Location name (optional)"
-            style={{ marginBottom: '8px' }}
-          />
-          <input
-            className={`input ${!newDestAddress.trim() && destinations.length === 0 ? '' : ''}`}
-            type="text"
-            value={newDestAddress}
-            onChange={(e) => { setNewDestAddress(e.target.value); searchDests(e.target.value); setShowDestSuggestions(true) }}
-            onFocus={() => newDestAddress && setShowDestSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
-            onKeyDown={(e) => e.key === 'Enter' && addDestination()}
-            placeholder="Address *"
-            style={{ marginBottom: '10px' }}
-          />
-
-          {showDestSuggestions && destinationSuggestions.length > 0 && (
-            <div className="suggestion-dropdown">
-              {destinationSuggestions.map((s, i) => (
-                <div key={i} className="suggestion-item" onMouseDown={() => pickDestSuggestion(s)}>
-                  <div style={{ fontWeight: 700 }}>{s.name || 'Unnamed'}</div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>{s.address}</div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <button
-            className={`btn ${newDestAddress.trim() ? 'btn-primary' : 'btn-disabled'}`}
-            onClick={addDestination}
-            disabled={!newDestAddress.trim()}
-            style={{ width: '100%', fontSize: '14px', padding: '12px' }}
-          >
-            + Add Destination
-          </button>
-        </div>
+        <DestinationAutocomplete
+          onAddDestination={handleAddDestination}
+          existingDestinations={destinations}
+        />
       </div>
 
       {/* Clients */}
@@ -310,29 +240,11 @@ function TransportCard({ transportId, onReturn, onClose }) {
             </div>
           ))}
         </div>
-        <div style={{ position: 'relative' }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input
-              className="input"
-              type="text"
-              value={newClient}
-              onChange={(e) => { setNewClient(e.target.value); searchClients(e.target.value); setShowClientSuggestions(true) }}
-              onKeyDown={(e) => e.key === 'Enter' && addClient()}
-              onFocus={() => newClient && setShowClientSuggestions(true)}
-              onBlur={() => setTimeout(() => setShowClientSuggestions(false), 200)}
-              placeholder="Add client name..."
-              style={{ flex: 1 }}
-            />
-            <button className="btn btn-finish" onClick={() => addClient()} style={{ padding: '10px 18px', fontSize: '14px' }}>+ Add</button>
-          </div>
-          {showClientSuggestions && clientSuggestions.length > 0 && (
-            <div className="suggestion-dropdown" style={{ right: '90px' }}>
-              {clientSuggestions.map((s, i) => (
-                <div key={i} className="suggestion-item" onMouseDown={() => addClient(s.label)}>{s.label}</div>
-              ))}
-            </div>
-          )}
-        </div>
+        <ClientAutocomplete
+          onAddClient={handleAddClient}
+          existingClients={clients}
+          transportId={transportId}
+        />
       </div>
 
       {/* Reasons */}
