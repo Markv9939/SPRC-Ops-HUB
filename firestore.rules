@@ -3,67 +3,85 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper function to check if user is authenticated (we use custom auth with PIN)
-    function isSignedIn() {
-      return request.auth != null;
-    }
+    // ============================================================================
+    // IMPORTANT: PIN-BASED AUTHENTICATION MODEL
+    // ============================================================================
+    // This app uses custom PIN authentication (not Firebase Auth).
+    // Users log in via PinLogin.jsx which queries the users collection directly.
+    // request.auth will always be null since we don't use Firebase Auth tokens.
+    //
+    // SECURITY MODEL:
+    // - We rely on client-side role enforcement in the React app
+    // - These rules provide basic validation and data integrity
+    // - For production, consider adding Firebase Anonymous Auth + Custom Claims
+    //   to properly enforce role-based permissions server-side
+    // ============================================================================
 
-    // Helper to get user document
-    function getUserData(userId) {
-      return get(/databases/$(database)/documents/users/$(userId)).data;
-    }
-
-    // Users collection
+    // Users collection (managed via supervisor dashboard)
     match /users/{userId} {
-      // Allow read for authentication purposes
+      // Open read for PIN authentication lookups
       allow read: if true;
-      // Only admins can write (managed through seed script or admin panel)
-      allow write: if false;
+      // Open write for user management via supervisor dashboard
+      // In production, consider adding role-based checks via Custom Claims
+      allow write: if true;
     }
 
     // Clients collection (autocomplete suggestions)
     match /clients/{clientId} {
-      // All authenticated users can read and write clients
+      // Open read/write for all users
       allow read, write: if true;
     }
 
     // Destinations collection (autocomplete suggestions)
     match /destinations/{destinationId} {
-      // All authenticated users can read and write destinations
+      // Open read/write for all users
       allow read, write: if true;
     }
 
     // Transports collection
     match /transports/{transportId} {
-      // Define supervisor check
-      function isSupervisor() {
-        return request.auth != null &&
-               request.auth.token.role == 'supervisor';
-      }
+      // Read: Open to all (client-side filtering by role)
+      allow read: if true;
 
-      // Check if user is the creator
-      function isCreator() {
-        return request.auth != null &&
-               resource.data.createdByUserId == request.auth.uid;
-      }
+      // Create: Require essential fields
+      allow create: if request.resource.data.keys().hasAll([
+        'site',
+        'createdByUserId',
+        'createdByName',
+        'status',
+        'departedAt',
+        'createdAt'
+      ]) &&
+      // Validate status is one of allowed values
+      request.resource.data.status in ['open', 'arrived', 'returned', 'closed'] &&
+      // Validate site is PHP or RTC
+      request.resource.data.site in ['PHP', 'RTC'];
 
-      // Check if transport is not closed
-      function isNotClosed() {
-        return resource.data.status != 'closed';
-      }
+      // Update: Require essential fields remain
+      allow update: if request.resource.data.keys().hasAll([
+        'site',
+        'createdByUserId',
+        'createdByName',
+        'status',
+        'departedAt',
+        'updatedAt'
+      ]) &&
+      // Validate status transitions
+      request.resource.data.status in ['open', 'arrived', 'returned', 'closed'] &&
+      // Prevent changing the creator
+      request.resource.data.createdByUserId == resource.data.createdByUserId &&
+      request.resource.data.createdByName == resource.data.createdByName &&
+      // Prevent changing the site
+      request.resource.data.site == resource.data.site;
 
-      // Read rules
-      allow read: if true; // Simplified - in production you'd restrict by role
+      // Delete: Open (client-side role enforcement)
+      // In production, this should be restricted to supervisors via custom claims
+      allow delete: if true;
+    }
 
-      // Create rules - any authenticated user can create
-      allow create: if request.auth != null;
-
-      // Update rules
-      allow update: if isSupervisor() ||
-                       (isCreator() && isNotClosed());
-
-      // Delete rules - only supervisors
-      allow delete: if isSupervisor();
+    // Deny all other paths
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

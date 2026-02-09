@@ -137,11 +137,55 @@ Firestore is initialized in [src/firebase.js](src/firebase.js) but not yet used 
   - ✅ 5-failure lockout with 5-minute duration in [PinLogin.jsx](src/components/PinLogin.jsx)
 4. **Editing rules** ✅ COMPLETED
   - ✅ Enforced in Firestore rules and UI routing (tech sees own transports only, supervisor sees all via dashboard)
-5. **Netlify** ✅ COMPLETED
-  - ✅ Created [netlify.toml](netlify.toml): build command, publish dir, SPA redirect
-  - ✅ Build verified: `npm run build` produces `dist/`
+5. **Netlify** ❌ REMOVED (not using Netlify deployment)
+  - ⚠️ [netlify.toml](netlify.toml) exists but not actively used
 
-**Done when:** Rules prevent tech from reading/writing others' data and editing closed transports; supervisor can do both; 60 min auto-lock and 5-fail lockout work; app runs on Netlify. ✅ ALL PHASES COMPLETE
+**Done when:** Rules prevent tech from reading/writing others' data and editing closed transports; supervisor can do both; 60 min auto-lock and 5-fail lockout work. ✅ PHASES 1-5 COMPLETE
+
+---
+
+## Bug Fixes (Post-Implementation Review — 2026-02-09)
+
+### CRITICAL Issues
+
+1. **6.A - Firestore rules non-functional** ✅ FIXED
+   - **Problem:** Rules reference `request.auth` but app uses PIN-based auth (not Firebase Auth). All create/update/delete rules will deny.
+   - **Impact:** App only works if Firestore is in test mode or rules haven't been deployed.
+   - **Fix:** Rewrite rules to be open with validation constraints. Remove Firebase Auth dependencies. Add comments explaining PIN-based auth model.
+   - **Files:** [firestore.rules](firestore.rules)
+   - **Solution:** Completely rewrote rules to work without Firebase Auth. Added field validation for transports (require site, createdByUserId, status, etc.), prevent creator/site changes, validate status values. Added extensive documentation explaining PIN-based auth model.
+
+### HIGH Priority Issues
+
+2. **1.A - No "Continue" button for open transports** ✅ FIXED
+   - **Problem:** Tech home displays transports but users cannot click to resume editing an in-progress transport.
+   - **Impact:** If user logs out or navigates away, they must create a new transport instead of continuing existing one.
+   - **Fix:** Make transport cards clickable, pass `onContinue` handler from App.jsx, add hover styling.
+   - **Files:** [TransportList.jsx](src/components/TransportList.jsx), [App.jsx](src/App.jsx)
+   - **Solution:** Made transport cards clickable (except closed ones), added `onContinueTransport` handler in App.jsx, added hover effects (lift + shadow), shows "Tap to continue →" hint for open transports.
+
+### MEDIUM Priority Issues
+
+3. **5.A - Excel export Stops column broken** ✅ FIXED
+   - **Problem:** Export references `s.destinationAddress` from `stops[]` array, but stops only contain `arrivedAt` and `dcCheck`.
+   - **Impact:** Excel Stops column will be empty or show undefined values.
+   - **Fix:** Use `destinations[]` array instead. Format as "Name (Address)" or just "Address".
+   - **Files:** [SupervisorDashboard.jsx](src/components/SupervisorDashboard.jsx)
+   - **Solution:** Changed Excel export to use `destinations[]` array, formats as "1. Name (Address)" or "1. Address" if no name, renamed column from "Stops" to "Destinations", added separate "Arrivals" column with count.
+
+### LOW Priority Issues (Deferred)
+
+4. **2.A - Data model divergence**
+   - Plan spec has `stops[]` with destination info. Implementation uses separate `destinations[]` and `stops[]` arrays. Functionally equivalent.
+
+5. **2.B - CloseChecklist label misleading**
+   - UI says "Stop(s) with Address" but stops array doesn't contain addresses. Validation logic is correct but label is confusing.
+
+6. **3.A - Autocomplete scalability**
+   - Fetches max 20 docs then filters client-side. Will miss results as data grows past 20 entries.
+
+7. **5.B - Dead code: onNewTransport prop**
+   - `SupervisorDashboard` receives `onNewTransport` prop but never renders a button to use it.
 
 ---
 

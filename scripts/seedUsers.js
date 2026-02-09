@@ -2,13 +2,13 @@ import { initializeApp } from 'firebase/app'
 import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc } from 'firebase/firestore'
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDw_3tVRohA3aTLwJGy_SfcevtMlEbjkUg",
-  authDomain: "sprc-tx-log.firebaseapp.com",
-  projectId: "sprc-tx-log",
-  storageBucket: "sprc-tx-log.firebasestorage.app",
-  messagingSenderId: "402300007688",
-  appId: "1:402300007688:web:f7c15801a17f99da7b68bd",
-  measurementId: "G-PBVRE3J5GN"
+  apiKey: "AIzaSyDkeTilCGBAxaR9Vz4uiIHsxLENvvRsy7U",
+  authDomain: "sprc-tx-l.firebaseapp.com",
+  projectId: "sprc-tx-l",
+  storageBucket: "sprc-tx-l.firebasestorage.app",
+  messagingSenderId: "699564668509",
+  appId: "1:699564668509:web:dc48902d5458fc5383fb4",
+  measurementId: "G-YQJZPLW7P6"
 }
 
 const app = initializeApp(firebaseConfig)

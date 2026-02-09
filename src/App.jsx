@@ -139,6 +139,11 @@ function App() {
     setPage('home')
   }
 
+  function handleContinueTransport(transportId) {
+    setCurrentTransportId(transportId)
+    setPage('transport')
+  }
+
   if (user === null) {
     return (
       <PinLogin onLogin={handleLogin} />
@@ -195,6 +200,7 @@ function App() {
       <TransportList
         transports={transports}
         onNewTransport={handleNewTransport}
+        onContinueTransport={handleContinueTransport}
       />
     </div>
   )

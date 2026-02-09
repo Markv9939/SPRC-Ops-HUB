@@ -1,4 +1,4 @@
-function TransportList({ transports, onNewTransport }) {
+function TransportList({ transports, onNewTransport, onContinueTransport }) {
   const formatTime = (timestamp) => {
     if (!timestamp) return '--:--'
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
@@ -52,35 +52,67 @@ function TransportList({ transports, onNewTransport }) {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {transports.map((t) => (
-            <div
-              key={t.id}
-              className={`transport-item animate-in ${isOverdue(t) ? 'transport-item-overdue' : ''}`}
-            >
-              {isOverdue(t) && (
-                <div style={{ position: 'absolute', top: '-8px', right: '12px' }}>
-                  <span className="badge badge-overdue">OVERDUE</span>
+          {transports.map((t) => {
+            const isClickable = t.status !== 'closed'
+            return (
+              <div
+                key={t.id}
+                className={`transport-item animate-in ${isOverdue(t) ? 'transport-item-overdue' : ''}`}
+                onClick={() => isClickable && onContinueTransport && onContinueTransport(t.id)}
+                style={{
+                  cursor: isClickable ? 'pointer' : 'default',
+                  transition: 'all 0.2s ease',
+                  ...(isClickable && {
+                    ':hover': {
+                      transform: 'translateY(-2px)',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                    }
+                  })
+                }}
+                onMouseEnter={(e) => {
+                  if (isClickable) {
+                    e.currentTarget.style.transform = 'translateY(-2px)'
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (isClickable) {
+                    e.currentTarget.style.transform = 'translateY(0)'
+                    e.currentTarget.style.boxShadow = ''
+                  }
+                }}
+              >
+                {isOverdue(t) && (
+                  <div style={{ position: 'absolute', top: '-8px', right: '12px' }}>
+                    <span className="badge badge-overdue">OVERDUE</span>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', marginTop: isOverdue(t) ? '8px' : '0' }}>
+                  <span style={{ fontWeight: 700, fontSize: '15px', color: '#333' }}>
+                    {getClientDisplay(t)}
+                  </span>
+                  <span className={badgeClass(t.status)}>
+                    {t.status || 'open'}
+                  </span>
                 </div>
-              )}
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', marginTop: isOverdue(t) ? '8px' : '0' }}>
-                <span style={{ fontWeight: 700, fontSize: '15px', color: '#333' }}>
-                  {getClientDisplay(t)}
-                </span>
-                <span className={badgeClass(t.status)}>
-                  {t.status || 'open'}
-                </span>
-              </div>
+                <div style={{ fontSize: '13px', color: '#666' }}>
+                  {getDestinationDisplay(t)}
+                </div>
 
-              <div style={{ fontSize: '13px', color: '#666' }}>
-                {getDestinationDisplay(t)}
-              </div>
+                <div style={{ fontSize: '12px', color: '#999', marginTop: '6px' }}>
+                  Departed: {formatTime(t.departedAt)}
+                </div>
 
-              <div style={{ fontSize: '12px', color: '#999', marginTop: '6px' }}>
-                Departed: {formatTime(t.departedAt)}
+                {isClickable && (
+                  <div style={{ fontSize: '11px', color: '#2196F3', marginTop: '8px', fontWeight: 600 }}>
+                    Tap to continue →
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
