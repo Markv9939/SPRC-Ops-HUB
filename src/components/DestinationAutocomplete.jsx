@@ -127,9 +127,35 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
   }
 
   const selectSuggestion = (suggestion) => {
-    setNameInput(suggestion.name || '')
-    setAddressInput(suggestion.address || '')
     setShowSuggestions(false)
+
+    const name = (suggestion.name || '').trim()
+    const address = (suggestion.address || '').trim()
+    if (!address) return
+
+    const normalizedAddress = normalize(address)
+    if (existingNormalizedAddresses.includes(normalizedAddress)) {
+      alert('This address is already added')
+      return
+    }
+
+    // Persist to Firestore
+    setDoc(
+      doc(db, 'destinations', normalizedAddress),
+      {
+        name: name,
+        address: address,
+        normalizedName: normalize(name),
+        normalizedAddress: normalizedAddress,
+        createdAt: serverTimestamp()
+      },
+      { merge: true }
+    ).catch(err => console.error('Error persisting destination:', err))
+
+    // Add immediately
+    onAddDestination({ name, address })
+    setNameInput('')
+    setAddressInput('')
   }
 
   const handleNameChange = (e) => {
