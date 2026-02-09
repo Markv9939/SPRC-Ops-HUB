@@ -1,200 +1,229 @@
----
-name: SPRC TX Log App Plan
-overview: "Vite + React + Firestore transport logging app with PIN auth, multi-stop workflow, DC checks, Close Checklist, suggestions, overdue tracking, supervisor dashboard with Excel export, user management, and Firebase Hosting deployment."
-todos: []
-isProject: false
----
+# SPRC TX Log
 
-# SPRC TX Log — Implementation Plan
+## What This Is
 
-## Project Status: ALL PHASES COMPLETE
+A **transport logging app** for SPRC (a facility with two sites: PHP and RTC). Staff ("techs") use it on their phones to log client transports — recording when they depart, arrive at destinations, and return. Supervisors can review all transports, filter/export data, and manage user accounts.
 
-All core phases (1–6) are implemented. The app is built and ready for Firebase Hosting deployment.
-
-**Deployment:** Firebase Hosting (project: `sprc-tx-l`). Netlify config exists but is not actively used.
+**Live at:** https://sprc-tx-l.web.app
 
 ---
 
-## Architecture
+## Tech Stack
 
-- **Framework:** Vite + React (SPA)
-- **Database:** Firestore (collections: `users`, `transports`, `clients`, `destinations`)
-- **Auth:** PIN-based (not Firebase Auth) — 4-digit PIN lookup against Firestore `users` collection
-- **Hosting:** Firebase Hosting (`dist/` folder)
-- **Export:** xlsx library for Excel export
-
----
-
-## File / Component Map
-
-| Component | File | Purpose |
-|-----------|------|---------|
-| Entry | [main.jsx](src/main.jsx) | React root |
-| App | [App.jsx](src/App.jsx) | Routing (home / transport / closeChecklist / supervisor), current user state, 60-min auto-lock |
-| PIN Login | [PinLogin.jsx](src/components/PinLogin.jsx) | Firestore user lookup by PIN, 5-fail lockout (5 min), returns `{ id, name, role, site }` |
-| Header | [Header.jsx](src/components/Header.jsx) | App header with user info and logout |
-| Transport List | [TransportList.jsx](src/components/TransportList.jsx) | Tech home: own transports (real-time Firestore query), overdue badges, clickable to continue, "New Transport" button |
-| Transport Card | [TransportCard.jsx](src/components/TransportCard.jsx) | Full transport workflow: uses ClientAutocomplete and DestinationAutocomplete components, tracks client usage with lastUsedAt timestamps |
-| Client Autocomplete | [ClientAutocomplete.jsx](src/components/ClientAutocomplete.jsx) | Reusable client autocomplete: input + "+ Add" button, filters active clients, updates lastUsedAt on use |
-| Destination Autocomplete | [DestinationAutocomplete.jsx](src/components/DestinationAutocomplete.jsx) | Reusable destination autocomplete: two-field input (name optional, address required), dedupes by address |
-| Autocomplete Dropdown | [AutocompleteDropdown.jsx](src/components/AutocompleteDropdown.jsx) | Base dropdown UI: rendered via portal to document.body, positioned with getBoundingClientRect(), z-index 9999, mobile-optimized |
-| Autocomplete Hook | [useAutocomplete.js](src/hooks/useAutocomplete.js) | Custom hook: debounced search (150ms), Firestore queries, active filter, max 5 results |
-| DC Paperwork Modal | [DCCheckModal.jsx](src/components/DCCheckModal.jsx) | Pre-RETURN modal: Collected / N/A / Other (note required). Triggers at Finish, saves status to transport |
-| Close Checklist | [CloseChecklist.jsx](src/components/CloseChecklist.jsx) | Validates clients + stops, blocks Close until requirements met, sets status to `closed` |
-| Supervisor Dashboard | [SupervisorDashboard.jsx](src/components/SupervisorDashboard.jsx) | Two tabs: Transports (filters, Excel export) and Manage Users (CRUD) |
-| Firebase Config | [firebase.js](src/firebase.js) | Firestore init, project config |
-| Firestore Rules | [firestore.rules](firestore.rules) | Open rules with field validation (PIN-based auth, no Firebase Auth) |
-| Seed Script | [scripts/seedUsers.js](scripts/seedUsers.js) | Resets users collection with test data |
-| Migration Script | [scripts/migrateExistingClients.js](scripts/migrateExistingClients.js) | One-time: adds active and lastUsedAt fields to existing clients |
-| Cleanup Script | [scripts/deactivateStaleClients.js](scripts/deactivateStaleClients.js) | Periodic: deactivates clients unused for 90+ days |
-| Styles | [index.css](src/index.css) | Global styles including autocomplete dropdown styles |
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19 (Vite 7, SPA) |
+| Database | Cloud Firestore |
+| Auth | PIN-based (4-digit numeric, looked up against Firestore `users` collection — no Firebase Auth) |
+| Hosting | Firebase Hosting (project: `sprc-tx-l`) |
+| Export | xlsx library for Excel spreadsheet export |
+| Styling | Plain CSS with custom properties (no framework) |
 
 ---
 
-## Data Model
+## How The App Works
 
-- **users**: `id`, `name`, `pin`, `role` (`tech` | `supervisor`), `site` (`PHP` | `RTC`), `active`
-- **clients**: `id`, `label`, `normalizedLabel`, `active`, `lastUsedAt`, `createdAt`
-- **destinations**: `id`, `name`, `address`, `normalizedName`, `normalizedAddress`, `createdAt`
-- **transports**: `id`, `site`, `createdByUserId`, `createdByName`, `status` (`open` | `returned` | `closed`), `departedAt`, `returnedAt`, `clients[]`, `reasons[]`, `destinations[]` (name + address), `stops[]` (arrivedAt), `dcPaperworkStatus` (`collected` | `na` | `other`), `dcPaperworkOtherNote`, `closeChecklist`, `createdAt`, `updatedAt`, `closedAt`
+### Transport Workflow (Tech View)
 
----
+1. **Login** — Enter 4-digit PIN. 5 failed attempts = 5-minute lockout. 60-minute inactivity auto-lock.
+2. **Home screen** — See your open/returned transports. Overdue transports (>8 hrs without return) show a red badge.
+3. **New Transport** — Creates a transport with departure time, site auto-set from user profile.
+4. **Add clients** — Type a name, autocomplete suggests from history. Selecting a suggestion auto-adds it. Can also type a new name and click "+ Add". Shown as removable chips.
+5. **Add reasons** — Toggle buttons: Medical X appointment, Outside Provider, Court, Admin (e.g., SSA), Recreational, Other.
+6. **ARRIVE** — Tap "ARRIVE" → DC paperwork reminder modal → confirms → logs arrival time.
+7. **Add destinations** — Name (optional) + address (required). Autocomplete suggests from history; selecting a suggestion auto-adds it. Can add multiple destinations.
+8. **Notes** — Optional freeform text.
+9. **Finish TX** — Validates: at least 1 arrival, 1 client, and all destinations have addresses. Opens DC Paperwork modal (Collected / N/A / Other with required note). On submit → status becomes `returned`.
+10. **Close Checklist** — Supervisor (or tech via return flow) reviews the transport, sees all data + DC paperwork status. Validates requirements, then closes it.
 
-## Phase 1 — Authentication + Roles + Persistence ✅ COMPLETE
+### Supervisor View
 
-- Firestore `users` collection with PIN lookup
-- 5-failure lockout (5-minute duration) via localStorage
-- Role-based views: tech sees own transports, supervisor sees all
-- Real-time Firestore queries for transport list
-- Clickable transport cards to continue open transports
-
----
-
-## Phase 2 — Multi-Stop Workflow, DC Paperwork, Close Checklist ✅ COMPLETE
-
-- Multi-stop support: ARRIVE logs time with DC paperwork reminder modal
-- DC Paperwork modal triggers at Finish (pre-return): Collected / N/A / Other (note required for Other)
-- `dcPaperworkStatus` and `dcPaperworkOtherNote` saved to transport document
-- Firestore rules enforce dcPaperworkStatus is set when status changes to `returned` or `closed`
-- RETURN sets `returnedAt`, navigates to Close Checklist
-- Close Checklist validates clients + stops, displays DC paperwork status, blocks Close until requirements met
-- Clients as chips (add/remove), multi-select reasons from spec list
+- **Transports tab** — See all transports across both sites. Filter by date range (default: current month), driver, overdue status, client name search. Export filtered results to Excel.
+- **Manage Users tab** — Full CRUD for user accounts (name, PIN, role, site, active status).
 
 ---
 
-## Phase 3 — Suggestions and Dedupe ✅ ENHANCED
+## File Map
 
-- **NEW:** Full reusable autocomplete system with dedicated components
-- **ClientAutocomplete:** input + "+ Add" button, filters already-added clients, tracks usage with `lastUsedAt`
-- **DestinationAutocomplete:** two-field input (name optional, address required), dedupes by `normalizedAddress`
-- **AutocompleteDropdown:** reusable base component, positioned below input, z-index 1000, mobile-optimized
-- **useAutocomplete hook:** debounced search (150ms), Firestore range queries, active filter, max 5 results
-- **90-day cleanup:** automatic client deactivation after 90 days of non-use (preserves historical data)
-- Firestore composite indexes for efficient queries (active + normalizedLabel, active + lastUsedAt)
+### Source Files (`src/`)
 
----
+| File | What It Does |
+|------|-------------|
+| `main.jsx` | React entry point |
+| `App.jsx` | Top-level routing and state. Manages login, auto-lock (60 min), role-based views (tech vs supervisor). Creates new transports. |
+| `firebase.js` | Firebase/Firestore initialization and config |
+| `index.css` | All global styles — CSS variables, glass cards, buttons, chips, badges, status colors, animations, SPRC watermark logo |
+| `hooks/useAutocomplete.js` | Reusable hook for Firestore autocomplete. Debounced (150ms), prefix matching, filters active-only, max 5 results. |
 
-## Phase 4 — Overdue and Notifications ✅ PARTIAL
+### Components (`src/components/`)
 
-- Overdue definition: >8 hours since departure without return
-- Red border + "OVERDUE" badge on transport cards
-- Overdue filter in supervisor dashboard
-- Push notifications skipped (requires Cloud Functions / paid Firebase plan)
+| Component | File | What It Does |
+|-----------|------|-------------|
+| PinLogin | `PinLogin.jsx` | PIN input, queries `users` where pin matches and active=true. 5-fail lockout via localStorage. |
+| Header | `Header.jsx` | Sticky header with SPRC logo, app title, username, Lock button |
+| TransportList | `TransportList.jsx` | Tech home screen. Real-time Firestore listener for user's transports. Shows status badges, overdue detection (>8 hrs). Click to open/continue. |
+| TransportCard | `TransportCard.jsx` | The main transport editing screen. Manages the full workflow: clients, reasons, ARRIVE, destinations, notes, Finish TX. Contains the arrive reminder modal inline. |
+| ClientAutocomplete | `ClientAutocomplete.jsx` | Input + "+ Add" button. Uses `useAutocomplete` hook against `clients` collection. Selecting a suggestion auto-adds it. Upserts client to Firestore with `lastUsedAt` tracking. |
+| DestinationAutocomplete | `DestinationAutocomplete.jsx` | Two fields: name (optional) + address (required). Custom Firestore search (not using the shared hook — searches by both name and address fields). Selecting a suggestion auto-adds it. Dedupes by normalized address. |
+| AutocompleteDropdown | `AutocompleteDropdown.jsx` | Shared dropdown UI. Renders via `createPortal` to `document.body` to escape parent overflow. Positions with `getBoundingClientRect()`, updates on scroll/resize. z-index 9999. |
+| DCPaperworkModal | `DCCheckModal.jsx` | Modal with 3 options: Collected, N/A, Other (requires note). Returns `{status, otherNote}`. Triggers when user taps "Finish TX". |
+| CloseChecklist | `CloseChecklist.jsx` | Pre-close validation. Checks: has clients, has stops with addresses. Displays DC paperwork status. Sets status to `closed` with `closedAt` timestamp. |
+| SupervisorDashboard | `SupervisorDashboard.jsx` | Two tabs. **Transports:** date range filter, driver filter, overdue filter, client search, Excel export. **Users:** add/edit/delete users with inline form. |
 
----
+### Scripts (`scripts/`)
 
-## Phase 5 — Supervisor Dashboard and Excel Export ✅ COMPLETE
+| Script | Command | What It Does |
+|--------|---------|-------------|
+| `seedUsers.js` | `npm run seed` | Resets `users` collection with 3 test users (2 techs, 1 supervisor). Uses client SDK. |
+| `migrateExistingClients.js` | `npm run migrate-clients` | One-time migration: adds `active=true` and `lastUsedAt` to existing client docs. Uses admin SDK. |
+| `deactivateStaleClients.js` | `npm run cleanup-clients` | Marks clients as `active=false` if unused for 90+ days. Uses admin SDK. Needs `serviceAccountKey.json`. |
 
-- Default current-month view with date range filter
-- Filters: driver dropdown, overdue status (all/yes/no), fuzzy client search
-- Excel export: one row per transport with all fields (destinations, arrivals, status, notes)
+### Config Files
 
----
-
-## Phase 6 — Security and Production ✅ COMPLETE
-
-- Firestore rules: open with field validation (PIN-based auth model, no Firebase Auth)
-- 60-minute auto-lock with activity tracking (mousedown, keydown, scroll, touchstart)
-- 5-failure PIN lockout (5-minute duration)
-
----
-
-## Recent Changes (Post-Phase 6)
-
-### UI Redesign (commit 0175df8)
-- Restructured ARRIVE flow: log time first, fill location details after
-- Redesigned UI across Header, TransportCard, TransportList, CloseChecklist
-- Moved inline styles to [index.css](src/index.css) for cleaner components
-
-### User Management Dashboard (commit 16fc005)
-- Added "Manage Users" tab to Supervisor Dashboard
-- Full CRUD: add, edit, delete users directly from the UI
-- User form: ID, Name, PIN, Role (tech/supervisor), Site (PHP/RTC), Active status
-- Added Firebase project config files (`.firebaserc`, `firebase.json`, `firestore.indexes.json`)
-- Updated Firestore rules to allow user collection writes
-- Updated seed script with current user data
-
-### App-Wide Autocomplete System (commit d31cb45)
-- **New reusable components:** ClientAutocomplete, DestinationAutocomplete, AutocompleteDropdown
-- **Custom hook:** useAutocomplete for debounced Firestore queries
-- **Client lifecycle management:** active/inactive status with 90-day auto-cleanup
-- **Usage tracking:** lastUsedAt timestamp updates on every client use
-- **Migration script:** migrateExistingClients.js (one-time setup)
-- **Cleanup script:** deactivateStaleClients.js (periodic maintenance)
-- **Documentation:** AUTOCOMPLETE_README.md (full docs), SETUP_AUTOCOMPLETE.md (setup guide)
-- **Firestore indexes:** composite indexes for active + normalizedLabel/lastUsedAt queries
-- **Mobile-optimized:** 16px font (prevents iOS zoom), 44px tap targets, keyboard-aware
-- **DRY architecture:** all autocompletes use shared components and hooks
-
-### DC Paperwork Flow Restructure + Autocomplete Portal Fix (commit 1822c8d)
-- **DC paperwork moved from per-arrive to finish/return step:** No longer prompts after each ARRIVE; instead triggers once when clicking Finish
-- **Arrive reminder modal:** ARRIVE now shows a "DC Paperwork Reminder" confirmation before logging arrival time
-- **DC Paperwork modal options:** Collected / N/A / Other (with required note)
-- **Firestore fields:** `dcPaperworkStatus` and `dcPaperworkOtherNote` saved to transport document on return
-- **Firestore rules updated:** Enforce `dcPaperworkStatus` must be set when status changes to `returned` or `closed`
-- **Close Checklist:** Displays DC paperwork status as a green confirmation card
-- **AutocompleteDropdown portal rendering:** Now uses `createPortal(document.body)` to escape parent `overflow` constraints
-- **Portal positioning:** Uses `getBoundingClientRect()` on inputRef, updates on scroll/resize events
-- **CSS fix:** `.glass-card` changed from `backdrop-filter: blur(8px)` to `overflow: visible` to support dropdown visibility
-- **User prop passed to TransportCard** from App.jsx
-
-### Auto-Add Destination on Autocomplete Selection (commit d7ddc51)
-- **Destination autocomplete now auto-adds on selection:** Selecting a suggestion immediately adds it to the transport (matches client autocomplete behavior)
-- No need to click "+ Add Destination" after selecting a suggestion
+| File | Purpose |
+|------|---------|
+| `firebase.json` | Firebase config — Firestore rules/indexes paths, hosting config (public: dist, SPA rewrite) |
+| `.firebaserc` | Firebase project alias (default: `sprc-tx-l`) |
+| `firestore.rules` | Security rules (see below) |
+| `firestore.indexes.json` | Composite indexes for client autocomplete queries |
+| `vite.config.js` | Standard Vite + React config |
+| `package.json` | Dependencies and npm scripts |
 
 ---
 
-## Deployment
+## Firestore Data Model
 
-- **Platform:** Firebase Hosting (project ID: `sprc-tx-l`)
-- **Build:** `npm run build` → outputs to `dist/`
-- **Deploy:** `npx firebase-tools deploy --only hosting` (requires `firebase login` first)
-- **Local dev:** `npm run dev`
-- **Scripts:**
-  - `npm run seed` — Reset users collection with test data
-  - `npm run migrate-clients` — One-time migration to add active/lastUsedAt fields
-  - `npm run cleanup-clients` — Deactivate clients unused for 90+ days
-- **First-time setup:**
-  1. `npm install firebase-admin` (for cleanup scripts)
-  2. `firebase deploy --only firestore:indexes` (deploy composite indexes)
-  3. `npm run migrate-clients` (if you have existing clients)
-  4. Set up periodic cleanup (cron or Cloud Function)
+### `users` collection
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Display name |
+| `pin` | string | 4-digit login PIN |
+| `role` | string | `tech` or `supervisor` |
+| `site` | string | `PHP` or `RTC` |
+| `active` | boolean | Can this user log in? |
+
+### `transports` collection
+| Field | Type | Description |
+|-------|------|-------------|
+| `site` | string | `PHP` or `RTC` (from user profile) |
+| `createdByUserId` | string | User doc ID |
+| `createdByName` | string | User display name |
+| `status` | string | `open` → `arrived` → `returned` → `closed` |
+| `departedAt` | timestamp | When transport started |
+| `returnedAt` | timestamp | When Finish TX was submitted |
+| `closedAt` | timestamp | When Close Checklist completed |
+| `clients` | array of strings | Client names |
+| `reasons` | array of strings | Selected reason labels |
+| `destinations` | array of objects | `{name, address}` for each destination |
+| `stops` | array of objects | `{arrivedAt}` — one entry per ARRIVE tap |
+| `dcPaperworkStatus` | string | `collected`, `na`, or `other` (set at Finish) |
+| `dcPaperworkOtherNote` | string | Required note when status is `other` |
+| `notes` | string | Freeform notes |
+| `createdAt` | timestamp | Auto-set |
+| `updatedAt` | timestamp | Auto-set on every save |
+
+### `clients` collection
+| Field | Type | Description |
+|-------|------|-------------|
+| `label` | string | Display name (as entered) |
+| `normalizedLabel` | string | Lowercase, trimmed, collapsed spaces (used for search) |
+| `active` | boolean | Shown in autocomplete when true. Set false after 90 days unused. |
+| `lastUsedAt` | timestamp | Updated every time client is added to a transport |
+| `createdAt` | timestamp | First time this client was entered |
+
+### `destinations` collection
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Location name (optional) |
+| `address` | string | Street address |
+| `normalizedName` | string | Lowercase for search |
+| `normalizedAddress` | string | Lowercase for search and dedup (also used as doc ID) |
+| `createdAt` | timestamp | First time this destination was entered |
+
+### Firestore Indexes
+- `clients`: composite index on `active` (ASC) + `normalizedLabel` (ASC) — for autocomplete
+- `clients`: composite index on `active` (ASC) + `lastUsedAt` (ASC) — for cleanup script
 
 ---
 
-## Known Issues / Future Work
+## Firestore Security Rules
 
-1. **Autocomplete scalability** — Now resolved with Firestore range queries (no client-side filtering). Limited to 5 results per query for performance.
-2. **Client cleanup automation** — Periodic cleanup script created but needs deployment as Cloud Function or cron job for full automation.
-3. **Push notifications** — Skipped; requires Cloud Functions / paid Firebase plan.
-4. **Data model note** — Plan spec had `stops[]` with destination info. Implementation uses separate `destinations[]` and `stops[]` arrays. Functionally equivalent.
-5. **Firestore rules** — Currently open (allow read/write: true) since app uses PIN auth, not Firebase Auth. Security relies on client-side enforcement.
+The app uses **PIN auth, not Firebase Auth**, so `request.auth` is always null. Rules are permissive with field-level validation:
 
-## Future Enhancements
+- **users, clients, destinations** — Open read/write
+- **transports — create:** Validates required fields exist, status must be in allowed values, site must be PHP or RTC
+- **transports — update:** Prevents changing `createdByUserId`, `createdByName`, `site`. When status changes to `returned` or `closed`, requires `dcPaperworkStatus` to be set (must be `collected`, `na`, or `other`; if `other`, `dcPaperworkOtherNote` must be a non-empty string).
+- **transports — delete:** Open (should be supervisor-only in production)
 
-- Add "Recently used" section at top of client autocomplete
-- Add client usage count badge in suggestions
-- Add "Show inactive clients" toggle for supervisors
-- Add client merge functionality for duplicates
-- Add reactivation notification when inactive client is used
-- Add bulk cleanup tools in Supervisor Dashboard
+---
+
+## Development & Deployment
+
+```bash
+# Local development
+npm run dev
+
+# Build for production
+npm run build          # outputs to dist/
+
+# Deploy everything (hosting + firestore rules)
+npx firebase deploy
+
+# Deploy just hosting
+npx firebase deploy --only hosting
+
+# Deploy just firestore rules
+npx firebase deploy --only firestore:rules
+
+# Utility scripts
+npm run seed              # Reset users to test data
+npm run migrate-clients   # One-time: add active/lastUsedAt to existing clients
+npm run cleanup-clients   # Deactivate clients unused 90+ days (needs serviceAccountKey.json)
+```
+
+### Dependencies
+- `firebase` ^12.9.0
+- `react` ^19.2.0 / `react-dom` ^19.2.0
+- `xlsx` ^0.18.5
+- Dev: Vite 7, ESLint 9
+
+---
+
+## Commit History (Newest First)
+
+| Commit | Description |
+|--------|-------------|
+| `985a6fa` | Update plan.md |
+| `d7ddc51` | Auto-add destination on autocomplete selection (match client behavior) |
+| `1822c8d` | Restructure DC paperwork flow (moved to Finish step), autocomplete portal fix, arrive reminder modal |
+| `d31cb45` | Implement autocomplete system with reusable components, useAutocomplete hook, 90-day client lifecycle |
+| `1995765` | Update plan.md |
+| `16fc005` | Add Firebase project config, user management dashboard (CRUD in supervisor view) |
+| `0175df8` | UI redesign, restructure destinations/ARRIVE flow |
+| `34b675c` | Restructure ARRIVE flow: log time first, fill location after |
+| `5afd2af` | Phase 6: Security rules, auto-lock, deployment config |
+| `63a3f54` | Phases 3-5: Suggestions, overdue tracking, supervisor dashboard |
+| `6f75051` | Phase 2: Multi-stop workflow, DC checks, close checklist |
+| `1437b19` | Firestore transports with role-based access |
+| `b0af371` | Add seed script |
+| `1799b80` | Phase 1: Firestore PIN login with lockout |
+
+---
+
+## Known Limitations
+
+1. **No server-side auth** — PIN auth is client-side only. Anyone with the Firestore project ID could read/write data directly. For production hardening, would need Firebase Auth (anonymous or email) with custom claims for role enforcement.
+2. **No push notifications** — Requires Cloud Functions (paid Firebase plan).
+3. **Client cleanup is manual** — `npm run cleanup-clients` must be run manually or set up as a cron/Cloud Function.
+4. **TransportList backwards compatibility** — Still handles legacy `stops[]` array format (with destination info embedded in stops) from earlier data model.
+
+---
+
+## Possible Future Work
+
+- Push notifications for overdue transports (needs Cloud Functions)
+- Server-side auth hardening (Firebase Auth + custom claims)
+- Automated client cleanup via Cloud Function
+- "Recently used" section in client autocomplete
+- Client merge tool for duplicates
+- Bulk management tools in supervisor dashboard
