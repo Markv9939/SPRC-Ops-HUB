@@ -1,32 +1,22 @@
 import { useState } from 'react'
 
-function DCCheckModal({ onComplete, onCancel }) {
-  const [selectedOption, setSelectedOption] = useState('')
-  const [note, setNote] = useState('')
-  const [error, setError] = useState('')
+function DCPaperworkModal({ onComplete, onCancel }) {
+  const [selected, setSelected] = useState('')
+  const [otherNote, setOtherNote] = useState('')
 
-  const dcOptions = [
-    'All signed',
-    'Missing signature',
-    'Incomplete',
-    'Other'
+  const options = [
+    { value: 'collected', label: 'Collected' },
+    { value: 'na', label: 'N/A' },
+    { value: 'other', label: 'Other' }
   ]
 
-  const handleSubmit = () => {
-    if (!selectedOption) {
-      setError('Please select an option')
-      return
-    }
+  const isValid = selected && (selected !== 'other' || otherNote.trim())
 
-    if (selectedOption === 'Other' && !note.trim()) {
-      setError('Please provide a note for "Other"')
-      return
-    }
-
+  const handleContinue = () => {
+    if (!isValid) return
     onComplete({
-      completed: true,
-      option: selectedOption,
-      note: note.trim() || null
+      status: selected,
+      otherNote: selected === 'other' ? otherNote.trim() : ''
     })
   }
 
@@ -58,55 +48,44 @@ function DCCheckModal({ onComplete, onCancel }) {
           color: '#333',
           textAlign: 'center'
         }}>
-          DC Paperwork Check
+          DC paperwork status
         </h2>
 
         <div style={{ marginBottom: '20px' }}>
-          <label style={{
-            fontSize: '13px',
-            color: '#888',
-            display: 'block',
-            marginBottom: '10px'
-          }}>
-            Status *
-          </label>
           <div style={{
             display: 'flex',
             flexDirection: 'column',
             gap: '8px'
           }}>
-            {dcOptions.map((option) => (
+            {options.map((opt) => (
               <button
-                key={option}
-                onClick={() => {
-                  setSelectedOption(option)
-                  setError('')
-                }}
+                key={opt.value}
+                onClick={() => setSelected(opt.value)}
                 style={{
                   padding: '12px 16px',
                   borderRadius: '8px',
                   fontSize: '14px',
                   cursor: 'pointer',
-                  border: selectedOption === option
+                  border: selected === opt.value
                     ? '2px solid #C94A3F'
                     : '2px solid #ddd',
-                  backgroundColor: selectedOption === option
+                  backgroundColor: selected === opt.value
                     ? '#FDE8E7'
                     : 'white',
-                  color: selectedOption === option
+                  color: selected === opt.value
                     ? '#C94A3F'
                     : '#333',
-                  fontWeight: selectedOption === option ? 'bold' : 'normal',
+                  fontWeight: selected === opt.value ? 'bold' : 'normal',
                   textAlign: 'left'
                 }}
               >
-                {option}
+                {opt.label}
               </button>
             ))}
           </div>
         </div>
 
-        {selectedOption === 'Other' && (
+        {selected === 'other' && (
           <div style={{ marginBottom: '20px' }}>
             <label style={{
               fontSize: '13px',
@@ -114,15 +93,12 @@ function DCCheckModal({ onComplete, onCancel }) {
               display: 'block',
               marginBottom: '6px'
             }}>
-              Note (required for Other) *
+              Note (required) *
             </label>
             <textarea
-              value={note}
-              onChange={(e) => {
-                setNote(e.target.value)
-                setError('')
-              }}
-              placeholder="Explain the issue..."
+              value={otherNote}
+              onChange={(e) => setOtherNote(e.target.value)}
+              placeholder="Explain..."
               rows={3}
               style={{
                 width: '100%',
@@ -137,17 +113,6 @@ function DCCheckModal({ onComplete, onCancel }) {
               }}
             />
           </div>
-        )}
-
-        {error && (
-          <p style={{
-            color: '#C94A3F',
-            fontSize: '13px',
-            marginBottom: '16px',
-            textAlign: 'center'
-          }}>
-            {error}
-          </p>
         )}
 
         <div style={{
@@ -171,20 +136,22 @@ function DCCheckModal({ onComplete, onCancel }) {
             Cancel
           </button>
           <button
-            onClick={handleSubmit}
+            onClick={handleContinue}
+            disabled={!isValid}
             style={{
               flex: 1,
               padding: '14px',
-              backgroundColor: '#C94A3F',
-              color: 'white',
+              backgroundColor: isValid ? '#C94A3F' : '#e8e8e8',
+              color: isValid ? 'white' : '#999',
               border: 'none',
               borderRadius: '10px',
               fontSize: '16px',
               fontWeight: 'bold',
-              cursor: 'pointer'
+              cursor: isValid ? 'pointer' : 'not-allowed',
+              opacity: isValid ? 1 : 0.6
             }}
           >
-            Save
+            Continue
           </button>
         </div>
       </div>
@@ -192,4 +159,4 @@ function DCCheckModal({ onComplete, onCancel }) {
   )
 }
 
-export default DCCheckModal
+export default DCPaperworkModal

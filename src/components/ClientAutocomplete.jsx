@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { db } from '../firebase'
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore'
 import useAutocomplete from '../hooks/useAutocomplete'
@@ -14,6 +14,7 @@ import AutocompleteDropdown from './AutocompleteDropdown'
  */
 function ClientAutocomplete({ onAddClient, existingClients = [], transportId }) {
   const [inputValue, setInputValue] = useState('')
+  const inputRef = useRef(null)
   const { suggestions, isVisible, search, select, hide, show } = useAutocomplete(
     'clients',
     'normalizedLabel',
@@ -93,45 +94,44 @@ function ClientAutocomplete({ onAddClient, existingClients = [], transportId }) 
   }
 
   return (
-    <div style={{ position: 'relative' }}>
-      <div style={{ display: 'flex', gap: '8px' }}>
-        <input
-          className="input"
-          type="text"
-          value={inputValue}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          placeholder="Add client name..."
-          style={{
-            flex: 1,
-            fontSize: '16px', // Prevent zoom on iOS
-            minHeight: '44px' // Mobile tap target
-          }}
-        />
-        <button
-          className="btn btn-finish"
-          onClick={() => addClient(inputValue)}
-          style={{
-            padding: '10px 18px',
-            fontSize: '14px',
-            minHeight: '44px', // Mobile tap target
-            minWidth: '90px'
-          }}
-        >
-          + Add
-        </button>
-      </div>
-
+    <div style={{ display: 'flex', gap: '8px' }}>
+      <input
+        ref={inputRef}
+        className="input"
+        type="text"
+        value={inputValue}
+        onChange={handleInputChange}
+        onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        placeholder="Add client name..."
+        style={{
+          flex: 1,
+          fontSize: '16px', // Prevent zoom on iOS
+          minHeight: '44px' // Mobile tap target
+        }}
+      />
       <AutocompleteDropdown
         suggestions={filteredSuggestions}
         isVisible={isVisible && filteredSuggestions.length > 0}
         onSelect={handleSuggestionSelect}
+        inputRef={inputRef}
         renderItem={(suggestion) => (
           <span style={{ fontWeight: 500 }}>{suggestion.label}</span>
         )}
       />
+      <button
+        className="btn btn-finish"
+        onClick={() => addClient(inputValue)}
+        style={{
+          padding: '10px 18px',
+          fontSize: '14px',
+          minHeight: '44px', // Mobile tap target
+          minWidth: '90px'
+        }}
+      >
+        + Add
+      </button>
     </div>
   )
 }

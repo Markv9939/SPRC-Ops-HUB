@@ -72,7 +72,21 @@ service cloud.firestore {
       request.resource.data.createdByUserId == resource.data.createdByUserId &&
       request.resource.data.createdByName == resource.data.createdByName &&
       // Prevent changing the site
-      request.resource.data.site == resource.data.site;
+      request.resource.data.site == resource.data.site &&
+      // When setting status to returned or closed, require dcPaperworkStatus
+      (
+        !(request.resource.data.status in ['returned', 'closed'])
+        || (
+          request.resource.data.keys().hasAny(['dcPaperworkStatus'])
+          && request.resource.data.dcPaperworkStatus in ['collected', 'na', 'other']
+          && (
+            request.resource.data.dcPaperworkStatus != 'other'
+            || (request.resource.data.keys().hasAny(['dcPaperworkOtherNote'])
+                && request.resource.data.dcPaperworkOtherNote is string
+                && request.resource.data.dcPaperworkOtherNote.size() > 0)
+          )
+        )
+      );
 
       // Delete: Open (client-side role enforcement)
       // In production, this should be restricted to supervisors via custom claims

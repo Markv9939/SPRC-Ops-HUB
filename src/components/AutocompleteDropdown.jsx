@@ -1,11 +1,38 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 
 /**
  * Reusable autocomplete dropdown component
- * Positioned below input with z-index: 1000 to overlay all content
+ * Renders via portal at document.body to escape all parent overflow constraints
+ * Positions itself using getBoundingClientRect() on the passed inputRef
  */
-function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, loading }) {
+function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, loading, inputRef }) {
   const dropdownRef = useRef(null)
+  const [position, setPosition] = useState({ top: 0, left: 0, width: 0 })
+
+  const updatePosition = useCallback(() => {
+    if (inputRef?.current) {
+      const rect = inputRef.current.getBoundingClientRect()
+      setPosition({
+        top: rect.bottom + window.scrollY + 2,
+        left: rect.left + window.scrollX,
+        width: rect.width
+      })
+    }
+  }, [inputRef])
+
+  // Update position when visible or suggestions change
+  useEffect(() => {
+    if (!isVisible) return
+    updatePosition()
+
+    window.addEventListener('scroll', updatePosition, true)
+    window.addEventListener('resize', updatePosition)
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true)
+      window.removeEventListener('resize', updatePosition)
+    }
+  }, [isVisible, suggestions, updatePosition])
 
   // Scroll to top when suggestions change
   useEffect(() => {
@@ -18,21 +45,20 @@ function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, lo
     return null
   }
 
-  return (
+  return createPortal(
     <div
       ref={dropdownRef}
       className="autocomplete-dropdown"
       style={{
         position: 'absolute',
-        top: '100%',
-        left: 0,
-        right: 0,
+        top: position.top,
+        left: position.left,
+        width: position.width,
         background: 'white',
         border: '2px solid #eee',
         borderRadius: '0 0 var(--radius-sm) var(--radius-sm)',
-        marginTop: '2px',
         boxShadow: 'var(--shadow-lg)',
-        zIndex: 1000,
+        zIndex: 9999,
         maxHeight: '240px',
         overflowY: 'auto',
         overflowX: 'hidden'
@@ -77,7 +103,8 @@ function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, lo
           {renderItem(suggestion)}
         </div>
       ))}
-    </div>
+    </div>,
+    document.body
   )
 }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { db } from '../firebase'
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore'
 import AutocompleteDropdown from './AutocompleteDropdown'
@@ -17,6 +17,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const addressRef = useRef(null)
   let debounceTimer = null
 
   const normalize = (text) => text.toLowerCase().trim().replace(/\s+/g, ' ')
@@ -151,7 +152,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
   }
 
   return (
-    <div style={{ position: 'relative', marginTop: existingDestinations.length > 0 ? '10px' : '0' }}>
+    <div style={{ marginTop: existingDestinations.length > 0 ? '10px' : '0' }}>
       <input
         className="input"
         type="text"
@@ -169,6 +170,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
         }}
       />
       <input
+        ref={addressRef}
         className="input"
         type="text"
         value={addressInput}
@@ -191,6 +193,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
         isVisible={showSuggestions}
         onSelect={selectSuggestion}
         loading={isLoading}
+        inputRef={addressRef}
         renderItem={(suggestion) => (
           <div style={{ width: '100%' }}>
             <div style={{

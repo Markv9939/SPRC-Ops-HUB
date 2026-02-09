@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { doc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, setDoc, orderBy, limit } from 'firebase/firestore'
-import DCCheckModal from './DCCheckModal'
+import DCPaperworkModal from './DCCheckModal'
 import ClientAutocomplete from './ClientAutocomplete'
 import DestinationAutocomplete from './DestinationAutocomplete'
 
-function TransportCard({ transportId, onReturn, onClose }) {
+function TransportCard({ transportId, user, onReturn, onClose }) {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('open')
   const [departedAt, setDepartedAt] = useState(null)
@@ -14,8 +14,10 @@ function TransportCard({ transportId, onReturn, onClose }) {
   const [stops, setStops] = useState([])
   const [destinations, setDestinations] = useState([])
   const [notes, setNotes] = useState('')
-  const [showDCCheck, setShowDCCheck] = useState(false)
-  const [pendingStopIndex, setPendingStopIndex] = useState(null)
+  const [showDCPaperwork, setShowDCPaperwork] = useState(false)
+  const [showArriveReminder, setShowArriveReminder] = useState(false)
+  const [dcPaperworkStatus, setDcPaperworkStatus] = useState(null)
+  const [dcPaperworkOtherNote, setDcPaperworkOtherNote] = useState('')
 
   const reasonOptions = [
     'Medical X appointment',
@@ -42,6 +44,8 @@ function TransportCard({ transportId, onReturn, onClose }) {
           setStops(d.stops || [])
           setDestinations(d.destinations || [])
           setNotes(d.notes || '')
+          setDcPaperworkStatus(d.dcPaperworkStatus || null)
+          setDcPaperworkOtherNote(d.dcPaperworkOtherNote || '')
         }
       } catch (err) { console.error('Error loading transport:', err) }
       finally { setLoading(false) }
@@ -117,20 +121,18 @@ function TransportCard({ transportId, onReturn, onClose }) {
     save({ destinations: updated })
   }
 
-  // --- arrive (logs time, triggers DC check) ---
+  // --- arrive (logs time, shows DC reminder) ---
   const handleArrive = () => {
-    const stop = { arrivedAt: new Date().toISOString(), dcCheck: null, note: '' }
-    const updated = [...stops, stop]
-    setStops(updated)
-    setPendingStopIndex(updated.length - 1)
-    setShowDCCheck(true)
+    setShowArriveReminder(true)
   }
 
-  const handleDCComplete = async (dc) => {
-    const updated = [...stops]
-    updated[pendingStopIndex].dcCheck = dc
-    setStops(updated); setShowDCCheck(false); setPendingStopIndex(null); setStatus('arrived')
-    await save({ stops: updated, status: 'arrived' })
+  const handleArriveConfirm = () => {
+    setShowArriveReminder(false)
+    const stop = { arrivedAt: new Date().toISOString() }
+    const updated = [...stops, stop]
+    setStops(updated)
+    setStatus('arrived')
+    save({ stops: updated, status: 'arrived' })
   }
 
   // --- finish ---
@@ -148,10 +150,30 @@ function TransportCard({ transportId, onReturn, onClose }) {
     return m.join(', ')
   }
 
-  const handleFinish = async () => {
+  const handleFinish = () => {
     if (!canFinish) { alert('Missing: ' + missingMsg()); return }
-    await save({ status: 'returned', returnedAt: serverTimestamp(), destinations })
+    setShowDCPaperwork(true)
+  }
+
+  const handleDCPaperworkComplete = async (result) => {
+    setShowDCPaperwork(false)
+    setDcPaperworkStatus(result.status)
+    setDcPaperworkOtherNote(result.otherNote || '')
+    await save({
+      status: 'returned',
+      returnedAt: serverTimestamp(),
+      destinations,
+      dcPaperworkStatus: result.status,
+      dcPaperworkOtherNote: result.otherNote || ''
+    })
     onReturn()
+  }
+
+  const dcStatusLabel = (s) => {
+    if (s === 'collected') return 'Collected'
+    if (s === 'na') return 'N/A'
+    if (s === 'other') return 'Other'
+    return s
   }
 
   if (loading) {
@@ -198,11 +220,21 @@ function TransportCard({ transportId, onReturn, onClose }) {
                   {new Date(s.arrivedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
-              {s.dcCheck && (
-                <span className="badge badge-arrived">{s.dcCheck.option}</span>
-              )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* DC Paperwork Status (shown after return) */}
+      {dcPaperworkStatus && (
+        <div className="glass-card animate-in" style={{ marginBottom: '16px' }}>
+          <div style={{ fontSize: '14px', color: '#333' }}>
+            <strong>DC paperwork:</strong>{' '}
+            {dcStatusLabel(dcPaperworkStatus)}
+            {dcPaperworkStatus === 'other' && dcPaperworkOtherNote && (
+              <span> — {dcPaperworkOtherNote}</span>
+            )}
+          </div>
         </div>
       )}
 
@@ -289,11 +321,89 @@ function TransportCard({ transportId, onReturn, onClose }) {
         </p>
       )}
 
-      {/* DC Check Modal */}
-      {showDCCheck && (
-        <DCCheckModal
-          onComplete={handleDCComplete}
-          onCancel={() => { setStops(stops.slice(0, -1)); setShowDCCheck(false); setPendingStopIndex(null) }}
+      {/* Arrive DC Reminder Modal */}
+      {showArriveReminder && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '20px'
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '16px',
+            padding: '24px',
+            maxWidth: '400px',
+            width: '100%',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
+          }}>
+            <h2 style={{
+              margin: '0 0 16px 0',
+              fontSize: '20px',
+              color: '#333',
+              textAlign: 'center'
+            }}>
+              DC Paperwork Reminder
+            </h2>
+            <p style={{
+              fontSize: '15px',
+              color: '#555',
+              textAlign: 'center',
+              marginBottom: '24px',
+              lineHeight: 1.5
+            }}>
+              Make sure to remind the client about DC paperwork
+            </p>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => setShowArriveReminder(false)}
+                style={{
+                  flex: 1,
+                  padding: '14px',
+                  backgroundColor: '#e8e8e8',
+                  color: '#666',
+                  border: 'none',
+                  borderRadius: '10px',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleArriveConfirm}
+                style={{
+                  flex: 1,
+                  padding: '14px',
+                  backgroundColor: '#C94A3F',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '10px',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer'
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DC Paperwork Modal */}
+      {showDCPaperwork && (
+        <DCPaperworkModal
+          onComplete={handleDCPaperworkComplete}
+          onCancel={() => setShowDCPaperwork(false)}
         />
       )}
     </div>

@@ -123,12 +123,12 @@ body {
 /* --- Glass card --- */
 .glass-card {
   background: var(--card);
-  backdrop-filter: blur(8px);
   border: 1px solid var(--card-border);
   border-radius: var(--radius);
   padding: 20px;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s, transform 0.15s;
+  overflow: visible;
 }
 
 .glass-card:hover {

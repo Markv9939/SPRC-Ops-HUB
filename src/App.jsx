@@ -156,6 +156,7 @@ function App() {
         <Header userName={user.name} onLogout={handleLogout} />
         <TransportCard
           transportId={currentTransportId}
+          user={user}
           onReturn={handleReturn}
           onClose={handleCloseTransportCard}
         />

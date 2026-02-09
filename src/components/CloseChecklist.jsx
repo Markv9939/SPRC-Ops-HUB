@@ -178,6 +178,39 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
               </div>
             </div>
           </div>
+
+          {transport?.dcPaperworkStatus && (
+            <div style={{
+              padding: '16px',
+              borderRadius: '10px',
+              border: '2px solid #4CAF50',
+              backgroundColor: '#E8F5E9'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <span style={{ fontSize: '20px' }}>✓</span>
+                <div>
+                  <div style={{
+                    fontWeight: 'bold',
+                    color: '#333',
+                    marginBottom: '4px'
+                  }}>
+                    DC paperwork
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#666' }}>
+                    {transport.dcPaperworkStatus === 'collected' && 'Collected'}
+                    {transport.dcPaperworkStatus === 'na' && 'N/A'}
+                    {transport.dcPaperworkStatus === 'other' && (
+                      <>Other{transport.dcPaperworkOtherNote ? ` — ${transport.dcPaperworkOtherNote}` : ''}</>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {errors.length > 0 && (
