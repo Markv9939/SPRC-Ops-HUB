@@ -345,22 +345,13 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
             boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
           }}>
             <h2 style={{
-              margin: '0 0 16px 0',
+              margin: '0 0 24px 0',
               fontSize: '20px',
-              color: '#333',
+              color: '#C94A3F',
               textAlign: 'center'
             }}>
-              DC Paperwork Reminder
+              REMIND THE CLIENT ABOUT DC PAPERWORK
             </h2>
-            <p style={{
-              fontSize: '15px',
-              color: '#555',
-              textAlign: 'center',
-              marginBottom: '24px',
-              lineHeight: 1.5
-            }}>
-              Make sure to remind the client about DC paperwork
-            </p>
             <div style={{ display: 'flex', gap: '10px' }}>
               <button
                 onClick={() => setShowArriveReminder(false)}
