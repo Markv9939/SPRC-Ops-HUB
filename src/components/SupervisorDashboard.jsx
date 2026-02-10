@@ -2,9 +2,11 @@ import { useState, useEffect, useMemo } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore'
 import * as XLSX from 'xlsx'
+import SupervisorEocPanel from './SupervisorEocPanel'
+import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 
 function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
-  const [activeTab, setActiveTab] = useState('transports') // 'transports', 'users', or 'dashboard'
+  const [activeTab, setActiveTab] = useState('transports') // 'transports', 'users', 'dashboard', or 'eoc'
   const [transports, setTransports] = useState([])
   const [filteredTransports, setFilteredTransports] = useState([])
 
@@ -29,7 +31,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
   // User Management
   const [users, setUsers] = useState([])
   const [editingUser, setEditingUser] = useState(null)
-  const [userForm, setUserForm] = useState({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true })
+  const [userForm, setUserForm] = useState({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true, locationId: '', shiftId: '', vanId: '' })
 
   useEffect(() => {
     // Set default to current month
@@ -80,7 +82,10 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
         pin: userForm.pin,
         role: userForm.role,
         site: userForm.site,
-        active: userForm.active
+        active: userForm.active,
+        locationId: userForm.locationId || null,
+        shiftId: userForm.shiftId || null,
+        vanId: userForm.vanId || null
       })
       alert('User saved successfully!')
       setEditingUser(null)
@@ -375,7 +380,27 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
         >
           📈 Dashboard
         </button>
+        <button
+          onClick={() => setActiveTab('eoc')}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: activeTab === 'eoc' ? '#2196F3' : 'transparent',
+            color: activeTab === 'eoc' ? 'white' : '#666',
+            border: 'none',
+            borderBottom: activeTab === 'eoc' ? '3px solid #2196F3' : 'none',
+            borderRadius: '8px 8px 0 0',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            marginBottom: '-2px'
+          }}
+        >
+          🔧 EOC
+        </button>
       </div>
+
+      {/* EOC Tab */}
+      {activeTab === 'eoc' && <SupervisorEocPanel />}
 
       {/* User Management Tab */}
       {activeTab === 'users' && (
@@ -536,6 +561,66 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                     >
                       <option value="true">Active</option>
                       <option value="false">Inactive</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                      EOC Location
+                    </label>
+                    <select
+                      value={userForm.locationId || ''}
+                      onChange={(e) => setUserForm({ ...userForm, locationId: e.target.value })}
+                      style={{
+                        width: '100%',
+                        padding: '8px',
+                        border: '2px solid #eee',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        boxSizing: 'border-box'
+                      }}
+                    >
+                      <option value="">None</option>
+                      {LOCATIONS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                      Shift
+                    </label>
+                    <select
+                      value={userForm.shiftId || ''}
+                      onChange={(e) => setUserForm({ ...userForm, shiftId: e.target.value })}
+                      style={{
+                        width: '100%',
+                        padding: '8px',
+                        border: '2px solid #eee',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        boxSizing: 'border-box'
+                      }}
+                    >
+                      <option value="">None</option>
+                      {SHIFTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                      Van
+                    </label>
+                    <select
+                      value={userForm.vanId || ''}
+                      onChange={(e) => setUserForm({ ...userForm, vanId: e.target.value })}
+                      style={{
+                        width: '100%',
+                        padding: '8px',
+                        border: '2px solid #eee',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        boxSizing: 'border-box'
+                      }}
+                    >
+                      <option value="">None</option>
+                      {VANS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
                     </select>
                   </div>
                 </div>

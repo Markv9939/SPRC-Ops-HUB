@@ -3,31 +3,48 @@ import { db } from './firebase'
 import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore'
 import PinLogin from './components/PinLogin'
 import Header from './components/Header'
-import TransportList from './components/TransportList'
+import BhtHub from './components/BhtHub'
 import TransportCard from './components/TransportCard'
 import CloseChecklist from './components/CloseChecklist'
+import EocChecklist from './components/EocChecklist'
 import SupervisorDashboard from './components/SupervisorDashboard'
 
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
 
 function App() {
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState(() => {
+    const saved = sessionStorage.getItem('bhtUser')
+    if (!saved) return null
+    const lastActivityTime = parseInt(localStorage.getItem('lastActivity') || '0')
+    if (Date.now() - lastActivityTime > AUTO_LOCK_TIMEOUT) {
+      sessionStorage.removeItem('bhtUser')
+      localStorage.removeItem('lastActivity')
+      return null
+    }
+    return JSON.parse(saved)
+  })
   const [page, setPage] = useState('home')
   const [transports, setTransports] = useState([])
   const [currentTransportId, setCurrentTransportId] = useState(null)
+  const [currentAssignmentId, setCurrentAssignmentId] = useState(null)
   const [lastActivity, setLastActivity] = useState(Date.now())
+  const [alertCount, setAlertCount] = useState(0)
 
-  function handleLogin(user) {
-    setUser(user)
+  function handleLogin(userData) {
+    sessionStorage.setItem('bhtUser', JSON.stringify(userData))
+    setUser(userData)
     setPage('home')
     setLastActivity(Date.now())
+    localStorage.setItem('lastActivity', Date.now().toString())
   }
 
   function handleLogout() {
+    sessionStorage.removeItem('bhtUser')
     setUser(null)
     setPage('home')
     setTransports([])
     setCurrentTransportId(null)
+    setCurrentAssignmentId(null)
     localStorage.removeItem('lastActivity')
   }
 
@@ -95,6 +112,37 @@ function App() {
     return () => unsubscribe()
   }, [user])
 
+  // Supervisor alert count listener
+  useEffect(() => {
+    if (!user || user.role !== 'supervisor') return
+
+    const q = query(
+      collection(db, 'supervisorAlerts'),
+      where('read', '==', false)
+    )
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setAlertCount(snapshot.size)
+    })
+
+    return () => unsubscribe()
+  }, [user])
+
+  function handleStartEoc(assignmentId) {
+    setCurrentAssignmentId(assignmentId)
+    setPage('eocForm')
+  }
+
+  function handleEocComplete() {
+    setCurrentAssignmentId(null)
+    setPage('home')
+  }
+
+  function handleEocBack() {
+    setCurrentAssignmentId(null)
+    setPage('home')
+  }
+
   async function handleNewTransport() {
     try {
       const newTransport = {
@@ -153,7 +201,7 @@ function App() {
   if (page === 'transport') {
     return (
       <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} />
+        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
         <TransportCard
           transportId={currentTransportId}
           user={user}
@@ -167,7 +215,7 @@ function App() {
   if (page === 'closeChecklist') {
     return (
       <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} />
+        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
         <CloseChecklist
           transportId={currentTransportId}
           onClose={handleCloseChecklistBack}
@@ -177,11 +225,25 @@ function App() {
     )
   }
 
+  if (page === 'eocForm') {
+    return (
+      <div className="app-bg">
+        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
+        <EocChecklist
+          assignmentId={currentAssignmentId}
+          user={user}
+          onComplete={handleEocComplete}
+          onBack={handleEocBack}
+        />
+      </div>
+    )
+  }
+
   // Show supervisor dashboard for supervisor role
   if (user.role === 'supervisor') {
     return (
       <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} />
+        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
         <SupervisorDashboard
           onNewTransport={handleNewTransport}
           onLogout={handleLogout}
@@ -191,17 +253,19 @@ function App() {
     )
   }
 
-  // Regular tech view
+  // Regular tech view — BHT Hub
   return (
     <div style={{
       minHeight: '100vh',
       backgroundColor: '#f5f5f5'
     }}>
-      <Header userName={user.name} onLogout={handleLogout} />
-      <TransportList
+      <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
+      <BhtHub
+        user={user}
         transports={transports}
         onNewTransport={handleNewTransport}
         onContinueTransport={handleContinueTransport}
+        onStartEoc={handleStartEoc}
       />
     </div>
   )

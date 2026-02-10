@@ -95,7 +95,10 @@ function PinLogin({ onLogin }) {
           id: userDoc.id,
           name: userData.name,
           role: userData.role,
-          site: userData.site
+          site: userData.site,
+          locationId: userData.locationId || null,
+          shiftId: userData.shiftId || null,
+          vanId: userData.vanId || null
         })
       }
     } catch (err) {
@@ -138,7 +141,7 @@ function PinLogin({ onLogin }) {
           color: '#333',
           marginBottom: '5px'
         }}>
-          SPRC TX Log
+          BHT Hub
         </h1>
 
         <p style={{

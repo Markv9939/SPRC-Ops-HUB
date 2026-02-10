@@ -423,3 +423,107 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #aaa; }
+
+/* --- EOC / BHT Hub Styles --- */
+
+.btn-eoc {
+  background: linear-gradient(135deg, var(--blue) 0%, var(--blue-dark) 100%);
+  color: white;
+  box-shadow: 0 4px 14px rgba(33,150,243,0.35);
+}
+
+.btn-eoc:hover {
+  box-shadow: 0 6px 20px rgba(33,150,243,0.45);
+}
+
+.hub-action-btn {
+  padding: 16px 24px;
+}
+
+.hub-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* EOC checklist items */
+.eoc-category-header {
+  font-size: 13px;
+  font-weight: 700;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #eee;
+}
+
+.eoc-item {
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.eoc-item:last-child {
+  border-bottom: none;
+}
+
+.eoc-item-attention {
+  margin-top: 8px;
+  padding: 12px;
+  background: #FFF8E1;
+  border-radius: var(--radius-sm);
+  border: 1px solid #FFE082;
+}
+
+/* Chip variants for EOC */
+.chip-ok {
+  background: #E8F5E9;
+  border-color: var(--green);
+  color: #2E7D32;
+}
+
+.chip-attention {
+  background: #FFF3E0;
+  border-color: var(--orange);
+  color: #E65100;
+}
+
+/* EOC status badges */
+.badge-eoc-pending  { background: #FFF3CD; color: #856404; }
+.badge-eoc-completed { background: #D4EDDA; color: #155724; }
+.badge-eoc-missed   { background: #FFCDD2; color: #B71C1C; }
+
+/* Severity chips */
+.severity-low {
+  background: #E8F5E9;
+  border-color: var(--green);
+  color: #2E7D32;
+}
+
+.severity-medium {
+  background: #FFF3E0;
+  border-color: var(--orange);
+  color: #E65100;
+}
+
+.severity-high {
+  background: #FFEBEE;
+  border-color: #F44336;
+  color: #B71C1C;
+}
+
+/* Alert dot in header */
+.alert-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: #FF5722;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
