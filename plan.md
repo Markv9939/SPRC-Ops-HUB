@@ -249,6 +249,10 @@ npm run cleanup-clients   # Deactivate clients unused 90+ days (needs serviceAcc
   - Solution: Add open-issue and missed-assignment counts plus inline issue resolution from Dashboard.
   - Acceptance: Supervisors can resolve open EOC issues directly from Dashboard.
 
+- **EOC Template Editor** *(DONE)*
+  - Goal: Allow supervisors to view/edit the EOC checklist template from the EOC dashboard.
+  - Solution: Add Template tab with CRUD + seed-from-default, and load template from Firestore in the tech checklist (fallback to defaults if empty).
+
 - **Compliance Tracking System** *(DONE)*
   - Goal: Replace Excel-based compliance tracking with in-app records.
   - Scope: FPCC, TB Test, CPR & First Aid, Food Handlers, Drivers License, Annual Orientation, Performance Evaluation, Misc., Cintas Service Sheet.

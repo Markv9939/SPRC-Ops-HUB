@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp, writeBatch } from 'firebase/firestore'
+import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp, writeBatch, query, orderBy, onSnapshot } from 'firebase/firestore'
 import { EOC_CHECKLIST_TEMPLATE } from '../data/eocConstants'
 
 function EocChecklist({ assignmentId, user, onComplete, onBack }) {
   const [assignment, setAssignment] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [templateItems, setTemplateItems] = useState([])
   const [answers, setAnswers] = useState({})
   // For "Needs Attention" items: { itemId: { description, severity } }
   const [attentionDetails, setAttentionDetails] = useState({})
@@ -38,6 +39,14 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
     loadAssignment()
   }, [assignmentId])
 
+  useEffect(() => {
+    const q = query(collection(db, 'eocChecklistTemplate'), orderBy('order', 'asc'))
+    const unsub = onSnapshot(q, (snap) => {
+      setTemplateItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    })
+    return () => unsub()
+  }, [])
+
   const setAnswer = (itemId, value) => {
     setAnswers(prev => ({ ...prev, [itemId]: value }))
     if (value === 'ok') {
@@ -56,8 +65,14 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
     }))
   }
 
+  const activeTemplate = (() => {
+    if (templateItems.length === 0) return EOC_CHECKLIST_TEMPLATE
+    const filtered = templateItems.filter(i => i.active !== false)
+    return filtered.length > 0 ? filtered : EOC_CHECKLIST_TEMPLATE
+  })()
+
   const validate = () => {
-    for (const item of EOC_CHECKLIST_TEMPLATE) {
+    for (const item of activeTemplate) {
       if (!answers[item.id]) return `Please complete all checklist items (missing: ${item.label})`
       if (answers[item.id] === 'attention') {
         const detail = attentionDetails[item.id]
@@ -83,7 +98,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
       const batch = writeBatch(db)
 
       // Build answers array
-      const answersData = EOC_CHECKLIST_TEMPLATE.map(item => ({
+      const answersData = activeTemplate.map(item => ({
         itemId: item.id,
         label: item.label,
         category: item.category,
@@ -188,14 +203,14 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
   // Group items by category
   const categories = []
   const seen = new Set()
-  for (const item of EOC_CHECKLIST_TEMPLATE) {
+  for (const item of activeTemplate) {
     if (!seen.has(item.category)) {
       seen.add(item.category)
       categories.push(item.category)
     }
   }
 
-  const allAnswered = EOC_CHECKLIST_TEMPLATE.every(item => answers[item.id])
+  const allAnswered = activeTemplate.every(item => answers[item.id])
 
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', paddingBottom: '100px' }}>
@@ -220,7 +235,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
       {categories.map(cat => (
         <div key={cat} style={{ marginBottom: '20px' }}>
           <div className="eoc-category-header">{cat}</div>
-          {EOC_CHECKLIST_TEMPLATE.filter(i => i.category === cat).map(item => (
+          {activeTemplate.filter(i => i.category === cat).map(item => (
             <div key={item.id} className="eoc-item">
               <div style={{ marginBottom: '8px', fontSize: '14px', color: '#e8e8e8' }}>
                 {item.label}

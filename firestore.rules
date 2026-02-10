@@ -38,6 +38,23 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // EOC collections
+    match /eocAssignments/{docId} {
+      allow read, write: if true;
+    }
+    match /eocIssues/{docId} {
+      allow read, write: if true;
+    }
+    match /eocSubmissions/{docId} {
+      allow read, write: if true;
+    }
+    match /supervisorAlerts/{docId} {
+      allow read, write: if true;
+    }
+    match /eocChecklistTemplate/{docId} {
+      allow read, write: if true;
+    }
+
     // Compliance collections (dashboard tracking)
     match /complianceEmployees/{employeeId} {
       allow read, write: if true;

@@ -2,16 +2,18 @@ import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import {
   collection, query, where, orderBy, onSnapshot, getDocs,
-  doc, updateDoc, serverTimestamp
+  doc, updateDoc, serverTimestamp, addDoc, deleteDoc, writeBatch
 } from 'firebase/firestore'
-import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
+import { LOCATIONS, SHIFTS, VANS, EOC_CHECKLIST_TEMPLATE } from '../data/eocConstants'
 
 function SupervisorEocPanel() {
-  const [subTab, setSubTab] = useState('compliance') // compliance | assignments | issues
+  const [subTab, setSubTab] = useState('compliance') // compliance | assignments | issues | template
   const [assignments, setAssignments] = useState([])
   const [issues, setIssues] = useState([])
+  const [templateItems, setTemplateItems] = useState([])
   const [loadingAssignments, setLoadingAssignments] = useState(true)
   const [loadingIssues, setLoadingIssues] = useState(true)
+  const [loadingTemplate, setLoadingTemplate] = useState(true)
 
   // Filters
   const [filterLocation, setFilterLocation] = useState('all')
@@ -19,6 +21,10 @@ function SupervisorEocPanel() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterSeverity, setFilterSeverity] = useState('all')
   const [filterIssueStatus, setFilterIssueStatus] = useState('open')
+
+  // Template editor
+  const [editingTemplateId, setEditingTemplateId] = useState(null)
+  const [templateForm, setTemplateForm] = useState({ category: '', label: '', order: 0, active: true })
 
   // Resolve modal
   const [resolvingIssue, setResolvingIssue] = useState(null)
@@ -40,6 +46,16 @@ function SupervisorEocPanel() {
     const unsub = onSnapshot(q, (snap) => {
       setIssues(snap.docs.map(d => ({ id: d.id, ...d.data() })))
       setLoadingIssues(false)
+    })
+    return unsub
+  }, [])
+
+  // Load template items
+  useEffect(() => {
+    const q = query(collection(db, 'eocChecklistTemplate'), orderBy('order', 'asc'))
+    const unsub = onSnapshot(q, (snap) => {
+      setTemplateItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setLoadingTemplate(false)
     })
     return unsub
   }, [])
@@ -99,6 +115,71 @@ function SupervisorEocPanel() {
     }
   }
 
+  const handleSaveTemplateItem = async () => {
+    if (!templateForm.category.trim() || !templateForm.label.trim()) {
+      alert('Category and label are required')
+      return
+    }
+    const payload = {
+      category: templateForm.category.trim(),
+      label: templateForm.label.trim(),
+      order: Number(templateForm.order) || 0,
+      active: templateForm.active !== false
+    }
+    try {
+      if (editingTemplateId) {
+        await updateDoc(doc(db, 'eocChecklistTemplate', editingTemplateId), payload)
+      } else {
+        await addDoc(collection(db, 'eocChecklistTemplate'), payload)
+      }
+      setEditingTemplateId(null)
+      setTemplateForm({ category: '', label: '', order: 0, active: true })
+    } catch (err) {
+      console.error('Error saving template item:', err)
+      alert('Failed to save template item')
+    }
+  }
+
+  const handleEditTemplateItem = (item) => {
+    setEditingTemplateId(item.id)
+    setTemplateForm({
+      category: item.category || '',
+      label: item.label || '',
+      order: item.order || 0,
+      active: item.active !== false
+    })
+  }
+
+  const handleDeleteTemplateItem = async (id) => {
+    if (!confirm('Delete this checklist item?')) return
+    try {
+      await deleteDoc(doc(db, 'eocChecklistTemplate', id))
+    } catch (err) {
+      console.error('Error deleting template item:', err)
+      alert('Failed to delete template item')
+    }
+  }
+
+  const handleSeedTemplate = async () => {
+    if (!confirm('Seed template from defaults? This will add new items, not replace existing ones.')) return
+    try {
+      const batch = writeBatch(db)
+      EOC_CHECKLIST_TEMPLATE.forEach((item, idx) => {
+        const ref = doc(collection(db, 'eocChecklistTemplate'))
+        batch.set(ref, {
+          category: item.category,
+          label: item.label,
+          order: idx + 1,
+          active: true
+        })
+      })
+      await batch.commit()
+    } catch (err) {
+      console.error('Error seeding template:', err)
+      alert('Failed to seed template')
+    }
+  }
+
   const locationLabel = (id) => LOCATIONS.find(l => l.id === id)?.label || id
   const shiftLabel = (id) => SHIFTS.find(s => s.id === id)?.label || id
   const vanLabel = (id) => VANS.find(v => v.id === id)?.label || id || 'None'
@@ -150,6 +231,9 @@ function SupervisorEocPanel() {
         </button>
         <button style={tabBtnStyle(subTab === 'issues')} onClick={() => setSubTab('issues')}>
           Issues ({issues.filter(i => i.status === 'open').length})
+        </button>
+        <button style={tabBtnStyle(subTab === 'template')} onClick={() => setSubTab('template')}>
+          Template
         </button>
       </div>
 
@@ -355,6 +439,130 @@ function SupervisorEocPanel() {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== TEMPLATE TAB ===== */}
+      {subTab === 'template' && (
+        <div>
+          <p style={{ fontSize: '13px', color: '#8899aa', marginBottom: '16px' }}>
+            Edit the EOC checklist items that techs complete. Changes apply immediately.
+          </p>
+
+          {loadingTemplate ? (
+            <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>Loading...</div>
+          ) : (
+            <>
+              {templateItems.length === 0 && (
+                <div style={{ marginBottom: '12px' }}>
+                  <button onClick={handleSeedTemplate} style={tabBtnStyle(true)}>
+                    Seed From Default Template
+                  </button>
+                </div>
+              )}
+
+              <div style={{
+                backgroundColor: 'rgba(255,255,255,0.05)',
+                borderRadius: '12px',
+                padding: '16px',
+                marginBottom: '16px',
+                border: '1px solid rgba(255,255,255,0.08)'
+              }}>
+                <h4 style={{ margin: '0 0 12px 0', color: '#e8e8e8', fontSize: '14px' }}>
+                  {editingTemplateId ? 'Edit Item' : 'Add Item'}
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', color: '#556677' }}>Category</label>
+                    <input
+                      className="input"
+                      value={templateForm.category}
+                      onChange={e => setTemplateForm({ ...templateForm, category: e.target.value })}
+                      placeholder="Exterior"
+                      style={{ fontSize: '13px' }}
+                    />
+                  </div>
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <label style={{ fontSize: '11px', color: '#556677' }}>Label</label>
+                    <input
+                      className="input"
+                      value={templateForm.label}
+                      onChange={e => setTemplateForm({ ...templateForm, label: e.target.value })}
+                      placeholder="Tire condition and pressure"
+                      style={{ fontSize: '13px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', color: '#556677' }}>Order</label>
+                    <input
+                      className="input"
+                      type="number"
+                      value={templateForm.order}
+                      onChange={e => setTemplateForm({ ...templateForm, order: e.target.value })}
+                      style={{ fontSize: '13px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', color: '#556677', display: 'block' }}>Active</label>
+                    <select
+                      value={templateForm.active ? 'true' : 'false'}
+                      onChange={e => setTemplateForm({ ...templateForm, active: e.target.value === 'true' })}
+                      style={selectStyle}
+                    >
+                      <option value="true">Active</option>
+                      <option value="false">Inactive</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  <button onClick={handleSaveTemplateItem} style={tabBtnStyle(true)}>
+                    {editingTemplateId ? 'Save Changes' : 'Add Item'}
+                  </button>
+                  {editingTemplateId && (
+                    <button
+                      onClick={() => { setEditingTemplateId(null); setTemplateForm({ category: '', label: '', order: 0, active: true }) }}
+                      style={tabBtnStyle(false)}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {templateItems.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: '#556677' }}>
+                  No template items yet.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {templateItems.map(item => (
+                    <div key={item.id} style={{
+                      padding: '12px',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      backgroundColor: 'rgba(255,255,255,0.05)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontWeight: 700, fontSize: '14px' }}>
+                          {item.category} — {item.label}
+                        </span>
+                        <span className="badge" style={{ background: item.active === false ? 'rgba(255,255,255,0.06)' : 'rgba(76,175,80,0.15)', color: '#e8e8e8' }}>
+                          {item.active === false ? 'Inactive' : 'Active'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                        Order: {item.order || 0}
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button onClick={() => handleEditTemplateItem(item)} style={tabBtnStyle(false)}>Edit</button>
+                        <button onClick={() => handleDeleteTemplateItem(item.id)} style={tabBtnStyle(false)}>Delete</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
