@@ -44,6 +44,7 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
   }
 
   const openTransports = transports.filter(t => t.status !== 'closed')
+  const canStartEoc = hasEocProfile && ['pending', 'missed'].includes(currentAssignment?.status)
 
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
@@ -74,9 +75,9 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
       </button>
 
       <button
-        className={`btn hub-action-btn ${hasEocProfile && currentAssignment?.status === 'pending' ? 'btn-eoc' : 'btn-disabled'}`}
-        onClick={() => hasEocProfile && currentAssignment?.status === 'pending' && onStartEoc(currentAssignment.id)}
-        disabled={!hasEocProfile || currentAssignment?.status !== 'pending'}
+        className={`btn hub-action-btn ${canStartEoc ? 'btn-eoc' : 'btn-disabled'}`}
+        onClick={() => canStartEoc && onStartEoc(currentAssignment.id)}
+        disabled={!canStartEoc}
         style={{ width: '100%', fontSize: '18px', marginBottom: '20px', borderRadius: 'var(--radius)' }}
       >
         Complete EOC

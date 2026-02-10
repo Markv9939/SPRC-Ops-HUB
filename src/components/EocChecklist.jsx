@@ -22,7 +22,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           return
         }
         const data = snap.data()
-        if (data.status !== 'pending') {
+        if (data.status !== 'pending' && data.status !== 'missed') {
           setError(`This EOC has already been ${data.status}`)
           setLoading(false)
           return
