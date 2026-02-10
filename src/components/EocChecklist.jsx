@@ -1,16 +1,20 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp, writeBatch, query, orderBy, onSnapshot } from 'firebase/firestore'
-import { EOC_CHECKLIST_TEMPLATE } from '../data/eocConstants'
+import { EOC_CHECKLIST_TEMPLATE, VANS } from '../data/eocConstants'
 
 function EocChecklist({ assignmentId, user, onComplete, onBack }) {
   const [assignment, setAssignment] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [templateItems, setTemplateItems] = useState([])
+  const [staffCompleting, setStaffCompleting] = useState('')
+  const [vehicleName, setVehicleName] = useState('')
+  const [vinNumber, setVinNumber] = useState('')
+  const [odometerReading, setOdometerReading] = useState('')
   const [answers, setAnswers] = useState({})
-  // For "Needs Attention" items: { itemId: { description, severity } }
-  const [attentionDetails, setAttentionDetails] = useState({})
+  // For "Repair" items: { itemId: { description } }
+  const [repairDetails, setRepairDetails] = useState({})
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -28,6 +32,9 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           setLoading(false)
           return
         }
+        const vanLabel = VANS.find(v => v.id === data.vanId)?.label || ''
+        setStaffCompleting(user?.name || '')
+        setVehicleName(vanLabel)
         setAssignment({ id: snap.id, ...data })
       } catch (err) {
         console.error('Error loading assignment:', err)
@@ -50,7 +57,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
   const setAnswer = (itemId, value) => {
     setAnswers(prev => ({ ...prev, [itemId]: value }))
     if (value === 'ok') {
-      setAttentionDetails(prev => {
+      setRepairDetails(prev => {
         const next = { ...prev }
         delete next[itemId]
         return next
@@ -58,10 +65,10 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
     }
   }
 
-  const setAttentionField = (itemId, field, value) => {
-    setAttentionDetails(prev => ({
+  const setRepairField = (itemId, value) => {
+    setRepairDetails(prev => ({
       ...prev,
-      [itemId]: { ...(prev[itemId] || { description: '', severity: 'low' }), [field]: value }
+      [itemId]: { description: value }
     }))
   }
 
@@ -72,12 +79,14 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
   })()
 
   const validate = () => {
+    if (!staffCompleting.trim()) return 'Please enter staff completing EOC'
+    if (!odometerReading.trim()) return 'Please enter odometer reading'
     for (const item of activeTemplate) {
       if (!answers[item.id]) return `Please complete all checklist items (missing: ${item.label})`
-      if (answers[item.id] === 'attention') {
-        const detail = attentionDetails[item.id]
+      if (answers[item.id] === 'repair') {
+        const detail = repairDetails[item.id]
         if (!detail || !detail.description.trim()) {
-          return `Please describe the issue for: ${item.label}`
+          return `Please describe the repair for: ${item.label}`
         }
       }
     }
@@ -103,13 +112,12 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
         label: item.label,
         category: item.category,
         status: answers[item.id],
-        ...(answers[item.id] === 'attention' ? {
-          description: attentionDetails[item.id]?.description || '',
-          severity: attentionDetails[item.id]?.severity || 'low'
+        ...(answers[item.id] === 'repair' ? {
+          description: repairDetails[item.id]?.description || ''
         } : {})
       }))
 
-      const issueItems = answersData.filter(a => a.status === 'attention')
+      const issueItems = answersData.filter(a => a.status === 'repair')
 
       // 1. Create submission doc
       const submissionRef = doc(collection(db, 'eocSubmissions'))
@@ -119,6 +127,10 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
         shiftId: assignment.shiftId,
         vanId: assignment.vanId,
         dueDate: assignment.dueDate,
+        staffCompleting: staffCompleting.trim(),
+        vehicleName: vehicleName.trim(),
+        vinNumber: vinNumber.trim(),
+        odometerReading: odometerReading.trim(),
         answers: answersData,
         issueCount: issueItems.length,
         submittedByUserId: user.id,
@@ -148,7 +160,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           label: issue.label,
           category: issue.category,
           description: issue.description,
-          severity: issue.severity,
+          severity: 'medium',
           status: 'open',
           reportedByUserId: user.id,
           reportedByName: user.name,
@@ -161,7 +173,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           issueId: issueRef.id,
           assignmentId,
           locationId: assignment.locationId,
-          severity: issue.severity,
+          severity: 'medium',
           message: `EOC issue: ${issue.label} — ${issue.description}`,
           techName: user.name,
           read: false,
@@ -232,15 +244,52 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
         </div>
       </div>
 
+      <div className="glass-card" style={{ padding: '14px', marginBottom: '16px' }}>
+        <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>Staff Completing EOC</div>
+        <input
+          className="input"
+          value={staffCompleting}
+          onChange={(e) => setStaffCompleting(e.target.value)}
+          placeholder="Staff name(s)"
+          style={{ marginBottom: '10px' }}
+        />
+        <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>Vehicle Receiving Inspection</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+          <input
+            className="input"
+            value={vehicleName}
+            onChange={(e) => setVehicleName(e.target.value)}
+            placeholder="Vehicle name (e.g., Girls Php Van)"
+          />
+          <input
+            className="input"
+            value={vinNumber}
+            onChange={(e) => setVinNumber(e.target.value)}
+            placeholder="VIN number"
+          />
+          <input
+            className="input"
+            value={odometerReading}
+            onChange={(e) => setOdometerReading(e.target.value)}
+            placeholder="Odometer reading"
+          />
+        </div>
+      </div>
+
       {categories.map(cat => (
         <div key={cat} style={{ marginBottom: '20px' }}>
           <div className="eoc-category-header">{cat}</div>
+          <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: '#8899aa', margin: '6px 0 10px' }}>
+            <span style={{ minWidth: '52px' }}>OK</span>
+            <span style={{ minWidth: '72px' }}>REPAIR</span>
+            <span>If repair, add details</span>
+          </div>
           {activeTemplate.filter(i => i.category === cat).map(item => (
             <div key={item.id} className="eoc-item">
               <div style={{ marginBottom: '8px', fontSize: '14px', color: '#e8e8e8' }}>
                 {item.label}
               </div>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: answers[item.id] === 'attention' ? '10px' : '0' }}>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: answers[item.id] === 'repair' ? '10px' : '0' }}>
                 <button
                   className={`chip ${answers[item.id] === 'ok' ? 'chip-ok' : 'chip-unselected'}`}
                   onClick={() => setAnswer(item.id, 'ok')}
@@ -248,40 +297,32 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
                   OK
                 </button>
                 <button
-                  className={`chip ${answers[item.id] === 'attention' ? 'chip-attention' : 'chip-unselected'}`}
-                  onClick={() => setAnswer(item.id, 'attention')}
+                  className={`chip ${answers[item.id] === 'repair' ? 'chip-attention' : 'chip-unselected'}`}
+                  onClick={() => setAnswer(item.id, 'repair')}
                 >
-                  Needs Attention
+                  Repair
                 </button>
               </div>
 
-              {answers[item.id] === 'attention' && (
+              {answers[item.id] === 'repair' && (
                 <div className="eoc-item-attention">
                   <input
                     className="input"
-                    placeholder="Describe the issue..."
-                    value={attentionDetails[item.id]?.description || ''}
-                    onChange={(e) => setAttentionField(item.id, 'description', e.target.value)}
+                    placeholder="If repair, note changes needed..."
+                    value={repairDetails[item.id]?.description || ''}
+                    onChange={(e) => setRepairField(item.id, e.target.value)}
                     style={{ marginBottom: '8px' }}
                   />
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    {['low', 'medium', 'high'].map(sev => (
-                      <button
-                        key={sev}
-                        className={`chip ${(attentionDetails[item.id]?.severity || 'low') === sev ? `severity-${sev}` : 'chip-unselected'}`}
-                        onClick={() => setAttentionField(item.id, 'severity', sev)}
-                        style={{ textTransform: 'capitalize', fontSize: '12px' }}
-                      >
-                        {sev}
-                      </button>
-                    ))}
-                  </div>
                 </div>
               )}
             </div>
           ))}
         </div>
       ))}
+
+      <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '16px' }}>
+        Checklist must be completed on a weekly basis by staff on the first day of each shift. To be turned in to Supervisor following day.
+      </div>
 
       {error && (
         <div style={{ color: '#C94A3F', fontSize: '13px', marginBottom: '12px', textAlign: 'center' }}>

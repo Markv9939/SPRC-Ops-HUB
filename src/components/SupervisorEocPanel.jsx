@@ -180,6 +180,28 @@ function SupervisorEocPanel() {
     }
   }
 
+  const handleReplaceTemplate = async () => {
+    if (!confirm('Replace template with defaults? This will delete existing items.')) return
+    try {
+      const existing = await getDocs(collection(db, 'eocChecklistTemplate'))
+      const batch = writeBatch(db)
+      existing.docs.forEach(d => batch.delete(d.ref))
+      EOC_CHECKLIST_TEMPLATE.forEach((item, idx) => {
+        const ref = doc(collection(db, 'eocChecklistTemplate'))
+        batch.set(ref, {
+          category: item.category,
+          label: item.label,
+          order: idx + 1,
+          active: true
+        })
+      })
+      await batch.commit()
+    } catch (err) {
+      console.error('Error replacing template:', err)
+      alert('Failed to replace template')
+    }
+  }
+
   const locationLabel = (id) => LOCATIONS.find(l => l.id === id)?.label || id
   const shiftLabel = (id) => SHIFTS.find(s => s.id === id)?.label || id
   const vanLabel = (id) => VANS.find(v => v.id === id)?.label || id || 'None'
@@ -454,13 +476,18 @@ function SupervisorEocPanel() {
             <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>Loading...</div>
           ) : (
             <>
-              {templateItems.length === 0 && (
-                <div style={{ marginBottom: '12px' }}>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                {templateItems.length === 0 && (
                   <button onClick={handleSeedTemplate} style={tabBtnStyle(true)}>
                     Seed From Default Template
                   </button>
-                </div>
-              )}
+                )}
+                {templateItems.length > 0 && (
+                  <button onClick={handleReplaceTemplate} style={tabBtnStyle(true)}>
+                    Replace With Default Template
+                  </button>
+                )}
+              </div>
 
               <div style={{
                 backgroundColor: 'rgba(255,255,255,0.05)',
