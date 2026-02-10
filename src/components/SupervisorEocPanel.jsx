@@ -120,16 +120,17 @@ function SupervisorEocPanel() {
 
   const selectStyle = {
     padding: '6px 10px',
-    border: '2px solid #eee',
+    border: '2px solid rgba(255,255,255,0.1)',
     borderRadius: '6px',
     fontSize: '13px',
-    background: 'white'
+    background: 'rgba(255,255,255,0.06)',
+    color: '#e8e8e8'
   }
 
   const tabBtnStyle = (active) => ({
     padding: '8px 16px',
-    backgroundColor: active ? '#2196F3' : '#f0f0f0',
-    color: active ? 'white' : '#666',
+    backgroundColor: active ? '#E53935' : 'rgba(255,255,255,0.06)',
+    color: active ? 'white' : '#8899aa',
     border: 'none',
     borderRadius: '6px',
     fontSize: '13px',
@@ -173,17 +174,17 @@ function SupervisorEocPanel() {
           </div>
 
           {loadingAssignments ? (
-            <div style={{ textAlign: 'center', padding: '30px', color: '#999' }}>Loading...</div>
+            <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>Loading...</div>
           ) : filteredAssignments.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '30px', color: '#aaa' }}>No assignments found</div>
+            <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>No assignments found</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {filteredAssignments.map(a => (
                 <div key={a.id} style={{
                   padding: '14px',
                   borderRadius: '8px',
-                  border: '1px solid #eee',
-                  backgroundColor: 'white'
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  backgroundColor: 'rgba(255,255,255,0.05)'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontWeight: 700, fontSize: '14px' }}>
@@ -191,7 +192,7 @@ function SupervisorEocPanel() {
                     </span>
                     {statusBadge(a.status)}
                   </div>
-                  <div style={{ fontSize: '13px', color: '#666' }}>
+                  <div style={{ fontSize: '13px', color: '#8899aa' }}>
                     Due: {a.dueDate} &bull; Tech: {a.assignedTechName || 'Unassigned'}
                     {a.vanId ? ` \u00B7 ${vanLabel(a.vanId)}` : ''}
                   </div>
@@ -205,35 +206,35 @@ function SupervisorEocPanel() {
       {/* ===== ASSIGNMENTS TAB ===== */}
       {subTab === 'assignments' && (
         <div>
-          <p style={{ fontSize: '13px', color: '#888', marginBottom: '16px' }}>
+          <p style={{ fontSize: '13px', color: '#8899aa', marginBottom: '16px' }}>
             Manage upcoming assignments — reassign techs or override van assignments.
           </p>
           {loadingAssignments ? (
-            <div style={{ textAlign: 'center', padding: '30px', color: '#999' }}>Loading...</div>
+            <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>Loading...</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {assignments.filter(a => a.status === 'pending').map(a => (
                 <div key={a.id} style={{
                   padding: '14px',
                   borderRadius: '8px',
-                  border: '1px solid #eee',
-                  backgroundColor: 'white'
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  backgroundColor: 'rgba(255,255,255,0.05)'
                 }}>
                   <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '8px' }}>
                     {locationLabel(a.locationId)} — {shiftLabel(a.shiftId)}
                   </div>
-                  <div style={{ fontSize: '13px', color: '#666', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '8px' }}>
                     Due: {a.dueDate}
                   </div>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <div>
-                      <label style={{ fontSize: '11px', color: '#999' }}>Tech</label>
+                      <label style={{ fontSize: '11px', color: '#556677' }}>Tech</label>
                       <div style={{ fontSize: '13px', fontWeight: 600 }}>
                         {a.assignedTechName || 'Unassigned'}
                       </div>
                     </div>
                     <div>
-                      <label style={{ fontSize: '11px', color: '#999', display: 'block' }}>Van</label>
+                      <label style={{ fontSize: '11px', color: '#556677', display: 'block' }}>Van</label>
                       <select
                         value={a.vanId || ''}
                         onChange={e => handleUpdateVan(a.id, e.target.value || null)}
@@ -247,7 +248,7 @@ function SupervisorEocPanel() {
                 </div>
               ))}
               {assignments.filter(a => a.status === 'pending').length === 0 && (
-                <div style={{ textAlign: 'center', padding: '30px', color: '#aaa' }}>
+                <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>
                   No pending assignments
                 </div>
               )}
@@ -278,17 +279,17 @@ function SupervisorEocPanel() {
           </div>
 
           {loadingIssues ? (
-            <div style={{ textAlign: 'center', padding: '30px', color: '#999' }}>Loading...</div>
+            <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>Loading...</div>
           ) : filteredIssues.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '30px', color: '#aaa' }}>No issues found</div>
+            <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>No issues found</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {filteredIssues.map(issue => (
                 <div key={issue.id} style={{
                   padding: '14px',
                   borderRadius: '8px',
-                  border: issue.severity === 'high' ? '2px solid #FF5722' : '1px solid #eee',
-                  backgroundColor: 'white'
+                  border: issue.severity === 'high' ? '2px solid #FF5722' : '1px solid rgba(255,255,255,0.08)',
+                  backgroundColor: 'rgba(255,255,255,0.05)'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontWeight: 700, fontSize: '14px' }}>
@@ -296,10 +297,10 @@ function SupervisorEocPanel() {
                     </span>
                     {severityBadge(issue.severity)}
                   </div>
-                  <div style={{ fontSize: '13px', color: '#666', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '4px' }}>
                     {issue.description}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#999', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
                     {locationLabel(issue.locationId)} &bull; {issue.reportedByName}
                     {issue.vanId ? ` \u00B7 ${vanLabel(issue.vanId)}` : ''}
                   </div>
@@ -327,7 +328,7 @@ function SupervisorEocPanel() {
                         <button
                           onClick={() => { setResolvingIssue(null); setResolveNotes('') }}
                           style={{
-                            padding: '6px 14px', backgroundColor: '#eee', color: '#666',
+                            padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#8899aa',
                             border: 'none', borderRadius: '6px', fontSize: '13px', cursor: 'pointer'
                           }}
                         >
@@ -338,7 +339,7 @@ function SupervisorEocPanel() {
                       <button
                         onClick={() => setResolvingIssue(issue)}
                         style={{
-                          padding: '6px 14px', backgroundColor: '#f0f0f0', color: '#333',
+                          padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8',
                           border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
                           cursor: 'pointer'
                         }}

@@ -166,7 +166,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
 
   if (loading) {
     return (
-      <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>
+      <div style={{ padding: '40px', textAlign: 'center', color: '#556677' }}>
         Loading checklist...
       </div>
     )
@@ -177,7 +177,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
       <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
         <div className="glass-card" style={{ textAlign: 'center', padding: '40px 20px' }}>
           <p style={{ color: '#C94A3F', marginBottom: '16px' }}>{error}</p>
-          <button className="btn" onClick={onBack} style={{ background: '#eee', color: '#333' }}>
+          <button className="btn" onClick={onBack} style={{ background: 'rgba(255,255,255,0.06)', color: '#e8e8e8' }}>
             Back
           </button>
         </div>
@@ -204,14 +204,14 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           onClick={onBack}
           style={{
             background: 'none', border: 'none', fontSize: '24px',
-            cursor: 'pointer', color: '#666', padding: '4px'
+            cursor: 'pointer', color: '#8899aa', padding: '4px'
           }}
         >
           ←
         </button>
         <div>
-          <h2 style={{ margin: 0, fontSize: '18px', color: '#333' }}>EOC Checklist</h2>
-          <div style={{ fontSize: '13px', color: '#888' }}>
+          <h2 style={{ margin: 0, fontSize: '18px', color: '#e8e8e8' }}>EOC Checklist</h2>
+          <div style={{ fontSize: '13px', color: '#8899aa' }}>
             Due: {assignment.dueDate} &bull; {assignment.locationId}
           </div>
         </div>
@@ -222,7 +222,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           <div className="eoc-category-header">{cat}</div>
           {EOC_CHECKLIST_TEMPLATE.filter(i => i.category === cat).map(item => (
             <div key={item.id} className="eoc-item">
-              <div style={{ marginBottom: '8px', fontSize: '14px', color: '#333' }}>
+              <div style={{ marginBottom: '8px', fontSize: '14px', color: '#e8e8e8' }}>
                 {item.label}
               </div>
               <div style={{ display: 'flex', gap: '8px', marginBottom: answers[item.id] === 'attention' ? '10px' : '0' }}>

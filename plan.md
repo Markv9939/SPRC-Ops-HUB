@@ -230,6 +230,36 @@ npm run cleanup-clients   # Deactivate clients unused 90+ days (needs serviceAcc
 - Client merge tool for duplicates
 - Bulk management tools in supervisor dashboard
 
+---
+
+## Upcoming Features & Bugs
+
+- **Supervisor Dashboard Mobile Navigation**
+  - Problem: On small screens, the top tab strip overflows horizontally and hides the EOC tab.
+  - Solution: Replace the tab strip with a mobile-friendly dropdown on narrow viewports while keeping tabs on desktop.
+  - Acceptance: All tabs are accessible without horizontal scrolling on mobile.
+
+- **Default Supervisor Landing Tab**
+  - Problem: Supervisors land on Transports by default.
+  - Solution: Default the active tab to Dashboard on login.
+  - Acceptance: Supervisors see Dashboard content immediately after login.
+
+- **Dashboard EOC Summary + Inline Issue Resolution**
+  - Problem: Dashboard lacks EOC status and requires switching tabs to resolve issues.
+  - Solution: Add open-issue and missed-assignment counts plus inline issue resolution from Dashboard.
+  - Acceptance: Supervisors can resolve open EOC issues directly from Dashboard.
+
+- **Compliance Tracking System**
+  - Goal: Replace Excel-based compliance tracking with in-app records.
+  - Scope: FPCC, TB Test, CPR & First Aid, Food Handlers, Drivers License, Annual Orientation, Performance Evaluation, Misc., Cintas Service Sheet.
+  - Features:
+    - New Compliance tab with filters, CRUD for employees and compliance items.
+    - Dashboard summary of upcoming (30 days) and overdue compliance items.
+    - One-time import from the two Excel workbooks.
+  - Data model:
+    - `complianceEmployees` with name, site, hire date, optional linked user, active flag.
+    - `complianceItems` with employee linkage, category/subtype, last completed, due date, recurrence, and source.
+
 ### Google Places Autocomplete for Destinations
 
 Replace the "Click here to search in Google Maps" link with real-time address autocomplete powered by the Google Places API. Existing Firestore-based suggestions (previously saved destinations) still appear alongside Google results.

@@ -319,7 +319,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
         alignItems: 'center',
         marginBottom: '20px'
       }}>
-        <h2 style={{ margin: 0, color: '#333' }}>Supervisor Dashboard</h2>
+        <h2 style={{ margin: 0, color: '#e8e8e8' }}>Supervisor Dashboard</h2>
       </div>
 
       {/* Tabs */}
@@ -327,76 +327,28 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
         display: 'flex',
         gap: '8px',
         marginBottom: '20px',
-        borderBottom: '2px solid #eee'
+        borderBottom: '2px solid rgba(255,255,255,0.08)'
       }}>
-        <button
-          onClick={() => setActiveTab('transports')}
-          style={{
-            padding: '12px 24px',
-            backgroundColor: activeTab === 'transports' ? '#2196F3' : 'transparent',
-            color: activeTab === 'transports' ? 'white' : '#666',
-            border: 'none',
-            borderBottom: activeTab === 'transports' ? '3px solid #2196F3' : 'none',
-            borderRadius: '8px 8px 0 0',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            marginBottom: '-2px'
-          }}
-        >
-          📊 Transports
-        </button>
-        <button
-          onClick={() => setActiveTab('users')}
-          style={{
-            padding: '12px 24px',
-            backgroundColor: activeTab === 'users' ? '#2196F3' : 'transparent',
-            color: activeTab === 'users' ? 'white' : '#666',
-            border: 'none',
-            borderBottom: activeTab === 'users' ? '3px solid #2196F3' : 'none',
-            borderRadius: '8px 8px 0 0',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            marginBottom: '-2px'
-          }}
-        >
-          👥 Manage Users
-        </button>
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          style={{
-            padding: '12px 24px',
-            backgroundColor: activeTab === 'dashboard' ? '#2196F3' : 'transparent',
-            color: activeTab === 'dashboard' ? 'white' : '#666',
-            border: 'none',
-            borderBottom: activeTab === 'dashboard' ? '3px solid #2196F3' : 'none',
-            borderRadius: '8px 8px 0 0',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            marginBottom: '-2px'
-          }}
-        >
-          📈 Dashboard
-        </button>
-        <button
-          onClick={() => setActiveTab('eoc')}
-          style={{
-            padding: '12px 24px',
-            backgroundColor: activeTab === 'eoc' ? '#2196F3' : 'transparent',
-            color: activeTab === 'eoc' ? 'white' : '#666',
-            border: 'none',
-            borderBottom: activeTab === 'eoc' ? '3px solid #2196F3' : 'none',
-            borderRadius: '8px 8px 0 0',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            marginBottom: '-2px'
-          }}
-        >
-          🔧 EOC
-        </button>
+        {['transports', 'users', 'dashboard', 'eoc'].map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={{
+              padding: '12px 24px',
+              backgroundColor: activeTab === tab ? '#E53935' : 'transparent',
+              color: activeTab === tab ? 'white' : '#8899aa',
+              border: 'none',
+              borderBottom: activeTab === tab ? '3px solid #E53935' : 'none',
+              borderRadius: '8px 8px 0 0',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              marginBottom: '-2px'
+            }}
+          >
+            {tab === 'transports' ? '📊 Transports' : tab === 'users' ? '👥 Manage Users' : tab === 'dashboard' ? '📈 Dashboard' : '🔧 EOC'}
+          </button>
+        ))}
       </div>
 
       {/* EOC Tab */}
@@ -406,14 +358,15 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
       {activeTab === 'users' && (
         <div>
           <div style={{
-            backgroundColor: 'white',
+            backgroundColor: 'rgba(255,255,255,0.05)',
             borderRadius: '12px',
             padding: '20px',
             marginBottom: '20px',
-            border: '1px solid #eee'
+            border: '1px solid rgba(229,57,53,0.2)',
+            backdropFilter: 'blur(12px)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', color: '#333' }}>Users ({users.length})</h3>
+              <h3 style={{ margin: 0, fontSize: '16px', color: '#e8e8e8' }}>Users ({users.length})</h3>
               <button
                 onClick={handleAddUser}
                 style={{
@@ -433,18 +386,18 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
 
             {editingUser && (
               <div style={{
-                backgroundColor: '#f5f5f5',
+                backgroundColor: 'rgba(255,255,255,0.03)',
                 padding: '20px',
                 borderRadius: '8px',
                 marginBottom: '20px',
-                border: '2px solid #2196F3'
+                border: '2px solid #E53935'
               }}>
-                <h4 style={{ margin: '0 0 16px 0', color: '#333' }}>
+                <h4 style={{ margin: '0 0 16px 0', color: '#e8e8e8' }}>
                   {editingUser === 'new' ? 'Add New User' : 'Edit User'}
                 </h4>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                       User ID *
                     </label>
                     <input
@@ -456,16 +409,17 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       style={{
                         width: '100%',
                         padding: '8px',
-                        border: '2px solid #eee',
+                        border: '2px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px',
                         fontSize: '14px',
                         boxSizing: 'border-box',
-                        backgroundColor: editingUser !== 'new' ? '#f0f0f0' : 'white'
+                        backgroundColor: editingUser !== 'new' ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
+                        color: '#e8e8e8'
                       }}
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                       Name *
                     </label>
                     <input
@@ -476,15 +430,17 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       style={{
                         width: '100%',
                         padding: '8px',
-                        border: '2px solid #eee',
+                        border: '2px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px',
                         fontSize: '14px',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        color: '#e8e8e8'
                       }}
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                       PIN (4 digits) *
                     </label>
                     <input
@@ -496,15 +452,17 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       style={{
                         width: '100%',
                         padding: '8px',
-                        border: '2px solid #eee',
+                        border: '2px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px',
                         fontSize: '14px',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        color: '#e8e8e8'
                       }}
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                       Role
                     </label>
                     <select
@@ -513,10 +471,12 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       style={{
                         width: '100%',
                         padding: '8px',
-                        border: '2px solid #eee',
+                        border: '2px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px',
                         fontSize: '14px',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        color: '#e8e8e8'
                       }}
                     >
                       <option value="tech">Tech</option>
@@ -524,7 +484,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                       Site
                     </label>
                     <select
@@ -533,10 +493,12 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       style={{
                         width: '100%',
                         padding: '8px',
-                        border: '2px solid #eee',
+                        border: '2px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px',
                         fontSize: '14px',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        color: '#e8e8e8'
                       }}
                     >
                       <option value="PHP">PHP</option>
@@ -544,7 +506,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                       Active
                     </label>
                     <select
@@ -553,10 +515,12 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       style={{
                         width: '100%',
                         padding: '8px',
-                        border: '2px solid #eee',
+                        border: '2px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px',
                         fontSize: '14px',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        color: '#e8e8e8'
                       }}
                     >
                       <option value="true">Active</option>
@@ -564,7 +528,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                       EOC Location
                     </label>
                     <select
@@ -573,10 +537,12 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       style={{
                         width: '100%',
                         padding: '8px',
-                        border: '2px solid #eee',
+                        border: '2px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px',
                         fontSize: '14px',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        color: '#e8e8e8'
                       }}
                     >
                       <option value="">None</option>
@@ -584,7 +550,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                       Shift
                     </label>
                     <select
@@ -593,10 +559,12 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       style={{
                         width: '100%',
                         padding: '8px',
-                        border: '2px solid #eee',
+                        border: '2px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px',
                         fontSize: '14px',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        color: '#e8e8e8'
                       }}
                     >
                       <option value="">None</option>
@@ -604,7 +572,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                       Van
                     </label>
                     <select
@@ -613,10 +581,12 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       style={{
                         width: '100%',
                         padding: '8px',
-                        border: '2px solid #eee',
+                        border: '2px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px',
                         fontSize: '14px',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        color: '#e8e8e8'
                       }}
                     >
                       <option value="">None</option>
@@ -666,8 +636,8 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                   style={{
                     padding: '16px',
                     borderRadius: '8px',
-                    border: '1px solid #eee',
-                    backgroundColor: user.active ? '#fafafa' : '#f0f0f0',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    backgroundColor: user.active ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.01)',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center'
@@ -675,27 +645,27 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                 >
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', flex: 1 }}>
                     <div>
-                      <div style={{ fontSize: '11px', color: '#888' }}>ID</div>
+                      <div style={{ fontSize: '11px', color: '#8899aa' }}>ID</div>
                       <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{user.id}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: '#888' }}>Name</div>
+                      <div style={{ fontSize: '11px', color: '#8899aa' }}>Name</div>
                       <div style={{ fontSize: '14px' }}>{user.name}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: '#888' }}>PIN</div>
+                      <div style={{ fontSize: '11px', color: '#8899aa' }}>PIN</div>
                       <div style={{ fontSize: '14px', fontFamily: 'monospace' }}>{user.pin}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: '#888' }}>Role</div>
+                      <div style={{ fontSize: '11px', color: '#8899aa' }}>Role</div>
                       <div style={{ fontSize: '14px', textTransform: 'capitalize' }}>{user.role}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: '#888' }}>Site</div>
+                      <div style={{ fontSize: '11px', color: '#8899aa' }}>Site</div>
                       <div style={{ fontSize: '14px' }}>{user.site}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: '#888' }}>Status</div>
+                      <div style={{ fontSize: '11px', color: '#8899aa' }}>Status</div>
                       <div style={{
                         fontSize: '12px',
                         fontWeight: 'bold',
@@ -710,7 +680,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       onClick={() => handleEditUser(user)}
                       style={{
                         padding: '8px 16px',
-                        backgroundColor: '#2196F3',
+                        backgroundColor: '#E53935',
                         color: 'white',
                         border: 'none',
                         borderRadius: '6px',
@@ -749,11 +719,12 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
         <div>
           {/* Filter row */}
           <div style={{
-            backgroundColor: 'white',
+            backgroundColor: 'rgba(255,255,255,0.05)',
             borderRadius: '12px',
             padding: '20px',
             marginBottom: '20px',
-            border: '1px solid #eee'
+            border: '1px solid rgba(229,57,53,0.2)',
+            backdropFilter: 'blur(12px)'
           }}>
             <div style={{
               display: 'grid',
@@ -762,7 +733,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
               alignItems: 'center'
             }}>
               <div>
-                <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                   Month
                 </label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -770,7 +741,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                     onClick={() => setDashMonth(new Date(dashMonth.getFullYear(), dashMonth.getMonth() - 1, 1))}
                     style={{
                       padding: '8px 12px',
-                      backgroundColor: '#2196F3',
+                      backgroundColor: '#E53935',
                       color: 'white',
                       border: 'none',
                       borderRadius: '6px',
@@ -785,7 +756,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                     onClick={() => setDashMonth(new Date(dashMonth.getFullYear(), dashMonth.getMonth() + 1, 1))}
                     style={{
                       padding: '8px 12px',
-                      backgroundColor: '#2196F3',
+                      backgroundColor: '#E53935',
                       color: 'white',
                       border: 'none',
                       borderRadius: '6px',
@@ -796,7 +767,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                 </div>
               </div>
               <div>
-                <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
                   Site
                 </label>
                 <select
@@ -820,12 +791,12 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
           </div>
 
           {dashLoading ? (
-            <div style={{ textAlign: 'center', padding: '60px', color: '#aaa' }}>
+            <div style={{ textAlign: 'center', padding: '60px', color: '#556677' }}>
               <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
               Loading stats...
             </div>
           ) : dashStats.total === 0 ? (
-            <div style={{ textAlign: 'center', padding: '60px', color: '#aaa' }}>
+            <div style={{ textAlign: 'center', padding: '60px', color: '#556677' }}>
               <div style={{ fontSize: '32px', marginBottom: '12px' }}>📭</div>
               No transports in this period
             </div>
@@ -833,15 +804,15 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
             <>
               {/* Total card */}
               <div className="glass-card" style={{
-                backgroundColor: 'white',
+                backgroundColor: 'rgba(255,255,255,0.05)',
                 borderRadius: '12px',
                 padding: '20px',
                 marginBottom: '20px',
                 border: '1px solid #eee',
                 textAlign: 'center'
               }}>
-                <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>Total Transports</div>
-                <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#2196F3' }}>{dashStats.total}</div>
+                <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '4px' }}>Total Transports</div>
+                <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#E53935' }}>{dashStats.total}</div>
               </div>
 
               {/* Two-column breakdown */}
@@ -853,14 +824,14 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
               }}>
                 {/* By Reason */}
                 <div className="glass-card" style={{
-                  backgroundColor: 'white',
+                  backgroundColor: 'rgba(255,255,255,0.05)',
                   borderRadius: '12px',
                   padding: '20px',
                   border: '1px solid #eee'
                 }}>
-                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#333' }}>By Reason</h3>
+                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#e8e8e8' }}>By Reason</h3>
                   {dashStats.byReason.length === 0 ? (
-                    <div style={{ color: '#aaa', fontSize: '14px' }}>No reasons recorded</div>
+                    <div style={{ color: '#556677', fontSize: '14px' }}>No reasons recorded</div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {dashStats.byReason.map(([reason, count]) => (
@@ -869,11 +840,11 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                           justifyContent: 'space-between',
                           alignItems: 'center',
                           padding: '8px 12px',
-                          backgroundColor: '#f5f5f5',
+                          backgroundColor: 'rgba(255,255,255,0.04)',
                           borderRadius: '6px'
                         }}>
                           <span style={{ fontSize: '14px' }}>{reason}</span>
-                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#2196F3' }}>{count}</span>
+                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#E53935' }}>{count}</span>
                         </div>
                       ))}
                     </div>
@@ -882,12 +853,12 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
 
                 {/* By Tech */}
                 <div className="glass-card" style={{
-                  backgroundColor: 'white',
+                  backgroundColor: 'rgba(255,255,255,0.05)',
                   borderRadius: '12px',
                   padding: '20px',
                   border: '1px solid #eee'
                 }}>
-                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#333' }}>By Tech</h3>
+                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#e8e8e8' }}>By Tech</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {dashStats.byTech.map(([tech, count]) => (
                       <div key={tech} style={{
@@ -895,11 +866,11 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                         justifyContent: 'space-between',
                         alignItems: 'center',
                         padding: '8px 12px',
-                        backgroundColor: '#f5f5f5',
+                        backgroundColor: 'rgba(255,255,255,0.04)',
                         borderRadius: '6px'
                       }}>
                         <span style={{ fontSize: '14px' }}>{tech}</span>
-                        <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#2196F3' }}>{count}</span>
+                        <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#E53935' }}>{count}</span>
                       </div>
                     ))}
                   </div>
@@ -908,26 +879,27 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
 
               {/* DC Paperwork */}
               <div className="glass-card" style={{
-                backgroundColor: 'white',
+                backgroundColor: 'rgba(255,255,255,0.05)',
                 borderRadius: '12px',
                 padding: '20px',
-                border: '1px solid #eee'
+                border: '1px solid rgba(229,57,53,0.2)',
+                backdropFilter: 'blur(12px)'
               }}>
-                <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#333' }}>DC Paperwork</h3>
+                <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#e8e8e8' }}>DC Paperwork</h3>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                   {dashStats.byPaperwork.map(([status, count]) => (
                     <div key={status} style={{
                       padding: '10px 20px',
                       backgroundColor:
-                        status === 'collected' ? '#E8F5E9' :
-                        status === 'N/A' ? '#F5F5F5' :
-                        status === 'unknown' ? '#FFF3E0' :
-                        '#E3F2FD',
+                        status === 'collected' ? 'rgba(76,175,80,0.15)' :
+                        status === 'N/A' ? 'rgba(255,255,255,0.04)' :
+                        status === 'unknown' ? 'rgba(255,152,0,0.15)' :
+                        'rgba(229,57,53,0.15)',
                       borderRadius: '8px',
                       textAlign: 'center'
                     }}>
-                      <div style={{ fontSize: '12px', color: '#666', textTransform: 'capitalize' }}>{status}</div>
-                      <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>{count}</div>
+                      <div style={{ fontSize: '12px', color: '#8899aa', textTransform: 'capitalize' }}>{status}</div>
+                      <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#e8e8e8' }}>{count}</div>
                     </div>
                   ))}
                 </div>
@@ -942,13 +914,13 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
         <div>
           {/* Filters */}
           <div style={{
-        backgroundColor: 'white',
+        backgroundColor: 'rgba(255,255,255,0.05)',
         borderRadius: '12px',
         padding: '20px',
         marginBottom: '20px',
         border: '1px solid #eee'
       }}>
-        <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#333' }}>Filters</h3>
+        <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#e8e8e8' }}>Filters</h3>
 
         <div style={{
           display: 'grid',
@@ -957,7 +929,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
           marginBottom: '12px'
         }}>
           <div>
-            <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
               Start Date
             </label>
             <input
@@ -976,7 +948,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
               End Date
             </label>
             <input
@@ -995,7 +967,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
               Driver
             </label>
             <select
@@ -1018,7 +990,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
               Overdue
             </label>
             <select
@@ -1041,7 +1013,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
         </div>
 
         <div>
-          <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
             Search Client
           </label>
           <input
@@ -1072,8 +1044,8 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
           disabled={filteredTransports.length === 0}
           style={{
             padding: '12px 24px',
-            backgroundColor: filteredTransports.length > 0 ? '#4CAF50' : '#e8e8e8',
-            color: filteredTransports.length > 0 ? 'white' : '#999',
+            backgroundColor: filteredTransports.length > 0 ? '#4CAF50' : 'rgba(255,255,255,0.06)',
+            color: filteredTransports.length > 0 ? 'white' : '#556677',
             border: 'none',
             borderRadius: '8px',
             fontSize: '14px',
@@ -1087,17 +1059,17 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
 
       {/* Results */}
       <div style={{
-        backgroundColor: 'white',
+        backgroundColor: 'rgba(255,255,255,0.05)',
         borderRadius: '12px',
         padding: '20px',
         border: '1px solid #eee'
       }}>
-        <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#333' }}>
+        <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#e8e8e8' }}>
           Transports ({filteredTransports.length})
         </h3>
 
         {filteredTransports.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#aaa' }}>
+          <div style={{ textAlign: 'center', padding: '40px', color: '#556677' }}>
             No transports found
           </div>
         ) : (
@@ -1112,8 +1084,8 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                 style={{
                   padding: '16px',
                   borderRadius: '8px',
-                  border: isOverdue(t) ? '2px solid #FF5722' : '1px solid #eee',
-                  backgroundColor: '#fafafa',
+                  border: isOverdue(t) ? '2px solid #FF5722' : '1px solid rgba(255,255,255,0.08)',
+                  backgroundColor: 'rgba(255,255,255,0.03)',
                   position: 'relative'
                 }}
               >
@@ -1135,23 +1107,23 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
                   <div>
-                    <div style={{ fontSize: '11px', color: '#888' }}>Date</div>
+                    <div style={{ fontSize: '11px', color: '#8899aa' }}>Date</div>
                     <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{formatDate(t.departedAt)}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '11px', color: '#888' }}>Driver</div>
+                    <div style={{ fontSize: '11px', color: '#8899aa' }}>Driver</div>
                     <div style={{ fontSize: '14px' }}>{t.createdByName}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '11px', color: '#888' }}>Client(s)</div>
+                    <div style={{ fontSize: '11px', color: '#8899aa' }}>Client(s)</div>
                     <div style={{ fontSize: '14px' }}>{t.clients?.join(', ') || 'None'}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '11px', color: '#888' }}>Stops</div>
+                    <div style={{ fontSize: '11px', color: '#8899aa' }}>Stops</div>
                     <div style={{ fontSize: '14px' }}>{t.stops?.length || 0}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '11px', color: '#888' }}>Status</div>
+                    <div style={{ fontSize: '11px', color: '#8899aa' }}>Status</div>
                     <div style={{
                       fontSize: '12px',
                       fontWeight: 'bold',

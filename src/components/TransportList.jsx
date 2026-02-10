@@ -46,7 +46,7 @@ function TransportList({ transports, onNewTransport, onContinueTransport }) {
       <div className="section-label" style={{ marginBottom: '12px' }}>Today's Transports</div>
 
       {transports.length === 0 ? (
-        <div className="glass-card" style={{ textAlign: 'center', padding: '40px 20px', color: '#aaa' }}>
+        <div className="glass-card" style={{ textAlign: 'center', padding: '40px 20px', color: '#556677' }}>
           <p style={{ fontSize: '16px', marginBottom: '4px' }}>No transports yet</p>
           <p style={{ fontSize: '13px' }}>Tap "+ New Transport" to get started</p>
         </div>
@@ -89,7 +89,7 @@ function TransportList({ transports, onNewTransport, onContinueTransport }) {
                 )}
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', marginTop: isOverdue(t) ? '8px' : '0' }}>
-                  <span style={{ fontWeight: 700, fontSize: '15px', color: '#333' }}>
+                  <span style={{ fontWeight: 700, fontSize: '15px', color: '#e8e8e8' }}>
                     {getClientDisplay(t)}
                   </span>
                   <span className={badgeClass(t.status)}>
@@ -97,16 +97,16 @@ function TransportList({ transports, onNewTransport, onContinueTransport }) {
                   </span>
                 </div>
 
-                <div style={{ fontSize: '13px', color: '#666' }}>
+                <div style={{ fontSize: '13px', color: '#8899aa' }}>
                   {getDestinationDisplay(t)}
                 </div>
 
-                <div style={{ fontSize: '12px', color: '#999', marginTop: '6px' }}>
+                <div style={{ fontSize: '12px', color: '#556677', marginTop: '6px' }}>
                   Departed: {formatTime(t.departedAt)}
                 </div>
 
                 {isClickable && (
-                  <div style={{ fontSize: '11px', color: '#2196F3', marginTop: '8px', fontWeight: 600 }}>
+                  <div style={{ fontSize: '11px', color: '#E53935', marginTop: '8px', fontWeight: 600 }}>
                     Tap to continue →
                   </div>
                 )}

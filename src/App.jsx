@@ -257,7 +257,7 @@ function App() {
   return (
     <div style={{
       minHeight: '100vh',
-      backgroundColor: '#f5f5f5'
+      backgroundColor: 'var(--bg)'
     }}>
       <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
       <BhtHub

@@ -179,7 +179,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
   if (loading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center' }}>
-        <p style={{ color: '#888' }}>Loading transport...</p>
+        <p style={{ color: '#8899aa' }}>Loading transport...</p>
       </div>
     )
   }
@@ -189,8 +189,8 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
 
       {/* Title row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }} className="animate-in">
-        <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: '#333' }}>Transport</h2>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#aaa', padding: '4px 8px', borderRadius: '6px' }}>✕</button>
+        <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: '#e8e8e8' }}>Transport</h2>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#556677', padding: '4px 8px', borderRadius: '6px' }}>✕</button>
       </div>
 
       {/* Departed banner */}
@@ -206,7 +206,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
       >
         ARRIVE{stops.length > 0 ? ` (${stops.length} logged)` : ''}
       </button>
-      <p style={{ textAlign: 'center', fontSize: '11px', color: '#999', marginBottom: '16px' }}>Tap to log an arrival time</p>
+      <p style={{ textAlign: 'center', fontSize: '11px', color: '#556677', marginBottom: '16px' }}>Tap to log an arrival time</p>
 
       {/* Arrivals */}
       {stops.length > 0 && (
@@ -216,7 +216,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
             <div key={i} className="stop-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <span style={{ fontWeight: 700, fontSize: '14px' }}>Arrival {i + 1}</span>
-                <span style={{ marginLeft: '10px', fontSize: '12px', color: '#999' }}>
+                <span style={{ marginLeft: '10px', fontSize: '12px', color: '#556677' }}>
                   {new Date(s.arrivedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
@@ -228,7 +228,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
       {/* DC Paperwork Status (shown after return) */}
       {dcPaperworkStatus && (
         <div className="glass-card animate-in" style={{ marginBottom: '16px' }}>
-          <div style={{ fontSize: '14px', color: '#333' }}>
+          <div style={{ fontSize: '14px', color: '#e8e8e8' }}>
             <strong>DC paperwork:</strong>{' '}
             {dcStatusLabel(dcPaperworkStatus)}
             {dcPaperworkStatus === 'other' && dcPaperworkOtherNote && (
@@ -246,7 +246,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
           <div key={i} className="dest-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               {d.name && <div style={{ fontWeight: 700, fontSize: '14px' }}>{d.name}</div>}
-              <div style={{ fontSize: '13px', color: '#666' }}>{d.address}</div>
+              <div style={{ fontSize: '13px', color: '#8899aa' }}>{d.address}</div>
             </div>
             <button
               onClick={() => removeDest(i)}
@@ -337,17 +337,18 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
           padding: '20px'
         }}>
           <div style={{
-            backgroundColor: 'white',
+            backgroundColor: '#1a2332',
             borderRadius: '16px',
             padding: '24px',
             maxWidth: '400px',
             width: '100%',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
+            boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+            border: '1px solid rgba(229,57,53,0.3)'
           }}>
             <h2 style={{
               margin: '0 0 24px 0',
               fontSize: '20px',
-              color: '#C94A3F',
+              color: '#E53935',
               textAlign: 'center'
             }}>
               REMIND THE CLIENT ABOUT DC PAPERWORK
@@ -358,8 +359,8 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
                 style={{
                   flex: 1,
                   padding: '14px',
-                  backgroundColor: '#e8e8e8',
-                  color: '#666',
+                  backgroundColor: 'rgba(255,255,255,0.06)',
+                  color: '#8899aa',
                   border: 'none',
                   borderRadius: '10px',
                   fontSize: '16px',
@@ -374,7 +375,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
                 style={{
                   flex: 1,
                   padding: '14px',
-                  backgroundColor: '#C94A3F',
+                  backgroundColor: '#E53935',
                   color: 'white',
                   border: 'none',
                   borderRadius: '10px',

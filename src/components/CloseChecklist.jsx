@@ -69,7 +69,7 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
         padding: '20px',
         textAlign: 'center',
         minHeight: '100vh',
-        backgroundColor: '#f5f5f5',
+        backgroundColor: 'var(--bg)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center'
@@ -85,10 +85,10 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
       maxWidth: '600px',
       margin: '0 auto',
       minHeight: '100vh',
-      backgroundColor: '#f5f5f5'
+      backgroundColor: 'var(--bg)'
     }}>
       <div style={{
-        backgroundColor: 'white',
+        backgroundColor: 'rgba(255,255,255,0.05)',
         borderRadius: '16px',
         padding: '24px',
         marginBottom: '20px'
@@ -96,7 +96,7 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
         <h2 style={{
           margin: '0 0 20px 0',
           fontSize: '24px',
-          color: '#333',
+          color: '#e8e8e8',
           textAlign: 'center'
         }}>
           Close Checklist
@@ -104,7 +104,7 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
 
         <p style={{
           fontSize: '14px',
-          color: '#666',
+          color: '#8899aa',
           textAlign: 'center',
           marginBottom: '24px'
         }}>
@@ -121,7 +121,7 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
             padding: '16px',
             borderRadius: '10px',
             border: '2px solid ' + (transport?.clients?.length > 0 ? '#4CAF50' : '#C94A3F'),
-            backgroundColor: transport?.clients?.length > 0 ? '#E8F5E9' : '#FFEBEE'
+            backgroundColor: transport?.clients?.length > 0 ? 'rgba(76,175,80,0.15)' : 'rgba(229,57,53,0.15)'
           }}>
             <div style={{
               display: 'flex',
@@ -134,12 +134,12 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
               <div>
                 <div style={{
                   fontWeight: 'bold',
-                  color: '#333',
+                  color: '#e8e8e8',
                   marginBottom: '4px'
                 }}>
                   Client(s)
                 </div>
-                <div style={{ fontSize: '13px', color: '#666' }}>
+                <div style={{ fontSize: '13px', color: '#8899aa' }}>
                   {transport?.clients?.length > 0
                     ? `${transport.clients.length} client(s): ${transport.clients.join(', ')}`
                     : 'No clients entered'}
@@ -152,7 +152,7 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
             padding: '16px',
             borderRadius: '10px',
             border: '2px solid ' + (transport?.stops?.length > 0 ? '#4CAF50' : '#C94A3F'),
-            backgroundColor: transport?.stops?.length > 0 ? '#E8F5E9' : '#FFEBEE'
+            backgroundColor: transport?.stops?.length > 0 ? 'rgba(76,175,80,0.15)' : 'rgba(229,57,53,0.15)'
           }}>
             <div style={{
               display: 'flex',
@@ -165,12 +165,12 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
               <div>
                 <div style={{
                   fontWeight: 'bold',
-                  color: '#333',
+                  color: '#e8e8e8',
                   marginBottom: '4px'
                 }}>
                   Stop(s) with Address
                 </div>
-                <div style={{ fontSize: '13px', color: '#666' }}>
+                <div style={{ fontSize: '13px', color: '#8899aa' }}>
                   {transport?.stops?.length > 0
                     ? `${transport.stops.length} stop(s) recorded`
                     : 'No stops recorded'}
@@ -184,7 +184,7 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
               padding: '16px',
               borderRadius: '10px',
               border: '2px solid #4CAF50',
-              backgroundColor: '#E8F5E9'
+              backgroundColor: 'rgba(76,175,80,0.15)'
             }}>
               <div style={{
                 display: 'flex',
@@ -195,12 +195,12 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
                 <div>
                   <div style={{
                     fontWeight: 'bold',
-                    color: '#333',
+                    color: '#e8e8e8',
                     marginBottom: '4px'
                   }}>
                     DC paperwork
                   </div>
-                  <div style={{ fontSize: '13px', color: '#666' }}>
+                  <div style={{ fontSize: '13px', color: '#8899aa' }}>
                     {transport.dcPaperworkStatus === 'collected' && 'Collected'}
                     {transport.dcPaperworkStatus === 'na' && 'N/A'}
                     {transport.dcPaperworkStatus === 'other' && (
@@ -217,13 +217,13 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
           <div style={{
             padding: '16px',
             borderRadius: '10px',
-            backgroundColor: '#FFEBEE',
-            border: '2px solid #C94A3F',
+            backgroundColor: 'rgba(229,57,53,0.15)',
+            border: '2px solid #E53935',
             marginBottom: '20px'
           }}>
             <div style={{
               fontWeight: 'bold',
-              color: '#C94A3F',
+              color: '#E53935',
               marginBottom: '8px'
             }}>
               Cannot close transport:
@@ -231,7 +231,7 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
             <ul style={{
               margin: 0,
               paddingLeft: '20px',
-              color: '#C94A3F',
+              color: '#E53935',
               fontSize: '14px'
             }}>
               {errors.map((error, index) => (
@@ -250,8 +250,8 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
             style={{
               flex: 1,
               padding: '16px',
-              backgroundColor: '#e8e8e8',
-              color: '#666',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              color: '#8899aa',
               border: 'none',
               borderRadius: '12px',
               fontSize: '18px',

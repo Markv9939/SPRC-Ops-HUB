@@ -36,7 +36,7 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
   }
 
   const getEocStatusBadge = () => {
-    if (eocLoading) return <span className="badge" style={{ background: '#eee', color: '#999' }}>Loading...</span>
+    if (eocLoading) return <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#556677' }}>Loading...</span>
     if (!currentAssignment) return null
     if (currentAssignment.status === 'completed') return <span className="badge badge-eoc-completed">Completed</span>
     if (currentAssignment.status === 'missed') return <span className="badge badge-eoc-missed">Missed</span>
@@ -50,11 +50,11 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
 
       {/* Context bar */}
       <div className="glass-card" style={{ marginBottom: '16px', padding: '14px 18px' }}>
-        <div style={{ fontSize: '15px', fontWeight: 700, color: '#333', marginBottom: '4px' }}>
+        <div style={{ fontSize: '15px', fontWeight: 700, color: '#e8e8e8', marginBottom: '4px' }}>
           {user.name}
         </div>
         {hasEocProfile ? (
-          <div style={{ fontSize: '13px', color: '#666' }}>
+          <div style={{ fontSize: '13px', color: '#8899aa' }}>
             {locationLabel} &bull; {shiftLabel} {vanLabel ? `\u00B7 ${vanLabel}` : ''}
           </div>
         ) : (
@@ -87,12 +87,12 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
         <div className="glass-card" style={{ padding: '14px' }}>
           <div className="section-label" style={{ marginBottom: '6px' }}>EOC Status</div>
           {hasEocProfile ? getEocStatusBadge() : (
-            <span style={{ fontSize: '13px', color: '#aaa' }}>Not assigned</span>
+            <span style={{ fontSize: '13px', color: '#556677' }}>Not assigned</span>
           )}
         </div>
         <div className="glass-card" style={{ padding: '14px' }}>
           <div className="section-label" style={{ marginBottom: '6px' }}>Active Transports</div>
-          <span style={{ fontSize: '22px', fontWeight: 700, color: openTransports.length > 0 ? '#2196F3' : '#ccc' }}>
+          <span style={{ fontSize: '22px', fontWeight: 700, color: openTransports.length > 0 ? '#E53935' : '#556677' }}>
             {openTransports.length}
           </span>
         </div>
@@ -102,7 +102,7 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
       <div className="section-label" style={{ marginBottom: '12px' }}>Recent Transports</div>
 
       {transports.length === 0 ? (
-        <div className="glass-card" style={{ textAlign: 'center', padding: '40px 20px', color: '#aaa' }}>
+        <div className="glass-card" style={{ textAlign: 'center', padding: '40px 20px', color: '#556677' }}>
           <p style={{ fontSize: '16px', marginBottom: '4px' }}>No transports yet</p>
           <p style={{ fontSize: '13px' }}>Tap "+ New Transport" to get started</p>
         </div>
@@ -118,21 +118,21 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
                 style={{ cursor: isClickable ? 'pointer' : 'default' }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontWeight: 700, fontSize: '15px', color: '#333' }}>
+                  <span style={{ fontWeight: 700, fontSize: '15px', color: '#e8e8e8' }}>
                     {getClientDisplay(t)}
                   </span>
                   <span className={badgeClass(t.status)}>
                     {t.status || 'open'}
                   </span>
                 </div>
-                <div style={{ fontSize: '13px', color: '#666' }}>
+                <div style={{ fontSize: '13px', color: '#8899aa' }}>
                   {getDestinationDisplay(t)}
                 </div>
-                <div style={{ fontSize: '12px', color: '#999', marginTop: '6px' }}>
+                <div style={{ fontSize: '12px', color: '#556677', marginTop: '6px' }}>
                   Departed: {formatTime(t.departedAt)}
                 </div>
                 {isClickable && (
-                  <div style={{ fontSize: '11px', color: '#2196F3', marginTop: '8px', fontWeight: 600 }}>
+                  <div style={{ fontSize: '11px', color: '#E53935', marginTop: '8px', fontWeight: 600 }}>
                     Tap to continue →
                   </div>
                 )}

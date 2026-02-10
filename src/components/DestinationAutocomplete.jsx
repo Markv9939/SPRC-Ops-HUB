@@ -266,7 +266,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
             </div>
             <div style={{
               fontSize: '12px',
-              color: '#666',
+              color: '#8899aa',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap'

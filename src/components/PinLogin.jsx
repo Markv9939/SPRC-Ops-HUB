@@ -115,14 +115,17 @@ function PinLogin({ onLogin }) {
       justifyContent: 'center',
       alignItems: 'center',
       minHeight: '100vh',
-      backgroundColor: '#f5f5f5'
+      backgroundColor: '#0f1923'
     }}>
       <div style={{
-        backgroundColor: 'white',
+        backgroundColor: 'rgba(255,255,255,0.05)',
         borderRadius: '16px',
         padding: '40px',
         textAlign: 'center',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+        border: '1px solid rgba(229,57,53,0.2)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
         width: '300px'
       }}>
         <img
@@ -132,20 +135,21 @@ function PinLogin({ onLogin }) {
             width: '90px',
             height: '90px',
             margin: '0 auto 20px',
-            display: 'block'
+            display: 'block',
+            filter: 'drop-shadow(0 0 12px rgba(229,57,53,0.3))'
           }}
         />
 
         <h1 style={{
           fontSize: '22px',
-          color: '#333',
+          color: '#e8e8e8',
           marginBottom: '5px'
         }}>
           BHT Hub
         </h1>
 
         <p style={{
-          color: '#888',
+          color: '#8899aa',
           marginBottom: '25px',
           fontSize: '14px'
         }}>
@@ -168,17 +172,19 @@ function PinLogin({ onLogin }) {
             padding: '14px',
             fontSize: '24px',
             textAlign: 'center',
-            border: '2px solid #ddd',
+            border: '2px solid rgba(255,255,255,0.1)',
             borderRadius: '10px',
             outline: 'none',
             letterSpacing: '8px',
             boxSizing: 'border-box',
-            marginBottom: '10px'
+            marginBottom: '10px',
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            color: '#e8e8e8'
           }}
         />
 
         {error && (
-          <p style={{ color: '#C94A3F', fontSize: '13px', marginBottom: '10px' }}>
+          <p style={{ color: '#E53935', fontSize: '13px', marginBottom: '10px' }}>
             {error}
           </p>
         )}
@@ -189,7 +195,7 @@ function PinLogin({ onLogin }) {
           style={{
             width: '100%',
             padding: '14px',
-            backgroundColor: '#C94A3F',
+            background: 'linear-gradient(135deg, #E53935 0%, #C62828 100%)',
             color: 'white',
             border: 'none',
             borderRadius: '10px',
@@ -197,7 +203,8 @@ function PinLogin({ onLogin }) {
             fontWeight: 'bold',
             cursor: (isLoading || (lockoutUntil && Date.now() < lockoutUntil)) ? 'not-allowed' : 'pointer',
             marginTop: '5px',
-            opacity: (isLoading || (lockoutUntil && Date.now() < lockoutUntil)) ? 0.6 : 1
+            opacity: (isLoading || (lockoutUntil && Date.now() < lockoutUntil)) ? 0.6 : 1,
+            boxShadow: '0 4px 14px rgba(229,57,53,0.35), 0 0 20px rgba(229,57,53,0.3)'
           }}
         >
           {isLoading ? 'Checking...' : 'Enter'}

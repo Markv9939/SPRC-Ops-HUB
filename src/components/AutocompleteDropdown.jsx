@@ -54,8 +54,8 @@ function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, lo
         top: position.top,
         left: position.left,
         width: position.width,
-        background: 'white',
-        border: '2px solid #eee',
+        background: 'var(--bg-surface)',
+        border: '2px solid var(--card-border)',
         borderRadius: '0 0 var(--radius-sm) var(--radius-sm)',
         boxShadow: 'var(--shadow-lg)',
         zIndex: 9999,
@@ -68,7 +68,7 @@ function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, lo
         <div style={{
           padding: '10px 12px',
           fontSize: '13px',
-          color: '#999',
+          color: '#556677',
           textAlign: 'center'
         }}>
           Loading...
@@ -86,18 +86,18 @@ function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, lo
             padding: '12px 14px',
             cursor: 'pointer',
             fontSize: '14px',
-            color: '#333',
+            color: '#e8e8e8',
             transition: 'background 0.1s',
-            borderBottom: index < suggestions.length - 1 ? '1px solid #f0f0f0' : 'none',
+            borderBottom: index < suggestions.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
             minHeight: '44px', // Mobile tap target
             display: 'flex',
             alignItems: 'center'
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = '#f5f5f5'
+            e.currentTarget.style.background = 'rgba(229,57,53,0.1)'
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'white'
+            e.currentTarget.style.background = 'transparent'
           }}
         >
           {renderItem(suggestion)}
