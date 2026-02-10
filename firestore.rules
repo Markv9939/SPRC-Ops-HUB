@@ -38,6 +38,17 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Compliance collections (dashboard tracking)
+    match /complianceEmployees/{employeeId} {
+      allow read, write: if true;
+    }
+    match /complianceItems/{itemId} {
+      allow read, write: if true;
+    }
+    match /cintasServices/{serviceId} {
+      allow read, write: if true;
+    }
+
     // Transports collection
     match /transports/{transportId} {
       // Read: Open to all (client-side filtering by role)

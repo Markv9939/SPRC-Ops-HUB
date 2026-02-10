@@ -249,16 +249,25 @@ npm run cleanup-clients   # Deactivate clients unused 90+ days (needs serviceAcc
   - Solution: Add open-issue and missed-assignment counts plus inline issue resolution from Dashboard.
   - Acceptance: Supervisors can resolve open EOC issues directly from Dashboard.
 
-- **Compliance Tracking System**
+- **Compliance Tracking System** *(DONE)*
   - Goal: Replace Excel-based compliance tracking with in-app records.
   - Scope: FPCC, TB Test, CPR & First Aid, Food Handlers, Drivers License, Annual Orientation, Performance Evaluation, Misc., Cintas Service Sheet.
-  - Features:
-    - New Compliance tab with filters, CRUD for employees and compliance items.
-    - Dashboard summary of upcoming (30 days) and overdue compliance items.
-    - One-time import from the two Excel workbooks.
-  - Data model:
-    - `complianceEmployees` with name, site, hire date, optional linked user, active flag.
-    - `complianceItems` with employee linkage, category/subtype, last completed, due date, recurrence, and source.
+  - Data model: `complianceEmployees`, `complianceItems`, `cintasServices` collections.
+
+  **Implementation Progress:**
+  1. ~~Create `src/components/CompliancePanel.jsx`~~ — DONE. Full component with 4 sub-tabs (Employees, Items, Cintas, Import), category constants, CRUD, Excel import with preview, status badges.
+  2. ~~Update `SupervisorDashboard.jsx`~~ — DONE:
+     - ~~Added `compliance` to TAB_LABELS~~
+     - ~~Imported CompliancePanel + getStatus~~
+     - ~~Added `complianceItems` state + real-time listener~~
+     - ~~Add `complianceSummary` useMemo (overdue + upcoming counts)~~
+     - ~~Render compliance summary card on Dashboard tab (after EOC Summary section)~~
+     - ~~Render `<CompliancePanel />` when `activeTab === 'compliance'`~~
+  3. ~~Update `firestore.rules` — add open read/write rules for `complianceEmployees`, `complianceItems`, `cintasServices`~~ (deployed 2026-02-10)
+  4. ~~Update `firestore.indexes.json` — add composite indexes for `complianceItems` (category+dueDate, employeeId+category)~~ (deployed 2026-02-10)
+  5. ~~Build verification — `npm run build`~~ (completed 2026-02-10)
+  6. ~~One-time compliance + Cintas seed from Excel files~~ (completed 2026-02-10; source files should not be reused)
+  7. ~~Compliance/Cintas seed data imported into Firestore~~ (completed 2026-02-10)
 
 ### Google Places Autocomplete for Destinations
 

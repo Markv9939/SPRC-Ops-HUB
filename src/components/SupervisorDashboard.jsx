@@ -1,12 +1,23 @@
 import { useState, useEffect, useMemo } from 'react'
 import { db } from '../firebase'
-import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore'
+import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, deleteDoc, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore'
 import * as XLSX from 'xlsx'
 import SupervisorEocPanel from './SupervisorEocPanel'
+import CompliancePanel, { getStatus } from './CompliancePanel'
 import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 
+const TAB_LABELS = {
+  dashboard: '\u{1F4C8} Dashboard',
+  transports: '\u{1F4CA} Transports',
+  users: '\u{1F465} Manage Users',
+  eoc: '\u{1F527} EOC',
+  compliance: '\u{1F4CB} Compliance'
+}
+const TAB_KEYS = Object.keys(TAB_LABELS)
+
 function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
-  const [activeTab, setActiveTab] = useState('transports') // 'transports', 'users', 'dashboard', or 'eoc'
+  const [activeTab, setActiveTab] = useState('dashboard') // 'transports', 'users', 'dashboard', or 'eoc'
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
   const [transports, setTransports] = useState([])
   const [filteredTransports, setFilteredTransports] = useState([])
 
@@ -28,10 +39,58 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
 
   const [drivers, setDrivers] = useState([])
 
+  // EOC Dashboard summary
+  const [eocIssues, setEocIssues] = useState([])
+  const [eocAssignments, setEocAssignments] = useState([])
+  const [eocResolvingId, setEocResolvingId] = useState(null)
+  const [eocResolveNotes, setEocResolveNotes] = useState('')
+
+  // Compliance dashboard summary
+  const [complianceItems, setComplianceItems] = useState([])
+
   // User Management
   const [users, setUsers] = useState([])
   const [editingUser, setEditingUser] = useState(null)
   const [userForm, setUserForm] = useState({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true, locationId: '', shiftId: '', vanId: '' })
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 600px)')
+    const handler = (e) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
+  // Real-time EOC issues + assignments for dashboard summary
+  useEffect(() => {
+    const unsubIssues = onSnapshot(
+      query(collection(db, 'eocIssues'), where('status', '==', 'open'), orderBy('createdAt', 'desc')),
+      (snap) => setEocIssues(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    )
+    const unsubAssignments = onSnapshot(
+      query(collection(db, 'eocAssignments'), where('status', '==', 'missed'), orderBy('dueDate', 'desc')),
+      (snap) => setEocAssignments(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    )
+    const unsubCompliance = onSnapshot(
+      collection(db, 'complianceItems'),
+      (snap) => setComplianceItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    )
+    return () => { unsubIssues(); unsubAssignments(); unsubCompliance() }
+  }, [])
+
+  const handleDashResolveIssue = async (issueId) => {
+    try {
+      await updateDoc(doc(db, 'eocIssues', issueId), {
+        status: 'resolved',
+        resolvedNotes: eocResolveNotes,
+        resolvedAt: serverTimestamp()
+      })
+      setEocResolvingId(null)
+      setEocResolveNotes('')
+    } catch (err) {
+      console.error('Error resolving issue:', err)
+      alert('Failed to resolve issue')
+    }
+  }
 
   useEffect(() => {
     // Set default to current month
@@ -238,6 +297,19 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
     }
   }, [dashTransports])
 
+  const complianceSummary = useMemo(() => {
+    const summary = { overdue: 0, upcoming: 0, current: 0, none: 0, total: 0 }
+    complianceItems.forEach(item => {
+      const status = getStatus(item.dueDate)
+      if (status === 'overdue') summary.overdue += 1
+      else if (status === 'upcoming') summary.upcoming += 1
+      else if (status === 'current') summary.current += 1
+      else summary.none += 1
+    })
+    summary.total = complianceItems.length
+    return summary
+  }, [complianceItems])
+
   const isOverdue = (transport) => {
     if (transport.status === 'closed' || transport.status === 'returned') {
       return false
@@ -322,37 +394,70 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
         <h2 style={{ margin: 0, color: '#e8e8e8' }}>Supervisor Dashboard</h2>
       </div>
 
-      {/* Tabs */}
-      <div style={{
-        display: 'flex',
-        gap: '8px',
-        marginBottom: '20px',
-        borderBottom: '2px solid rgba(255,255,255,0.08)'
-      }}>
-        {['transports', 'users', 'dashboard', 'eoc'].map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
+      {/* Tabs — dropdown on mobile, button strip on desktop */}
+      {isMobile ? (
+        <div style={{ marginBottom: '20px' }}>
+          <select
+            value={activeTab}
+            onChange={(e) => setActiveTab(e.target.value)}
             style={{
-              padding: '12px 24px',
-              backgroundColor: activeTab === tab ? '#E53935' : 'transparent',
-              color: activeTab === tab ? 'white' : '#8899aa',
-              border: 'none',
-              borderBottom: activeTab === tab ? '3px solid #E53935' : 'none',
-              borderRadius: '8px 8px 0 0',
-              fontSize: '14px',
+              width: '100%',
+              padding: '12px 16px',
+              backgroundColor: 'rgba(229,57,53,0.15)',
+              color: '#e8e8e8',
+              border: '2px solid #E53935',
+              borderRadius: '10px',
+              fontSize: '15px',
               fontWeight: 'bold',
               cursor: 'pointer',
-              marginBottom: '-2px'
+              appearance: 'none',
+              WebkitAppearance: 'none',
+              backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%278%27 viewBox=%270 0 12 8%27%3E%3Cpath fill=%27%23E53935%27 d=%27M6 8L0 0h12z%27/%3E%3C/svg%3E")',
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 14px center',
+              backgroundSize: '12px'
             }}
           >
-            {tab === 'transports' ? '📊 Transports' : tab === 'users' ? '👥 Manage Users' : tab === 'dashboard' ? '📈 Dashboard' : '🔧 EOC'}
-          </button>
-        ))}
-      </div>
+            {TAB_KEYS.map(tab => (
+              <option key={tab} value={tab}>{TAB_LABELS[tab]}</option>
+            ))}
+          </select>
+        </div>
+      ) : (
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '20px',
+          borderBottom: '2px solid rgba(255,255,255,0.08)'
+        }}>
+          {TAB_KEYS.map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: activeTab === tab ? '#E53935' : 'transparent',
+                color: activeTab === tab ? 'white' : '#8899aa',
+                border: 'none',
+                borderBottom: activeTab === tab ? '3px solid #E53935' : 'none',
+                borderRadius: '8px 8px 0 0',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                marginBottom: '-2px'
+              }}
+            >
+              {TAB_LABELS[tab]}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* EOC Tab */}
       {activeTab === 'eoc' && <SupervisorEocPanel />}
+
+      {/* Compliance Tab */}
+      {activeTab === 'compliance' && <CompliancePanel />}
 
       {/* User Management Tab */}
       {activeTab === 'users' && (
@@ -717,9 +822,177 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
       {/* Dashboard Tab */}
       {activeTab === 'dashboard' && (
         <div>
-          {/* Filter row */}
-          <div style={{
-            backgroundColor: 'rgba(255,255,255,0.05)',
+          {/* EOC Summary */}
+            {(eocIssues.length > 0 || eocAssignments.length > 0) && (
+              <div style={{
+                backgroundColor: 'rgba(255,255,255,0.05)',
+              borderRadius: '12px',
+              padding: '20px',
+              marginBottom: '20px',
+              border: '1px solid rgba(229,57,53,0.2)',
+              backdropFilter: 'blur(12px)'
+            }}>
+              <h3 style={{ margin: '0 0 14px 0', fontSize: '16px', color: '#e8e8e8' }}>EOC Status</h3>
+
+              {/* Count badges */}
+              <div style={{ display: 'flex', gap: '12px', marginBottom: eocIssues.length > 0 ? '16px' : '0', flexWrap: 'wrap' }}>
+                {eocIssues.length > 0 && (
+                  <div style={{
+                    padding: '10px 20px',
+                    backgroundColor: 'rgba(255,87,34,0.15)',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    border: '1px solid rgba(255,87,34,0.3)'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#FF5722' }}>Open Issues</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF5722' }}>{eocIssues.length}</div>
+                  </div>
+                )}
+                {eocAssignments.length > 0 && (
+                  <div style={{
+                    padding: '10px 20px',
+                    backgroundColor: 'rgba(255,152,0,0.15)',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    border: '1px solid rgba(255,152,0,0.3)'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#FF9800' }}>Missed Assignments</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF9800' }}>{eocAssignments.length}</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Inline open issues list with resolve */}
+              {eocIssues.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {eocIssues.map(issue => (
+                    <div key={issue.id} style={{
+                      padding: '12px',
+                      borderRadius: '8px',
+                      border: issue.severity === 'high' ? '2px solid #FF5722' : '1px solid rgba(255,255,255,0.08)',
+                      backgroundColor: 'rgba(255,255,255,0.04)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontWeight: 700, fontSize: '14px' }}>{issue.label}</span>
+                        <span className={`chip severity-${issue.severity}`} style={{ fontSize: '11px', textTransform: 'capitalize' }}>
+                          {issue.severity}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '4px' }}>{issue.description}</div>
+                      <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
+                        {LOCATIONS.find(l => l.id === issue.locationId)?.label || issue.locationId} &bull; {issue.reportedByName}
+                        {issue.vanId ? ` \u00B7 ${VANS.find(v => v.id === issue.vanId)?.label || issue.vanId}` : ''}
+                      </div>
+
+                      {eocResolvingId === issue.id ? (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <input
+                            className="input"
+                            placeholder="Resolution notes..."
+                            value={eocResolveNotes}
+                            onChange={e => setEocResolveNotes(e.target.value)}
+                            style={{ flex: 1, padding: '6px 10px', fontSize: '13px' }}
+                          />
+                          <button
+                            onClick={() => handleDashResolveIssue(issue.id)}
+                            style={{
+                              padding: '6px 14px', backgroundColor: '#4CAF50', color: 'white',
+                              border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Resolve
+                          </button>
+                          <button
+                            onClick={() => { setEocResolvingId(null); setEocResolveNotes('') }}
+                            style={{
+                              padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#8899aa',
+                              border: 'none', borderRadius: '6px', fontSize: '13px', cursor: 'pointer'
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setEocResolvingId(issue.id)}
+                          style={{
+                            padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8',
+                            border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Mark Resolved
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                )}
+              </div>
+            )}
+
+            {/* Compliance Summary */}
+            {complianceSummary.total > 0 && (
+              <div style={{
+                backgroundColor: 'rgba(255,255,255,0.05)',
+                borderRadius: '12px',
+                padding: '20px',
+                marginBottom: '20px',
+                border: '1px solid rgba(229,57,53,0.2)',
+                backdropFilter: 'blur(12px)'
+              }}>
+                <h3 style={{ margin: '0 0 14px 0', fontSize: '16px', color: '#e8e8e8' }}>Compliance Status</h3>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                  <div style={{
+                    padding: '10px 20px',
+                    backgroundColor: 'rgba(244,67,54,0.15)',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    border: '1px solid rgba(244,67,54,0.3)'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#f44336' }}>Overdue</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#f44336' }}>{complianceSummary.overdue}</div>
+                  </div>
+                  <div style={{
+                    padding: '10px 20px',
+                    backgroundColor: 'rgba(255,152,0,0.15)',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    border: '1px solid rgba(255,152,0,0.3)'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#FF9800' }}>Due Soon</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF9800' }}>{complianceSummary.upcoming}</div>
+                  </div>
+                  <div style={{
+                    padding: '10px 20px',
+                    backgroundColor: 'rgba(76,175,80,0.15)',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    border: '1px solid rgba(76,175,80,0.3)'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#4CAF50' }}>Current</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>{complianceSummary.current}</div>
+                  </div>
+                  {complianceSummary.none > 0 && (
+                    <div style={{
+                      padding: '10px 20px',
+                      backgroundColor: 'rgba(255,255,255,0.04)',
+                      borderRadius: '8px',
+                      textAlign: 'center',
+                      border: '1px solid rgba(255,255,255,0.1)'
+                    }}>
+                      <div style={{ fontSize: '12px', color: '#8899aa' }}>No Due Date</div>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#e8e8e8' }}>{complianceSummary.none}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Filter row */}
+            <div style={{
+              backgroundColor: 'rgba(255,255,255,0.05)',
             borderRadius: '12px',
             padding: '20px',
             marginBottom: '20px',
