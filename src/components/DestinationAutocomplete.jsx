@@ -214,6 +214,26 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
         }}
       />
 
+      <a
+        href={(() => {
+          const searchQuery = [nameInput.trim(), addressInput.trim()].filter(Boolean).join(' ')
+          return searchQuery
+            ? `https://www.google.com/maps/search/${encodeURIComponent(searchQuery)}`
+            : 'https://www.google.com/maps'
+        })()}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          display: 'block', textAlign: 'center',
+          width: '100%', fontSize: '14px',
+          padding: '12px', minHeight: '44px',
+          marginBottom: '10px', boxSizing: 'border-box',
+          color: '#4285F4', textDecoration: 'none',
+          border: '1px solid #4285F4', borderRadius: '4px',
+          backgroundColor: 'transparent', cursor: 'pointer'
+        }}
+      >Click here to search in Google Maps</a>
+
       <AutocompleteDropdown
         suggestions={suggestions}
         isVisible={showSuggestions}

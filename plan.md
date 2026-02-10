@@ -40,6 +40,7 @@ A **transport logging app** for SPRC (a facility with two sites: PHP and RTC). S
 
 - **Transports tab** — See all transports across both sites. Filter by date range (default: current month), driver, overdue status, client name search. Export filtered results to Excel.
 - **Manage Users tab** — Full CRUD for user accounts (name, PIN, role, site, active status).
+- **Dashboard tab** — Monthly aggregated stats for completed (`returned`/`closed`) transports. Month picker with prev/next navigation, site filter (All/PHP/RTC). Shows: total count, breakdown by reason, breakdown by tech, DC paperwork status counts. Uses one-time `getDocs` query (not real-time) with client-side filtering.
 
 ---
 
@@ -68,7 +69,7 @@ A **transport logging app** for SPRC (a facility with two sites: PHP and RTC). S
 | AutocompleteDropdown | `AutocompleteDropdown.jsx` | Shared dropdown UI. Renders via `createPortal` to `document.body` to escape parent overflow. Positions with `getBoundingClientRect()`, updates on scroll/resize. z-index 9999. |
 | DCPaperworkModal | `DCCheckModal.jsx` | Modal with 3 options: Collected, N/A, Other (requires note). Returns `{status, otherNote}`. Triggers when user taps "Finish TX". |
 | CloseChecklist | `CloseChecklist.jsx` | Pre-close validation. Checks: has clients, has stops with addresses. Displays DC paperwork status. Sets status to `closed` with `closedAt` timestamp. |
-| SupervisorDashboard | `SupervisorDashboard.jsx` | Two tabs. **Transports:** date range filter, driver filter, overdue filter, client search, Excel export. **Users:** add/edit/delete users with inline form. |
+| SupervisorDashboard | `SupervisorDashboard.jsx` | Three tabs. **Transports:** date range filter, driver filter, overdue filter, client search, Excel export. **Users:** add/edit/delete users with inline form. **Dashboard:** monthly stats for completed transports — totals, breakdowns by reason/tech/DC paperwork status, with month nav and site filter. |
 
 ### Scripts (`scripts/`)
 
@@ -193,6 +194,7 @@ npm run cleanup-clients   # Deactivate clients unused 90+ days (needs serviceAcc
 
 | Commit | Description |
 |--------|-------------|
+| *(pending)* | Add supervisor Dashboard tab with monthly stats (reason/tech/paperwork breakdowns) |
 | `985a6fa` | Update plan.md |
 | `d7ddc51` | Auto-add destination on autocomplete selection (match client behavior) |
 | `1822c8d` | Restructure DC paperwork flow (moved to Finish step), autocomplete portal fix, arrive reminder modal |
@@ -227,3 +229,50 @@ npm run cleanup-clients   # Deactivate clients unused 90+ days (needs serviceAcc
 - "Recently used" section in client autocomplete
 - Client merge tool for duplicates
 - Bulk management tools in supervisor dashboard
+
+### Google Places Autocomplete for Destinations
+
+Replace the "Click here to search in Google Maps" link with real-time address autocomplete powered by the Google Places API. Existing Firestore-based suggestions (previously saved destinations) still appear alongside Google results.
+
+**Prerequisites:**
+1. Get a Google API key from https://console.cloud.google.com/
+2. Enable the **Places API** in the API Library
+3. (Recommended) Restrict the key: HTTP referrers → `localhost:*` + production domain; API restrictions → Places API only
+
+**Implementation steps:**
+
+1. **Add API key via environment variable** — Create `.env.local` in project root:
+   ```
+   VITE_GOOGLE_PLACES_API_KEY=your_key_here
+   ```
+   Add `.env.local` to `.gitignore` if not already there.
+
+2. **Load Google Maps script in `index.html`** — Add before closing `</head>`:
+   ```html
+   <script>
+     (function() {
+       var key = '%VITE_GOOGLE_PLACES_API_KEY%';
+       if (key && !key.startsWith('%')) {
+         var s = document.createElement('script');
+         s.src = 'https://maps.googleapis.com/maps/api/js?key=' + key + '&libraries=places';
+         s.async = true;
+         document.head.appendChild(s);
+       }
+     })();
+   </script>
+   ```
+   Note: Vite replaces `%VITE_*%` in index.html with env values at build time.
+
+3. **Modify `src/components/DestinationAutocomplete.jsx`:**
+   - Add `useEffect` to initialize `google.maps.places.AutocompleteService` once Google script loads
+   - Add `googleSuggestions` state alongside existing `suggestions` (Firestore)
+   - **Hybrid search** on address field: Firestore results first (labeled "Recent"), then a divider, then Google Places results via `AutocompleteService.getPlacePredictions()`
+   - **On Google Place selection:** call `PlacesService.getDetails()` to get full address + place name, auto-fill both fields
+   - **Remove** the "Click here to search in Google Maps" `<a>` tag (no longer needed)
+   - Keep existing Firestore persistence (destinations still saved on add)
+
+**Files modified:**
+- `.env.local` — new file, API key (git-ignored)
+- `.gitignore` — add `.env.local` if missing
+- `index.html` — add Google Maps script tag
+- `src/components/DestinationAutocomplete.jsx` — add Google Places integration, hybrid dropdown

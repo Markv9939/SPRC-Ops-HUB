@@ -1,12 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore'
 import * as XLSX from 'xlsx'
 
 function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
-  const [activeTab, setActiveTab] = useState('transports') // 'transports' or 'users'
+  const [activeTab, setActiveTab] = useState('transports') // 'transports', 'users', or 'dashboard'
   const [transports, setTransports] = useState([])
   const [filteredTransports, setFilteredTransports] = useState([])
+
+  // Dashboard stats
+  const [dashMonth, setDashMonth] = useState(() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), 1)
+  })
+  const [dashSite, setDashSite] = useState('ALL')
+  const [dashTransports, setDashTransports] = useState([])
+  const [dashLoading, setDashLoading] = useState(false)
 
   // Filters
   const [startDate, setStartDate] = useState('')
@@ -156,6 +165,74 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
     setFilteredTransports(filtered)
   }, [transports, selectedDriver, overdueFilter, clientSearch])
 
+  // Dashboard data fetch
+  useEffect(() => {
+    if (activeTab !== 'dashboard') return
+
+    const fetchDashData = async () => {
+      setDashLoading(true)
+      try {
+        const startOfMonth = Timestamp.fromDate(dashMonth)
+        const startOfNext = Timestamp.fromDate(new Date(dashMonth.getFullYear(), dashMonth.getMonth() + 1, 1))
+
+        const q = query(
+          collection(db, 'transports'),
+          where('departedAt', '>=', startOfMonth),
+          where('departedAt', '<', startOfNext),
+          orderBy('departedAt', 'desc')
+        )
+
+        const snapshot = await getDocs(q)
+        let data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+
+        // Client-side filters
+        data = data.filter(t => t.status === 'returned' || t.status === 'closed')
+        if (dashSite !== 'ALL') {
+          data = data.filter(t => t.site === dashSite)
+        }
+
+        setDashTransports(data)
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error)
+        setDashTransports([])
+      }
+      setDashLoading(false)
+    }
+
+    fetchDashData()
+  }, [activeTab, dashMonth, dashSite])
+
+  // Dashboard aggregation
+  const dashStats = useMemo(() => {
+    const reasonCounts = {}
+    const techCounts = {}
+    const paperworkCounts = {}
+
+    dashTransports.forEach(t => {
+      // Reasons
+      if (t.reasons && t.reasons.length > 0) {
+        t.reasons.forEach(r => {
+          reasonCounts[r] = (reasonCounts[r] || 0) + 1
+        })
+      }
+      // Tech
+      const tech = t.createdByName || 'Unknown'
+      techCounts[tech] = (techCounts[tech] || 0) + 1
+      // DC Paperwork
+      const pw = t.dcPaperworkStatus || 'unknown'
+      paperworkCounts[pw] = (paperworkCounts[pw] || 0) + 1
+    })
+
+    const sortDesc = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1])
+
+    return {
+      total: dashTransports.length,
+      byReason: sortDesc(reasonCounts),
+      byTech: sortDesc(techCounts),
+      byPaperwork: sortDesc(paperworkCounts)
+    }
+  }, [dashTransports])
+
   const isOverdue = (transport) => {
     if (transport.status === 'closed' || transport.status === 'returned') {
       return false
@@ -280,6 +357,23 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
           }}
         >
           👥 Manage Users
+        </button>
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: activeTab === 'dashboard' ? '#2196F3' : 'transparent',
+            color: activeTab === 'dashboard' ? 'white' : '#666',
+            border: 'none',
+            borderBottom: activeTab === 'dashboard' ? '3px solid #2196F3' : 'none',
+            borderRadius: '8px 8px 0 0',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            marginBottom: '-2px'
+          }}
+        >
+          📈 Dashboard
         </button>
       </div>
 
@@ -562,6 +656,199 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Dashboard Tab */}
+      {activeTab === 'dashboard' && (
+        <div>
+          {/* Filter row */}
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            padding: '20px',
+            marginBottom: '20px',
+            border: '1px solid #eee'
+          }}>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '12px',
+              alignItems: 'center'
+            }}>
+              <div>
+                <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                  Month
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    onClick={() => setDashMonth(new Date(dashMonth.getFullYear(), dashMonth.getMonth() - 1, 1))}
+                    style={{
+                      padding: '8px 12px',
+                      backgroundColor: '#2196F3',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '16px',
+                      cursor: 'pointer'
+                    }}
+                  >&lt;</button>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold', minWidth: '140px', textAlign: 'center' }}>
+                    {dashMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  </span>
+                  <button
+                    onClick={() => setDashMonth(new Date(dashMonth.getFullYear(), dashMonth.getMonth() + 1, 1))}
+                    style={{
+                      padding: '8px 12px',
+                      backgroundColor: '#2196F3',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '16px',
+                      cursor: 'pointer'
+                    }}
+                  >&gt;</button>
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                  Site
+                </label>
+                <select
+                  value={dashSite}
+                  onChange={(e) => setDashSite(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '2px solid #eee',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="ALL">All Sites</option>
+                  <option value="PHP">PHP</option>
+                  <option value="RTC">RTC</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {dashLoading ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: '#aaa' }}>
+              <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
+              Loading stats...
+            </div>
+          ) : dashStats.total === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: '#aaa' }}>
+              <div style={{ fontSize: '32px', marginBottom: '12px' }}>📭</div>
+              No transports in this period
+            </div>
+          ) : (
+            <>
+              {/* Total card */}
+              <div className="glass-card" style={{
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                padding: '20px',
+                marginBottom: '20px',
+                border: '1px solid #eee',
+                textAlign: 'center'
+              }}>
+                <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>Total Transports</div>
+                <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#2196F3' }}>{dashStats.total}</div>
+              </div>
+
+              {/* Two-column breakdown */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: '20px',
+                marginBottom: '20px'
+              }}>
+                {/* By Reason */}
+                <div className="glass-card" style={{
+                  backgroundColor: 'white',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  border: '1px solid #eee'
+                }}>
+                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#333' }}>By Reason</h3>
+                  {dashStats.byReason.length === 0 ? (
+                    <div style={{ color: '#aaa', fontSize: '14px' }}>No reasons recorded</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {dashStats.byReason.map(([reason, count]) => (
+                        <div key={reason} style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 12px',
+                          backgroundColor: '#f5f5f5',
+                          borderRadius: '6px'
+                        }}>
+                          <span style={{ fontSize: '14px' }}>{reason}</span>
+                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#2196F3' }}>{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* By Tech */}
+                <div className="glass-card" style={{
+                  backgroundColor: 'white',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  border: '1px solid #eee'
+                }}>
+                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#333' }}>By Tech</h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {dashStats.byTech.map(([tech, count]) => (
+                      <div key={tech} style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '8px 12px',
+                        backgroundColor: '#f5f5f5',
+                        borderRadius: '6px'
+                      }}>
+                        <span style={{ fontSize: '14px' }}>{tech}</span>
+                        <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#2196F3' }}>{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* DC Paperwork */}
+              <div className="glass-card" style={{
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                padding: '20px',
+                border: '1px solid #eee'
+              }}>
+                <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#333' }}>DC Paperwork</h3>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                  {dashStats.byPaperwork.map(([status, count]) => (
+                    <div key={status} style={{
+                      padding: '10px 20px',
+                      backgroundColor:
+                        status === 'collected' ? '#E8F5E9' :
+                        status === 'N/A' ? '#F5F5F5' :
+                        status === 'unknown' ? '#FFF3E0' :
+                        '#E3F2FD',
+                      borderRadius: '8px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '12px', color: '#666', textTransform: 'capitalize' }}>{status}</div>
+                      <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>{count}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
