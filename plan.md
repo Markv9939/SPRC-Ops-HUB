@@ -253,6 +253,10 @@ npm run cleanup-clients   # Deactivate clients unused 90+ days (needs serviceAcc
   - Goal: Allow supervisors to view/edit the EOC checklist template from the EOC dashboard.
   - Solution: Add Template tab with CRUD + seed-from-default, and load template from Firestore in the tech checklist (fallback to defaults if empty).
 
+- **Split House vs Van EOC** *(IN PROGRESS)*
+  - Goal: Separate House and Van EOC checklists with independent templates.
+  - Scope: Two EOCs due per cycle (House + Van), supervisor-managed vehicles, and auto van assignment by location.
+
 - **Compliance Tracking System** *(DONE)*
   - Goal: Replace Excel-based compliance tracking with in-app records.
   - Scope: FPCC, TB Test, CPR & First Aid, Food Handlers, Drivers License, Annual Orientation, Performance Evaluation, Misc., Cintas Service Sheet.

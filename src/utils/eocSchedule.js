@@ -31,8 +31,8 @@ export function formatPhoenixDate(date) {
 }
 
 /** Deterministic assignment ID */
-export function getAssignmentId(locationId, shiftId, dueDateStr) {
-  return `eoc_${locationId}_${shiftId}_${dueDateStr}`
+export function getAssignmentId(locationId, shiftId, dueDateStr, eocType) {
+  return `eoc_${locationId}_${shiftId}_${eocType}_${dueDateStr}`
 }
 
 /**

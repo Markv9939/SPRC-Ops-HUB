@@ -54,6 +54,9 @@ service cloud.firestore {
     match /eocChecklistTemplate/{docId} {
       allow read, write: if true;
     }
+    match /eocVehicles/{docId} {
+      allow read, write: if true;
+    }
 
     // Compliance collections (dashboard tracking)
     match /complianceEmployees/{employeeId} {

@@ -4,16 +4,18 @@ import {
   collection, query, where, orderBy, onSnapshot, getDocs,
   doc, updateDoc, serverTimestamp, addDoc, deleteDoc, writeBatch
 } from 'firebase/firestore'
-import { LOCATIONS, SHIFTS, VANS, EOC_CHECKLIST_TEMPLATE } from '../data/eocConstants'
+import { LOCATIONS, SHIFTS, VANS, EOC_VAN_TEMPLATE, EOC_HOUSE_TEMPLATE } from '../data/eocConstants'
 
 function SupervisorEocPanel() {
-  const [subTab, setSubTab] = useState('compliance') // compliance | assignments | issues | template
+  const [subTab, setSubTab] = useState('compliance') // compliance | assignments | issues | template | vehicles
   const [assignments, setAssignments] = useState([])
   const [issues, setIssues] = useState([])
   const [templateItems, setTemplateItems] = useState([])
+  const [vehicles, setVehicles] = useState([])
   const [loadingAssignments, setLoadingAssignments] = useState(true)
   const [loadingIssues, setLoadingIssues] = useState(true)
   const [loadingTemplate, setLoadingTemplate] = useState(true)
+  const [loadingVehicles, setLoadingVehicles] = useState(true)
 
   // Filters
   const [filterLocation, setFilterLocation] = useState('all')
@@ -21,10 +23,15 @@ function SupervisorEocPanel() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterSeverity, setFilterSeverity] = useState('all')
   const [filterIssueStatus, setFilterIssueStatus] = useState('open')
+  const [filterEocType, setFilterEocType] = useState('all')
 
   // Template editor
   const [editingTemplateId, setEditingTemplateId] = useState(null)
   const [templateForm, setTemplateForm] = useState({ category: '', label: '', order: 0, active: true })
+  const [templateType, setTemplateType] = useState('house')
+
+  const [editingVehicleId, setEditingVehicleId] = useState(null)
+  const [vehicleForm, setVehicleForm] = useState({ name: '', vin: '', vanId: '', locationId: '', active: true })
 
   // Resolve modal
   const [resolvingIssue, setResolvingIssue] = useState(null)
@@ -52,10 +59,29 @@ function SupervisorEocPanel() {
 
   // Load template items
   useEffect(() => {
-    const q = query(collection(db, 'eocChecklistTemplate'), orderBy('order', 'asc'))
+    const q = query(
+      collection(db, 'eocChecklistTemplate'),
+      where('eocType', '==', templateType),
+      orderBy('order', 'asc')
+    )
     const unsub = onSnapshot(q, (snap) => {
       setTemplateItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
       setLoadingTemplate(false)
+    })
+    return unsub
+  }, [templateType])
+
+  useEffect(() => {
+    setEditingTemplateId(null)
+    setTemplateForm({ category: '', label: '', order: 0, active: true })
+  }, [templateType])
+
+  // Load vehicles
+  useEffect(() => {
+    const q = query(collection(db, 'eocVehicles'), orderBy('name', 'asc'))
+    const unsub = onSnapshot(q, (snap) => {
+      setVehicles(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setLoadingVehicles(false)
     })
     return unsub
   }, [])
@@ -64,6 +90,7 @@ function SupervisorEocPanel() {
     if (filterLocation !== 'all' && a.locationId !== filterLocation) return false
     if (filterShift !== 'all' && a.shiftId !== filterShift) return false
     if (filterStatus !== 'all' && a.status !== filterStatus) return false
+    if (filterEocType !== 'all' && a.eocType !== filterEocType) return false
     return true
   })
 
@@ -130,7 +157,7 @@ function SupervisorEocPanel() {
       if (editingTemplateId) {
         await updateDoc(doc(db, 'eocChecklistTemplate', editingTemplateId), payload)
       } else {
-        await addDoc(collection(db, 'eocChecklistTemplate'), payload)
+        await addDoc(collection(db, 'eocChecklistTemplate'), { ...payload, eocType: templateType })
       }
       setEditingTemplateId(null)
       setTemplateForm({ category: '', label: '', order: 0, active: true })
@@ -164,13 +191,15 @@ function SupervisorEocPanel() {
     if (!confirm('Seed template from defaults? This will add new items, not replace existing ones.')) return
     try {
       const batch = writeBatch(db)
-      EOC_CHECKLIST_TEMPLATE.forEach((item, idx) => {
+      const defaults = templateType === 'van' ? EOC_VAN_TEMPLATE : EOC_HOUSE_TEMPLATE
+      defaults.forEach((item, idx) => {
         const ref = doc(collection(db, 'eocChecklistTemplate'))
         batch.set(ref, {
           category: item.category,
           label: item.label,
           order: idx + 1,
-          active: true
+          active: true,
+          eocType: templateType
         })
       })
       await batch.commit()
@@ -183,22 +212,71 @@ function SupervisorEocPanel() {
   const handleReplaceTemplate = async () => {
     if (!confirm('Replace template with defaults? This will delete existing items.')) return
     try {
-      const existing = await getDocs(collection(db, 'eocChecklistTemplate'))
+      const existing = await getDocs(query(collection(db, 'eocChecklistTemplate'), where('eocType', '==', templateType)))
       const batch = writeBatch(db)
       existing.docs.forEach(d => batch.delete(d.ref))
-      EOC_CHECKLIST_TEMPLATE.forEach((item, idx) => {
+      const defaults = templateType === 'van' ? EOC_VAN_TEMPLATE : EOC_HOUSE_TEMPLATE
+      defaults.forEach((item, idx) => {
         const ref = doc(collection(db, 'eocChecklistTemplate'))
         batch.set(ref, {
           category: item.category,
           label: item.label,
           order: idx + 1,
-          active: true
+          active: true,
+          eocType: templateType
         })
       })
       await batch.commit()
     } catch (err) {
       console.error('Error replacing template:', err)
       alert('Failed to replace template')
+    }
+  }
+
+  const handleSaveVehicle = async () => {
+    if (!vehicleForm.name.trim() || !vehicleForm.vin.trim()) {
+      alert('Vehicle name and VIN are required')
+      return
+    }
+    const payload = {
+      name: vehicleForm.name.trim(),
+      vin: vehicleForm.vin.trim(),
+      vanId: vehicleForm.vanId || null,
+      locationId: vehicleForm.locationId || null,
+      active: vehicleForm.active !== false
+    }
+    try {
+      if (editingVehicleId) {
+        await updateDoc(doc(db, 'eocVehicles', editingVehicleId), payload)
+      } else {
+        await addDoc(collection(db, 'eocVehicles'), payload)
+      }
+      setEditingVehicleId(null)
+      setVehicleForm({ name: '', vin: '', vanId: '', locationId: '', active: true })
+    } catch (err) {
+      console.error('Error saving vehicle:', err)
+      alert('Failed to save vehicle')
+    }
+  }
+
+  const handleEditVehicle = (v) => {
+    setEditingVehicleId(v.id)
+    setVehicleForm({
+      name: v.name || '',
+      vin: v.vin || '',
+      vanId: v.vanId || '',
+      locationId: v.locationId || '',
+      active: v.active !== false
+    })
+  }
+
+  const handleDeleteVehicle = async (id) => {
+    if (!confirm('Delete this vehicle?')) return
+    try {
+      await deleteDoc(doc(db, 'eocVehicles', id))
+    } catch (err) {
+      console.error('Error deleting vehicle:', err)
+      alert('Failed to delete vehicle')
     }
   }
 
@@ -257,6 +335,9 @@ function SupervisorEocPanel() {
         <button style={tabBtnStyle(subTab === 'template')} onClick={() => setSubTab('template')}>
           Template
         </button>
+        <button style={tabBtnStyle(subTab === 'vehicles')} onClick={() => setSubTab('vehicles')}>
+          Vehicles
+        </button>
       </div>
 
       {/* ===== COMPLIANCE TAB ===== */}
@@ -276,6 +357,11 @@ function SupervisorEocPanel() {
               <option value="pending">Pending</option>
               <option value="completed">Completed</option>
               <option value="missed">Missed</option>
+            </select>
+            <select value={filterEocType} onChange={e => setFilterEocType(e.target.value)} style={selectStyle}>
+              <option value="all">All Types</option>
+              <option value="house">House</option>
+              <option value="van">Van</option>
             </select>
           </div>
 
@@ -300,6 +386,7 @@ function SupervisorEocPanel() {
                   </div>
                   <div style={{ fontSize: '13px', color: '#8899aa' }}>
                     Due: {a.dueDate} &bull; Tech: {a.assignedTechName || 'Unassigned'}
+                    {a.eocType ? ` \u00B7 ${a.eocType.toUpperCase()}` : ''}
                     {a.vanId ? ` \u00B7 ${vanLabel(a.vanId)}` : ''}
                   </div>
                 </div>
@@ -327,7 +414,7 @@ function SupervisorEocPanel() {
                   backgroundColor: 'rgba(255,255,255,0.05)'
                 }}>
                   <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '8px' }}>
-                    {locationLabel(a.locationId)} — {shiftLabel(a.shiftId)}
+                    {locationLabel(a.locationId)} — {shiftLabel(a.shiftId)} {a.eocType ? `(${a.eocType.toUpperCase()})` : ''}
                   </div>
                   <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '8px' }}>
                     Due: {a.dueDate}
@@ -339,17 +426,19 @@ function SupervisorEocPanel() {
                         {a.assignedTechName || 'Unassigned'}
                       </div>
                     </div>
-                    <div>
-                      <label style={{ fontSize: '11px', color: '#556677', display: 'block' }}>Van</label>
-                      <select
-                        value={a.vanId || ''}
-                        onChange={e => handleUpdateVan(a.id, e.target.value || null)}
-                        style={selectStyle}
-                      >
-                        <option value="">None</option>
-                        {VANS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
-                      </select>
-                    </div>
+                    {a.eocType === 'van' && (
+                      <div>
+                        <label style={{ fontSize: '11px', color: '#556677', display: 'block' }}>Van</label>
+                        <select
+                          value={a.vanId || ''}
+                          onChange={e => handleUpdateVan(a.id, e.target.value || null)}
+                          style={selectStyle}
+                        >
+                          <option value="">None</option>
+                          {VANS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -471,6 +560,12 @@ function SupervisorEocPanel() {
           <p style={{ fontSize: '13px', color: '#8899aa', marginBottom: '16px' }}>
             Edit the EOC checklist items that techs complete. Changes apply immediately.
           </p>
+          <div style={{ marginBottom: '12px' }}>
+            <select value={templateType} onChange={e => setTemplateType(e.target.value)} style={selectStyle}>
+              <option value="house">House Template</option>
+              <option value="van">Van Template</option>
+            </select>
+          </div>
 
           {loadingTemplate ? (
             <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>Loading...</div>
@@ -590,6 +685,126 @@ function SupervisorEocPanel() {
                 </div>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {/* ===== VEHICLES TAB ===== */}
+      {subTab === 'vehicles' && (
+        <div>
+          <p style={{ fontSize: '13px', color: '#8899aa', marginBottom: '16px' }}>
+            Manage vehicle details (name, VIN) and assign vans to locations.
+          </p>
+
+          <div style={{
+            backgroundColor: 'rgba(255,255,255,0.05)',
+            borderRadius: '12px',
+            padding: '16px',
+            marginBottom: '16px',
+            border: '1px solid rgba(255,255,255,0.08)'
+          }}>
+            <h4 style={{ margin: '0 0 12px 0', color: '#e8e8e8', fontSize: '14px' }}>
+              {editingVehicleId ? 'Edit Vehicle' : 'Add Vehicle'}
+            </h4>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
+              <div>
+                <label style={{ fontSize: '11px', color: '#556677' }}>Vehicle Name</label>
+                <input
+                  className="input"
+                  value={vehicleForm.name}
+                  onChange={e => setVehicleForm({ ...vehicleForm, name: e.target.value })}
+                  placeholder="Girls Php Van"
+                  style={{ fontSize: '13px' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', color: '#556677' }}>VIN</label>
+                <input
+                  className="input"
+                  value={vehicleForm.vin}
+                  onChange={e => setVehicleForm({ ...vehicleForm, vin: e.target.value })}
+                  placeholder="VIN number"
+                  style={{ fontSize: '13px' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', color: '#556677', display: 'block' }}>Van</label>
+                <select
+                  value={vehicleForm.vanId}
+                  onChange={e => setVehicleForm({ ...vehicleForm, vanId: e.target.value })}
+                  style={selectStyle}
+                >
+                  <option value="">None</option>
+                  {VANS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', color: '#556677', display: 'block' }}>Location</label>
+                <select
+                  value={vehicleForm.locationId}
+                  onChange={e => setVehicleForm({ ...vehicleForm, locationId: e.target.value })}
+                  style={selectStyle}
+                >
+                  <option value="">Unassigned</option>
+                  {LOCATIONS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', color: '#556677', display: 'block' }}>Active</label>
+                <select
+                  value={vehicleForm.active ? 'true' : 'false'}
+                  onChange={e => setVehicleForm({ ...vehicleForm, active: e.target.value === 'true' })}
+                  style={selectStyle}
+                >
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button onClick={handleSaveVehicle} style={tabBtnStyle(true)}>
+                {editingVehicleId ? 'Save Changes' : 'Add Vehicle'}
+              </button>
+              {editingVehicleId && (
+                <button
+                  onClick={() => { setEditingVehicleId(null); setVehicleForm({ name: '', vin: '', vanId: '', locationId: '', active: true }) }}
+                  style={tabBtnStyle(false)}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>
+
+          {loadingVehicles ? (
+            <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>Loading...</div>
+          ) : vehicles.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>No vehicles found</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {vehicles.map(v => (
+                <div key={v.id} style={{
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  backgroundColor: 'rgba(255,255,255,0.05)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <span style={{ fontWeight: 700, fontSize: '14px' }}>{v.name}</span>
+                    <span className="badge" style={{ background: v.active === false ? 'rgba(255,255,255,0.06)' : 'rgba(76,175,80,0.15)', color: '#e8e8e8' }}>
+                      {v.active === false ? 'Inactive' : 'Active'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                    VIN: {v.vin || '--'} &bull; Van: {vanLabel(v.vanId)} &bull; Location: {v.locationId ? locationLabel(v.locationId) : 'Unassigned'}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={() => handleEditVehicle(v)} style={tabBtnStyle(false)}>Edit</button>
+                    <button onClick={() => handleDeleteVehicle(v.id)} style={tabBtnStyle(false)}>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}

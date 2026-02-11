@@ -2,7 +2,7 @@ import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 import useEocAssignments from '../hooks/useEocAssignments'
 
 function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStartEoc }) {
-  const { currentAssignment, loading: eocLoading } = useEocAssignments(user)
+  const { houseAssignment, vanAssignment, loading: eocLoading } = useEocAssignments(user)
 
   const hasEocProfile = user.locationId && user.shiftId
   const locationLabel = LOCATIONS.find(l => l.id === user.locationId)?.label
@@ -35,16 +35,17 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
     return `badge ${map[status] || ''}`
   }
 
-  const getEocStatusBadge = () => {
+  const getEocStatusBadge = (assignment) => {
     if (eocLoading) return <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: '#556677' }}>Loading...</span>
-    if (!currentAssignment) return null
-    if (currentAssignment.status === 'completed') return <span className="badge badge-eoc-completed">Completed</span>
-    if (currentAssignment.status === 'missed') return <span className="badge badge-eoc-missed">Missed</span>
-    return <span className="badge badge-eoc-pending">Due {currentAssignment.dueDate}</span>
+    if (!assignment) return null
+    if (assignment.status === 'completed') return <span className="badge badge-eoc-completed">Completed</span>
+    if (assignment.status === 'missed') return <span className="badge badge-eoc-missed">Missed</span>
+    return <span className="badge badge-eoc-pending">Due {assignment.dueDate}</span>
   }
 
   const openTransports = transports.filter(t => t.status !== 'closed')
-  const canStartEoc = hasEocProfile && ['pending', 'missed'].includes(currentAssignment?.status)
+  const canStartHouse = hasEocProfile && ['pending', 'missed'].includes(houseAssignment?.status)
+  const canStartVan = hasEocProfile && ['pending', 'missed'].includes(vanAssignment?.status)
 
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
@@ -75,19 +76,33 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
       </button>
 
       <button
-        className={`btn hub-action-btn ${canStartEoc ? 'btn-eoc' : 'btn-disabled'}`}
-        onClick={() => canStartEoc && onStartEoc(currentAssignment.id)}
-        disabled={!canStartEoc}
+        className={`btn hub-action-btn ${canStartHouse ? 'btn-eoc' : 'btn-disabled'}`}
+        onClick={() => canStartHouse && onStartEoc(houseAssignment.id)}
+        disabled={!canStartHouse}
+        style={{ width: '100%', fontSize: '18px', marginBottom: '10px', borderRadius: 'var(--radius)' }}
+      >
+        Complete House EOC
+      </button>
+      <button
+        className={`btn hub-action-btn ${canStartVan ? 'btn-eoc' : 'btn-disabled'}`}
+        onClick={() => canStartVan && onStartEoc(vanAssignment.id)}
+        disabled={!canStartVan}
         style={{ width: '100%', fontSize: '18px', marginBottom: '20px', borderRadius: 'var(--radius)' }}
       >
-        Complete EOC
+        Complete Van EOC
       </button>
 
       {/* Status cards */}
       <div className="hub-status-grid" style={{ marginBottom: '20px' }}>
         <div className="glass-card" style={{ padding: '14px' }}>
-          <div className="section-label" style={{ marginBottom: '6px' }}>EOC Status</div>
-          {hasEocProfile ? getEocStatusBadge() : (
+          <div className="section-label" style={{ marginBottom: '6px' }}>House EOC</div>
+          {hasEocProfile ? getEocStatusBadge(houseAssignment) : (
+            <span style={{ fontSize: '13px', color: '#556677' }}>Not assigned</span>
+          )}
+        </div>
+        <div className="glass-card" style={{ padding: '14px' }}>
+          <div className="section-label" style={{ marginBottom: '6px' }}>Van EOC</div>
+          {hasEocProfile ? getEocStatusBadge(vanAssignment) : (
             <span style={{ fontSize: '13px', color: '#556677' }}>Not assigned</span>
           )}
         </div>

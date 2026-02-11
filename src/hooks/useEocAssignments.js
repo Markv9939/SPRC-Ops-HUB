@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp, updateDoc } from 'firebase/firestore'
-import { SHIFTS } from '../data/eocConstants'
+import { SHIFTS, VAN_BY_LOCATION } from '../data/eocConstants'
 import {
   getAssignmentId,
   getCurrentCycleDueDate,
@@ -11,12 +11,13 @@ import {
 
 /**
  * Lazy EOC assignment creation hook.
- * On mount, ensures current + next cycle assignments exist for the user's shift/location.
+ * On mount, ensures current + next cycle assignments exist for the user's shift/location
+ * for both house and van EOCs.
  * Flips past-due pending assignments to "missed".
  */
 export default function useEocAssignments(user) {
-  const [currentAssignment, setCurrentAssignment] = useState(null)
-  const [nextAssignment, setNextAssignment] = useState(null)
+  const [houseAssignment, setHouseAssignment] = useState(null)
+  const [vanAssignment, setVanAssignment] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -36,38 +37,41 @@ export default function useEocAssignments(user) {
         const currentDue = getCurrentCycleDueDate(shift)
         const nextDue = getNextCycleDueDate(shift)
 
-        const currentId = getAssignmentId(user.locationId, user.shiftId, currentDue)
-        const nextId = getAssignmentId(user.locationId, user.shiftId, nextDue)
+        const ensureForType = async (eocType) => {
+          const currentId = getAssignmentId(user.locationId, user.shiftId, currentDue, eocType)
+          const nextId = getAssignmentId(user.locationId, user.shiftId, nextDue, eocType)
 
-        // Ensure current assignment exists
-        const currentDoc = await ensureAssignment(currentId, user, currentDue)
-        // Ensure next assignment exists
-        const nextDoc = await ensureAssignment(nextId, user, nextDue)
+          const currentDoc = await ensureAssignment(currentId, user, currentDue, eocType)
+          const nextDoc = await ensureAssignment(nextId, user, nextDue, eocType)
 
-        // Check if current is past due and still pending → mark missed
-        if (currentDoc.status === 'pending' && isDueDatePassed(currentDue)) {
-          await updateDoc(doc(db, 'eocAssignments', currentId), {
-            status: 'missed',
-            updatedAt: serverTimestamp()
-          })
-          // Create supervisor alert for missed assignment
-          await addDoc(collection(db, 'supervisorAlerts'), {
-            type: 'eoc_missed',
-            assignmentId: currentId,
-            locationId: user.locationId,
-            shiftId: user.shiftId,
-            techId: user.id,
-            techName: user.name,
-            dueDate: currentDue,
-            message: `${user.name} missed EOC for ${user.locationId} (due ${currentDue})`,
-            read: false,
-            createdAt: serverTimestamp()
-          })
-          currentDoc.status = 'missed'
+          if (currentDoc.status === 'pending' && isDueDatePassed(currentDue)) {
+            await updateDoc(doc(db, 'eocAssignments', currentId), {
+              status: 'missed',
+              updatedAt: serverTimestamp()
+            })
+            await addDoc(collection(db, 'supervisorAlerts'), {
+              type: 'eoc_missed',
+              assignmentId: currentId,
+              locationId: user.locationId,
+              shiftId: user.shiftId,
+              techId: user.id,
+              techName: user.name,
+              dueDate: currentDue,
+              message: `${user.name} missed ${eocType} EOC for ${user.locationId} (due ${currentDue})`,
+              read: false,
+              createdAt: serverTimestamp()
+            })
+            currentDoc.status = 'missed'
+          }
+
+          return { currentId, currentDoc, nextId, nextDoc }
         }
 
-        setCurrentAssignment({ id: currentId, ...currentDoc })
-        setNextAssignment({ id: nextId, ...nextDoc })
+        const house = await ensureForType('house')
+        const van = await ensureForType('van')
+
+        setHouseAssignment({ id: house.currentId, ...house.currentDoc })
+        setVanAssignment({ id: van.currentId, ...van.currentDoc })
       } catch (err) {
         console.error('Error ensuring EOC assignments:', err)
       } finally {
@@ -78,16 +82,22 @@ export default function useEocAssignments(user) {
     ensureAssignments()
   }, [user])
 
-  return { currentAssignment, nextAssignment, loading }
+  return { houseAssignment, vanAssignment, loading }
 }
 
-async function ensureAssignment(assignmentId, user, dueDate) {
+function getDefaultVanId(locationId) {
+  return VAN_BY_LOCATION[locationId] || null
+}
+
+async function ensureAssignment(assignmentId, user, dueDate, eocType) {
   const ref = doc(db, 'eocAssignments', assignmentId)
   const snap = await getDoc(ref)
 
   if (snap.exists()) {
     return snap.data()
   }
+
+  const vanId = eocType === 'van' ? getDefaultVanId(user.locationId) : null
 
   // Create new assignment
   const data = {
@@ -96,7 +106,8 @@ async function ensureAssignment(assignmentId, user, dueDate) {
     dueDate,
     assignedTechId: user.id,
     assignedTechName: user.name,
-    vanId: user.vanId || null,
+    vanId,
+    eocType,
     status: 'pending',
     submissionId: null,
     createdAt: serverTimestamp(),

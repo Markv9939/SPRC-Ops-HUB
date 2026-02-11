@@ -84,6 +84,20 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "eocChecklistTemplate",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "eocType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "order",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

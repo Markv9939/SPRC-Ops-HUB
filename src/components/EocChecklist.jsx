@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp, writeBatch, query, orderBy, onSnapshot } from 'firebase/firestore'
-import { EOC_CHECKLIST_TEMPLATE, VANS } from '../data/eocConstants'
+import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp, writeBatch, query, orderBy, onSnapshot, where, getDocs } from 'firebase/firestore'
+import { EOC_CHECKLIST_TEMPLATE, EOC_VAN_TEMPLATE, EOC_HOUSE_TEMPLATE, VANS, LOCATIONS } from '../data/eocConstants'
 
 function EocChecklist({ assignmentId, user, onComplete, onBack }) {
   const [assignment, setAssignment] = useState(null)
@@ -12,6 +12,8 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
   const [vehicleName, setVehicleName] = useState('')
   const [vinNumber, setVinNumber] = useState('')
   const [odometerReading, setOdometerReading] = useState('')
+  const [vehicleId, setVehicleId] = useState('')
+  const [eocType, setEocType] = useState('')
   const [answers, setAnswers] = useState({})
   // For "Repair" items: { itemId: { description } }
   const [repairDetails, setRepairDetails] = useState({})
@@ -32,9 +34,15 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           setLoading(false)
           return
         }
-        const vanLabel = VANS.find(v => v.id === data.vanId)?.label || ''
+        setEocType(data.eocType || '')
+        if (data.eocType === 'van') {
+          const vanLabel = VANS.find(v => v.id === data.vanId)?.label || ''
+          setVehicleName(vanLabel)
+        } else {
+          setVehicleName('')
+          setVinNumber('')
+        }
         setStaffCompleting(user?.name || '')
-        setVehicleName(vanLabel)
         setAssignment({ id: snap.id, ...data })
       } catch (err) {
         console.error('Error loading assignment:', err)
@@ -47,12 +55,53 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
   }, [assignmentId])
 
   useEffect(() => {
-    const q = query(collection(db, 'eocChecklistTemplate'), orderBy('order', 'asc'))
+    if (!eocType) return
+    const q = query(
+      collection(db, 'eocChecklistTemplate'),
+      where('eocType', '==', eocType),
+      orderBy('order', 'asc')
+    )
     const unsub = onSnapshot(q, (snap) => {
       setTemplateItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     })
     return () => unsub()
-  }, [])
+  }, [eocType])
+
+  useEffect(() => {
+    if (!assignment || eocType !== 'van') return
+    async function loadVehicle() {
+      try {
+        if (assignment.vehicleId) {
+          const snap = await getDoc(doc(db, 'eocVehicles', assignment.vehicleId))
+          if (snap.exists()) {
+            const v = snap.data()
+            setVehicleId(snap.id)
+            setVehicleName(v.name || '')
+            setVinNumber(v.vin || '')
+            return
+          }
+        }
+        if (assignment.vanId) {
+          const q = query(
+            collection(db, 'eocVehicles'),
+            where('vanId', '==', assignment.vanId),
+            where('active', '==', true)
+          )
+          const snap = await getDocs(q)
+          if (!snap.empty) {
+            const docSnap = snap.docs[0]
+            const v = docSnap.data()
+            setVehicleId(docSnap.id)
+            setVehicleName(v.name || '')
+            setVinNumber(v.vin || '')
+          }
+        }
+      } catch (err) {
+        console.error('Error loading vehicle:', err)
+      }
+    }
+    loadVehicle()
+  }, [assignment, eocType])
 
   const setAnswer = (itemId, value) => {
     setAnswers(prev => ({ ...prev, [itemId]: value }))
@@ -73,14 +122,15 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
   }
 
   const activeTemplate = (() => {
-    if (templateItems.length === 0) return EOC_CHECKLIST_TEMPLATE
+    const fallback = eocType === 'van' ? EOC_VAN_TEMPLATE : EOC_HOUSE_TEMPLATE
+    if (templateItems.length === 0) return fallback
     const filtered = templateItems.filter(i => i.active !== false)
-    return filtered.length > 0 ? filtered : EOC_CHECKLIST_TEMPLATE
+    return filtered.length > 0 ? filtered : fallback
   })()
 
   const validate = () => {
     if (!staffCompleting.trim()) return 'Please enter staff completing EOC'
-    if (!odometerReading.trim()) return 'Please enter odometer reading'
+    if (eocType === 'van' && !odometerReading.trim()) return 'Please enter odometer reading'
     for (const item of activeTemplate) {
       if (!answers[item.id]) return `Please complete all checklist items (missing: ${item.label})`
       if (answers[item.id] === 'repair') {
@@ -128,9 +178,11 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
         vanId: assignment.vanId,
         dueDate: assignment.dueDate,
         staffCompleting: staffCompleting.trim(),
+        eocType,
+        vehicleId: vehicleId || null,
         vehicleName: vehicleName.trim(),
         vinNumber: vinNumber.trim(),
-        odometerReading: odometerReading.trim(),
+        odometerReading: eocType === 'van' ? odometerReading.trim() : '',
         answers: answersData,
         issueCount: issueItems.length,
         submittedByUserId: user.id,
@@ -156,6 +208,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           locationId: assignment.locationId,
           shiftId: assignment.shiftId,
           vanId: assignment.vanId,
+          eocType,
           itemId: issue.itemId,
           label: issue.label,
           category: issue.category,
@@ -173,6 +226,7 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           issueId: issueRef.id,
           assignmentId,
           locationId: assignment.locationId,
+          eocType,
           severity: 'medium',
           message: `EOC issue: ${issue.label} — ${issue.description}`,
           techName: user.name,
@@ -237,7 +291,9 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           ←
         </button>
         <div>
-          <h2 style={{ margin: 0, fontSize: '18px', color: '#e8e8e8' }}>EOC Checklist</h2>
+          <h2 style={{ margin: 0, fontSize: '18px', color: '#e8e8e8' }}>
+            {eocType === 'van' ? 'Van EOC Checklist' : 'House EOC Checklist'}
+          </h2>
           <div style={{ fontSize: '13px', color: '#8899aa' }}>
             Due: {assignment.dueDate} &bull; {assignment.locationId}
           </div>
@@ -253,27 +309,40 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
           placeholder="Staff name(s)"
           style={{ marginBottom: '10px' }}
         />
-        <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>Vehicle Receiving Inspection</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
-          <input
-            className="input"
-            value={vehicleName}
-            onChange={(e) => setVehicleName(e.target.value)}
-            placeholder="Vehicle name (e.g., Girls Php Van)"
-          />
-          <input
-            className="input"
-            value={vinNumber}
-            onChange={(e) => setVinNumber(e.target.value)}
-            placeholder="VIN number"
-          />
-          <input
-            className="input"
-            value={odometerReading}
-            onChange={(e) => setOdometerReading(e.target.value)}
-            placeholder="Odometer reading"
-          />
-        </div>
+        {eocType === 'van' ? (
+          <>
+            <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>Vehicle Receiving Inspection</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+              <input
+                className="input"
+                value={vehicleName}
+                readOnly
+                placeholder="Vehicle name"
+              />
+              <input
+                className="input"
+                value={vinNumber}
+                readOnly
+                placeholder="VIN number"
+              />
+              <input
+                className="input"
+                value={odometerReading}
+                onChange={(e) => setOdometerReading(e.target.value)}
+                placeholder="Odometer reading"
+              />
+            </div>
+            {(!vehicleName || !vinNumber) && (
+              <div style={{ marginTop: '8px', fontSize: '12px', color: '#FF9800' }}>
+                Vehicle details missing — ask supervisor to set vehicle name/VIN.
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ fontSize: '13px', color: '#8899aa' }}>
+            House: {LOCATIONS.find(l => l.id === assignment.locationId)?.label || assignment.locationId}
+          </div>
+        )}
       </div>
 
       {categories.map(cat => (
@@ -284,8 +353,13 @@ function EocChecklist({ assignmentId, user, onComplete, onBack }) {
             <span style={{ minWidth: '72px' }}>REPAIR</span>
             <span>If repair, add details</span>
           </div>
-          {activeTemplate.filter(i => i.category === cat).map(item => (
-            <div key={item.id} className="eoc-item">
+          {activeTemplate.filter(i => i.category === cat).map((item, idx) => (
+            <div key={item.id} className="eoc-item" style={{
+              background: idx % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)',
+              borderRadius: '10px',
+              padding: '12px',
+              border: '1px solid rgba(255,255,255,0.06)'
+            }}>
               <div style={{ marginBottom: '8px', fontSize: '14px', color: '#e8e8e8' }}>
                 {item.label}
               </div>

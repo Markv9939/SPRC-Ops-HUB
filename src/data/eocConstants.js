@@ -18,7 +18,13 @@ export const SHIFTS = [
   { id: 'shift_2', label: '2nd Shift', dueDayOfWeek: 3 }  // Wednesday
 ]
 
-export const EOC_CHECKLIST_TEMPLATE = [
+export const VAN_BY_LOCATION = {
+  lone_mountain: 'van_2',
+  res: 'van_3',
+  mesquite: 'van_4'
+}
+
+export const EOC_VAN_TEMPLATE = [
   // Vehicle Receiving Inspection — Engine Off Criteria
   { id: 'engine_off_oil', category: 'Engine Off Criteria', label: 'ENGINE OIL WITHIN ACCEPTABLE LIMITS' },
   { id: 'engine_off_belts', category: 'Engine Off Criteria', label: 'FAN BELTS TIGHT AND SHOW NO OBVIOUS DAMAGE' },
@@ -41,7 +47,9 @@ export const EOC_CHECKLIST_TEMPLATE = [
   { id: 'engine_on_mirrors', category: 'Engine On Criteria', label: 'MIRRORS FUNCTION AND ARE CLEAN' },
   { id: 'engine_on_brakes', category: 'Engine On Criteria', label: 'BRAKES FUNCTION CORRECTLY' },
   { id: 'engine_on_new_damage', category: 'Engine On Criteria', label: 'ANY NEW DAMAGE NOTED PRIOR TO USING THIS VEHICLE?' },
+]
 
+export const EOC_HOUSE_TEMPLATE = [
   // Weekly Environment of Care Checklist — Kitchen
   { id: 'kitchen_knives', category: 'Kitchen', label: 'Are all kitchen knives accounted for?' },
   { id: 'kitchen_plumbing', category: 'Kitchen', label: 'Is the plumbing working correctly?' },
@@ -90,4 +98,9 @@ export const EOC_CHECKLIST_TEMPLATE = [
   { id: 'gym_clean', category: 'Gym/Garage', label: 'Are the areas clean and well maintained?' },
   { id: 'gym_equipment', category: 'Gym/Garage', label: 'Is all equipment/machinery in working order?' },
   { id: 'gym_doors', category: 'Gym/Garage', label: 'Are garage doors working?' }
+]
+
+export const EOC_CHECKLIST_TEMPLATE = [
+  ...EOC_VAN_TEMPLATE,
+  ...EOC_HOUSE_TEMPLATE
 ]
