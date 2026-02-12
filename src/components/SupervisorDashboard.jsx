@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { db } from '../firebase'
-import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, deleteDoc, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, deleteDoc, getDocs, updateDoc, serverTimestamp, addDoc } from 'firebase/firestore'
 import * as XLSX from 'xlsx'
 import SupervisorEocPanel from './SupervisorEocPanel'
 import CompliancePanel, { getStatus } from './CompliancePanel'
@@ -9,14 +9,15 @@ import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 const TAB_LABELS = {
   dashboard: '\u{1F4C8} Dashboard',
   transports: '\u{1F4CA} Transports',
-  users: '\u{1F465} Manage Users',
+  users: '\u{1F465} Users',
+  assignments: '\u{1F4CB} Assignments',
   eoc: '\u{1F527} EOC',
   compliance: '\u{1F4CB} Compliance'
 }
 const TAB_KEYS = Object.keys(TAB_LABELS)
 
-function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
-  const [activeTab, setActiveTab] = useState('dashboard') // 'transports', 'users', 'dashboard', or 'eoc'
+function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
+  const [activeTab, setActiveTab] = useState('dashboard')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
   const [transports, setTransports] = useState([])
   const [filteredTransports, setFilteredTransports] = useState([])
@@ -51,7 +52,16 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
   // User Management
   const [users, setUsers] = useState([])
   const [editingUser, setEditingUser] = useState(null)
-  const [userForm, setUserForm] = useState({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true, locationId: '', shiftId: '', vanId: '' })
+  const [userForm, setUserForm] = useState({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true })
+
+  // Assignment Management
+  const [bhtAssignments, setBhtAssignments] = useState([])
+  const [editingAssignment, setEditingAssignment] = useState(null)
+  const [assignmentForm, setAssignmentForm] = useState({
+    bhtUserId: '', locationId: '', shiftId: '', vanIds: [], isHousePrimary: false, active: true
+  })
+
+  const isAdmin = user?.role === 'admin'
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 600px)')
@@ -75,6 +85,15 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
       (snap) => setComplianceItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     )
     return () => { unsubIssues(); unsubAssignments(); unsubCompliance() }
+  }, [])
+
+  // Load BHT Assignments
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'bhtAssignments'), orderBy('bhtUserName', 'asc')),
+      (snap) => setBhtAssignments(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    )
+    return unsub
   }, [])
 
   const handleDashResolveIssue = async (issueId) => {
@@ -114,6 +133,8 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
     setUsers(usersData)
   }
 
+  const techUsers = users.filter(u => u.role === 'tech' && u.active)
+
   const handleAddUser = () => {
     setEditingUser('new')
     setUserForm({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true })
@@ -142,9 +163,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
         role: userForm.role,
         site: userForm.site,
         active: userForm.active,
-        locationId: userForm.locationId || null,
-        shiftId: userForm.shiftId || null,
-        vanId: userForm.vanId || null
+        authorizedLocations: userForm.authorizedLocations || null
       })
       alert('User saved successfully!')
       setEditingUser(null)
@@ -171,6 +190,101 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
   const handleCancelEdit = () => {
     setEditingUser(null)
     setUserForm({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true })
+  }
+
+  // Assignment handlers
+  const handleAddAssignment = () => {
+    setEditingAssignment('new')
+    setAssignmentForm({ bhtUserId: '', locationId: '', shiftId: '', vanIds: [], isHousePrimary: false, active: true })
+  }
+
+  const handleEditAssignment = (a) => {
+    setEditingAssignment(a.id)
+    setAssignmentForm({
+      bhtUserId: a.bhtUserId,
+      locationId: a.locationId,
+      shiftId: a.shiftId,
+      vanIds: a.vanIds || [],
+      isHousePrimary: a.isHousePrimary || false,
+      active: a.active !== false
+    })
+  }
+
+  const handleSaveAssignment = async () => {
+    if (!assignmentForm.bhtUserId || !assignmentForm.locationId || !assignmentForm.shiftId) {
+      alert('Please select a BHT, location, and shift')
+      return
+    }
+
+    const selectedUser = users.find(u => u.id === assignmentForm.bhtUserId)
+    if (!selectedUser) {
+      alert('Selected user not found')
+      return
+    }
+
+    // Validate: if isHousePrimary is true, check no other active assignment at same location+shift is also primary
+    if (assignmentForm.isHousePrimary) {
+      const conflicting = bhtAssignments.find(a =>
+        a.active &&
+        a.locationId === assignmentForm.locationId &&
+        a.shiftId === assignmentForm.shiftId &&
+        a.isHousePrimary &&
+        a.id !== editingAssignment
+      )
+      if (conflicting) {
+        alert(`${conflicting.bhtUserName} is already the House Primary for this location/shift. Remove their primary status first.`)
+        return
+      }
+    }
+
+    const payload = {
+      bhtUserId: assignmentForm.bhtUserId,
+      bhtUserName: selectedUser.name,
+      locationId: assignmentForm.locationId,
+      shiftId: assignmentForm.shiftId,
+      vanIds: assignmentForm.vanIds,
+      isHousePrimary: assignmentForm.isHousePrimary,
+      active: assignmentForm.active
+    }
+
+    try {
+      if (editingAssignment === 'new') {
+        await addDoc(collection(db, 'bhtAssignments'), {
+          ...payload,
+          effectiveFrom: serverTimestamp(),
+          effectiveTo: null,
+          createdAt: serverTimestamp()
+        })
+      } else {
+        await updateDoc(doc(db, 'bhtAssignments', editingAssignment), {
+          ...payload,
+          updatedAt: serverTimestamp()
+        })
+      }
+      setEditingAssignment(null)
+    } catch (err) {
+      console.error('Error saving assignment:', err)
+      alert('Failed to save assignment: ' + err.message)
+    }
+  }
+
+  const handleDeleteAssignment = async (id) => {
+    if (!confirm('Delete this assignment?')) return
+    try {
+      await deleteDoc(doc(db, 'bhtAssignments', id))
+    } catch (err) {
+      console.error('Error deleting assignment:', err)
+      alert('Failed to delete assignment')
+    }
+  }
+
+  const toggleVanId = (vanId) => {
+    setAssignmentForm(prev => ({
+      ...prev,
+      vanIds: prev.vanIds.includes(vanId)
+        ? prev.vanIds.filter(v => v !== vanId)
+        : [...prev.vanIds, vanId]
+    }))
   }
 
   useEffect(() => {
@@ -344,7 +458,6 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
 
   const exportToExcel = () => {
     const data = filteredTransports.map(t => {
-      // Format destinations as "Name (Address)" or just "Address"
       const destinationsText = t.destinations && t.destinations.length > 0
         ? t.destinations.map((d, i) => {
             const num = `${i + 1}.`
@@ -383,6 +496,15 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
     XLSX.writeFile(workbook, filename)
   }
 
+  const selectStyle = {
+    padding: '6px 10px',
+    border: '2px solid rgba(255,255,255,0.1)',
+    borderRadius: '6px',
+    fontSize: '13px',
+    background: 'rgba(255,255,255,0.06)',
+    color: '#e8e8e8'
+  }
+
   return (
     <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
       <div style={{
@@ -391,7 +513,9 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
         alignItems: 'center',
         marginBottom: '20px'
       }}>
-        <h2 style={{ margin: 0, color: '#e8e8e8' }}>Supervisor Dashboard</h2>
+        <h2 style={{ margin: 0, color: '#e8e8e8' }}>
+          {isAdmin ? 'Admin' : 'Supervisor'} Dashboard
+        </h2>
       </div>
 
       {/* Tabs — dropdown on mobile, button strip on desktop */}
@@ -428,7 +552,8 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
           display: 'flex',
           gap: '8px',
           marginBottom: '20px',
-          borderBottom: '2px solid rgba(255,255,255,0.08)'
+          borderBottom: '2px solid rgba(255,255,255,0.08)',
+          flexWrap: 'wrap'
         }}>
           {TAB_KEYS.map(tab => (
             <button
@@ -458,6 +583,232 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
 
       {/* Compliance Tab */}
       {activeTab === 'compliance' && <CompliancePanel />}
+
+      {/* Assignments Tab */}
+      {activeTab === 'assignments' && (
+        <div>
+          <div style={{
+            backgroundColor: 'rgba(255,255,255,0.05)',
+            borderRadius: '12px',
+            padding: '20px',
+            marginBottom: '20px',
+            border: '1px solid rgba(229,57,53,0.2)',
+            backdropFilter: 'blur(12px)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', color: '#e8e8e8' }}>BHT Assignments ({bhtAssignments.length})</h3>
+              <button
+                onClick={handleAddAssignment}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#4CAF50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer'
+                }}
+              >
+                + New Assignment
+              </button>
+            </div>
+
+            {editingAssignment && (
+              <div style={{
+                backgroundColor: 'rgba(255,255,255,0.03)',
+                padding: '20px',
+                borderRadius: '8px',
+                marginBottom: '20px',
+                border: '2px solid #E53935'
+              }}>
+                <h4 style={{ margin: '0 0 16px 0', color: '#e8e8e8' }}>
+                  {editingAssignment === 'new' ? 'New Assignment' : 'Edit Assignment'}
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>BHT *</label>
+                    <select
+                      value={assignmentForm.bhtUserId}
+                      onChange={(e) => setAssignmentForm({ ...assignmentForm, bhtUserId: e.target.value })}
+                      disabled={editingAssignment !== 'new'}
+                      style={selectStyle}
+                    >
+                      <option value="">Select BHT...</option>
+                      {techUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Location *</label>
+                    <select
+                      value={assignmentForm.locationId}
+                      onChange={(e) => setAssignmentForm({ ...assignmentForm, locationId: e.target.value })}
+                      style={selectStyle}
+                    >
+                      <option value="">Select Location...</option>
+                      {LOCATIONS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Shift *</label>
+                    <select
+                      value={assignmentForm.shiftId}
+                      onChange={(e) => setAssignmentForm({ ...assignmentForm, shiftId: e.target.value })}
+                      style={selectStyle}
+                    >
+                      <option value="">Select Shift...</option>
+                      {SHIFTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>House Primary</label>
+                    <select
+                      value={assignmentForm.isHousePrimary ? 'true' : 'false'}
+                      onChange={(e) => setAssignmentForm({ ...assignmentForm, isHousePrimary: e.target.value === 'true' })}
+                      style={selectStyle}
+                    >
+                      <option value="false">No</option>
+                      <option value="true">Yes</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Active</label>
+                    <select
+                      value={assignmentForm.active ? 'true' : 'false'}
+                      onChange={(e) => setAssignmentForm({ ...assignmentForm, active: e.target.value === 'true' })}
+                      style={selectStyle}
+                    >
+                      <option value="true">Active</option>
+                      <option value="false">Inactive</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '12px' }}>
+                  <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Assigned Vans (multi-select)</label>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {VANS.map(v => (
+                      <button
+                        key={v.id}
+                        className={`chip ${assignmentForm.vanIds.includes(v.id) ? 'chip-selected' : 'chip-unselected'}`}
+                        onClick={() => toggleVanId(v.id)}
+                      >
+                        {v.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+                  <button
+                    onClick={handleSaveAssignment}
+                    style={{
+                      padding: '10px 20px',
+                      backgroundColor: '#4CAF50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setEditingAssignment(null)}
+                    style={{
+                      padding: '10px 20px',
+                      backgroundColor: '#999',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {bhtAssignments.map(a => (
+                <div
+                  key={a.id}
+                  style={{
+                    padding: '16px',
+                    borderRadius: '8px',
+                    border: a.active ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(255,255,255,0.04)',
+                    backgroundColor: a.active ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.01)',
+                    opacity: a.active ? 1 : 0.6,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>
+                      {a.bhtUserName}
+                      {!a.active && <span style={{ color: '#999', fontSize: '11px', marginLeft: '8px' }}>INACTIVE</span>}
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#8899aa' }}>
+                      {LOCATIONS.find(l => l.id === a.locationId)?.label || a.locationId}
+                      {' '}&bull;{' '}
+                      {SHIFTS.find(s => s.id === a.shiftId)?.label || a.shiftId}
+                      {a.vanIds?.length > 0 && (
+                        <span> &bull; {a.vanIds.map(v => VANS.find(van => van.id === v)?.label || v).join(', ')}</span>
+                      )}
+                      {a.isHousePrimary && (
+                        <span style={{ color: '#4CAF50', marginLeft: '8px' }}>House Primary</span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => handleEditAssignment(a)}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: '#E53935',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteAssignment(a.id)}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: '#f44336',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {bhtAssignments.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>
+                  No assignments yet. Create one to assign a BHT to a location, shift, and van(s).
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* User Management Tab */}
       {activeTab === 'users' && (
@@ -633,72 +984,6 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       <option value="false">Inactive</option>
                     </select>
                   </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                      EOC Location
-                    </label>
-                    <select
-                      value={userForm.locationId || ''}
-                      onChange={(e) => setUserForm({ ...userForm, locationId: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '8px',
-                        border: '2px solid rgba(255,255,255,0.1)',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        boxSizing: 'border-box',
-                        backgroundColor: 'rgba(255,255,255,0.06)',
-                        color: '#e8e8e8'
-                      }}
-                    >
-                      <option value="">None</option>
-                      {LOCATIONS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                      Shift
-                    </label>
-                    <select
-                      value={userForm.shiftId || ''}
-                      onChange={(e) => setUserForm({ ...userForm, shiftId: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '8px',
-                        border: '2px solid rgba(255,255,255,0.1)',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        boxSizing: 'border-box',
-                        backgroundColor: 'rgba(255,255,255,0.06)',
-                        color: '#e8e8e8'
-                      }}
-                    >
-                      <option value="">None</option>
-                      {SHIFTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                      Van
-                    </label>
-                    <select
-                      value={userForm.vanId || ''}
-                      onChange={(e) => setUserForm({ ...userForm, vanId: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '8px',
-                        border: '2px solid rgba(255,255,255,0.1)',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        boxSizing: 'border-box',
-                        backgroundColor: 'rgba(255,255,255,0.06)',
-                        color: '#e8e8e8'
-                      }}
-                    >
-                      <option value="">None</option>
-                      {VANS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
-                    </select>
-                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
                   <button
@@ -714,7 +999,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
                       cursor: 'pointer'
                     }}
                   >
-                    💾 Save
+                    Save
                   </button>
                   <button
                     onClick={handleCancelEdit}
@@ -1066,12 +1351,10 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
 
           {dashLoading ? (
             <div style={{ textAlign: 'center', padding: '60px', color: '#556677' }}>
-              <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
               Loading stats...
             </div>
           ) : dashStats.total === 0 ? (
             <div style={{ textAlign: 'center', padding: '60px', color: '#556677' }}>
-              <div style={{ fontSize: '32px', marginBottom: '12px' }}>📭</div>
               No transports in this period
             </div>
           ) : (
@@ -1327,7 +1610,7 @@ function SupervisorDashboard({ onNewTransport, onLogout, userName }) {
             cursor: filteredTransports.length > 0 ? 'pointer' : 'not-allowed'
           }}
         >
-          📊 Export to Excel ({filteredTransports.length})
+          Export to Excel ({filteredTransports.length})
         </button>
       </div>
 
