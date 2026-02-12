@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 import useEocAssignments from '../hooks/useEocAssignments'
 import useEocTasks from '../hooks/useEocTasks'
+import { getCurrentCycleDueDate } from '../utils/eocSchedule'
 
 function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStartEoc }) {
   const { assignment, loading: assignmentLoading } = useEocAssignments(user)
@@ -67,6 +68,21 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
   }
 
   const openTransports = transports.filter(t => t.status !== 'closed')
+  const shiftConfig = hasAssignment ? SHIFTS.find(s => s.id === assignment.shiftId) : null
+  const currentCycleDueDate = shiftConfig ? getCurrentCycleDueDate(shiftConfig) : null
+  const currentCycleTasks = hasAssignment
+    ? tasks.filter(t =>
+      t.locationId === assignment.locationId &&
+      t.shiftId === assignment.shiftId &&
+      (!currentCycleDueDate || t.dueDate === currentCycleDueDate))
+    : []
+  const dueCount = currentCycleTasks.filter(t => t.status === 'pending').length
+  const overdueCount = currentCycleTasks.filter(t => t.status === 'overdue').length
+  const completedCount = currentCycleTasks.filter(t => t.status === 'completed').length
+  const expectedTaskCount = hasAssignment
+    ? (assignment.isHousePrimary ? 1 : 0) + (Array.isArray(assignment.vanIds) ? assignment.vanIds.length : 0)
+    : 0
+  const notDueCount = Math.max(0, expectedTaskCount - (dueCount + overdueCount + completedCount))
 
   useEffect(() => {
     if (!hasAssignment) {
@@ -142,6 +158,25 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
       {hasAssignment && (
         <div className="glass-card" style={{ marginBottom: '20px', padding: '16px' }}>
           <div className="section-label" style={{ marginBottom: '10px' }}>Due EOCs</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+            <button className="chip chip-unselected" disabled>Not Due ({notDueCount})</button>
+            <button className="chip chip-unselected" disabled>Due ({dueCount})</button>
+            <button className="chip chip-attention" disabled>Overdue ({overdueCount})</button>
+            <button className="chip chip-ok" disabled>Completed ({completedCount})</button>
+          </div>
+          <div style={{ marginBottom: '10px' }}>
+            <button
+              className="btn btn-eoc"
+              onClick={() => actionableTasks.length > 0 && onStartEoc(actionableTasks[0].id)}
+              disabled={actionableTasks.length === 0}
+              style={{ width: '100%', fontSize: '14px', borderRadius: '8px', opacity: actionableTasks.length > 0 ? 1 : 0.7 }}
+            >
+              Mark All OK
+            </button>
+            <div style={{ marginTop: '6px', fontSize: '11px', color: '#8899aa' }}>
+              Opens the next due checklist with one-tap "Mark All OK" support.
+            </div>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: actionableTasks.length > 0 ? '12px' : '0' }}>
             {houseTask && (
               <button

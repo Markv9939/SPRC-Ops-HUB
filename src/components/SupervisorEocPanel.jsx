@@ -7,6 +7,7 @@ import {
 import { LOCATIONS, SHIFTS, VANS, EOC_VAN_TEMPLATE, EOC_HOUSE_TEMPLATE } from '../data/eocConstants'
 
 function SupervisorEocPanel() {
+  const LEGACY_ASSIGNMENTS_READ_ONLY = true
   const [subTab, setSubTab] = useState('compliance') // compliance | assignments | issues | template | vehicles
   const [assignments, setAssignments] = useState([])
   const [issues, setIssues] = useState([])
@@ -118,6 +119,10 @@ function SupervisorEocPanel() {
   }
 
   const handleReassignTech = async (assignmentId, techId, techName) => {
+    if (LEGACY_ASSIGNMENTS_READ_ONLY) {
+      alert('Legacy eocAssignments are read-only. Use Assignment Engine (bhtAssignments) in Supervisor Dashboard.')
+      return
+    }
     try {
       await updateDoc(doc(db, 'eocAssignments', assignmentId), {
         assignedTechId: techId,
@@ -131,6 +136,10 @@ function SupervisorEocPanel() {
   }
 
   const handleUpdateVan = async (assignmentId, vanId) => {
+    if (LEGACY_ASSIGNMENTS_READ_ONLY) {
+      alert('Legacy eocAssignments are read-only. Use Assignment Engine (bhtAssignments) in Supervisor Dashboard.')
+      return
+    }
     try {
       await updateDoc(doc(db, 'eocAssignments', assignmentId), {
         vanId,
@@ -399,6 +408,11 @@ function SupervisorEocPanel() {
       {/* ===== ASSIGNMENTS TAB ===== */}
       {subTab === 'assignments' && (
         <div>
+          {LEGACY_ASSIGNMENTS_READ_ONLY && (
+            <div style={{ marginBottom: '10px', fontSize: '12px', color: '#FF9800' }}>
+              Legacy `eocAssignments` records are read-only in this panel. Use `Assignments` tab in Supervisor Dashboard for active workflow changes.
+            </div>
+          )}
           <p style={{ fontSize: '13px', color: '#8899aa', marginBottom: '16px' }}>
             Manage upcoming assignments — reassign techs or override van assignments.
           </p>
@@ -432,6 +446,7 @@ function SupervisorEocPanel() {
                         <select
                           value={a.vanId || ''}
                           onChange={e => handleUpdateVan(a.id, e.target.value || null)}
+                          disabled={LEGACY_ASSIGNMENTS_READ_ONLY}
                           style={selectStyle}
                         >
                           <option value="">None</option>

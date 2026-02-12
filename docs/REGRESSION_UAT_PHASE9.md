@@ -48,6 +48,7 @@ Status legend: `PASS`, `FAIL`, `PENDING`, `BLOCKED`
 
 Walkthrough script:
 - `docs/UAT_WALKTHROUGH_PHASE9.md`
+- `docs/CUTOVER_RUNBOOK.md`
 
 | ID | Area | Scenario | Expected Result | Status | Evidence |
 |---|---|---|---|---|---|

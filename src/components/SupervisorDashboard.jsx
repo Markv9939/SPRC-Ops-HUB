@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx'
 import SupervisorEocPanel from './SupervisorEocPanel'
 import CompliancePanel, { getStatus } from './CompliancePanel'
 import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
+import { hashPin } from '../utils/pinHash'
 
 const TAB_LABELS = {
   dashboard: '\u{1F4C8} Dashboard',
@@ -96,7 +97,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   // Real-time EOC issues + overdue tasks for dashboard summary
   useEffect(() => {
     const unsubIssues = onSnapshot(
-      query(collection(db, 'eocIssues'), where('status', '==', 'open'), orderBy('createdAt', 'desc')),
+      query(collection(db, 'eocIssues'), where('status', 'in', ['open', 'in_progress']), orderBy('createdAt', 'desc')),
       (snap) => setEocIssues(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     )
     const unsubOverdueTasks = onSnapshot(
@@ -138,14 +139,43 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     return unsub
   }, [])
 
+  const handleDashStartIssue = async (issueId) => {
+    try {
+      await updateDoc(doc(db, 'eocIssues', issueId), {
+        status: 'in_progress',
+        inProgressAt: serverTimestamp(),
+        inProgressByUserId: user?.id || null,
+        inProgressByName: user?.name || null,
+        updatedAt: serverTimestamp()
+      })
+      await writeAuditLog({
+        action: 'issue_in_progress',
+        collectionPath: 'eocIssues',
+        documentId: issueId,
+        reason: 'Supervisor started issue work'
+      })
+    } catch (err) {
+      console.error('Error moving issue to in_progress:', err)
+      alert('Failed to start issue progress')
+    }
+  }
+
   const handleDashResolveIssue = async (issueId) => {
+    if (!eocResolveNotes.trim()) {
+      alert('Resolution note is required.')
+      return
+    }
+
     try {
       const batch = writeBatch(db)
 
       batch.update(doc(db, 'eocIssues', issueId), {
         status: 'resolved',
-        resolvedNotes: eocResolveNotes,
-        resolvedAt: serverTimestamp()
+        resolvedNotes: eocResolveNotes.trim(),
+        resolvedAt: serverTimestamp(),
+        resolvedByUserId: user?.id || null,
+        resolvedByName: user?.name || null,
+        updatedAt: serverTimestamp()
       })
 
       // Close any open alerts tied to this issue as part of resolution lifecycle.
@@ -163,6 +193,12 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       })
 
       await batch.commit()
+      await writeAuditLog({
+        action: 'issue_resolved',
+        collectionPath: 'eocIssues',
+        documentId: issueId,
+        reason: eocResolveNotes.trim()
+      })
       setEocResolvingId(null)
       setEocResolveNotes('')
     } catch (err) {
@@ -253,7 +289,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
 
   const handleEditUser = (user) => {
     setEditingUser(user.id)
-    setUserForm({ ...user })
+    setUserForm({ ...user, pin: '' })
   }
 
   const handleSaveUser = async () => {
@@ -268,14 +304,26 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     }
 
     try {
-      await setDoc(doc(db, 'users', userForm.id), {
+      const pinHash = await hashPin(userForm.pin)
+      const payload = {
         name: userForm.name,
-        pin: userForm.pin,
+        pinHash,
+        pinVersion: 'v1_sha256',
+        pinUpdatedAt: serverTimestamp(),
         role: userForm.role,
         site: userForm.site,
         active: userForm.active,
-        authorizedLocations: userForm.authorizedLocations || null
-      })
+        authorizedLocations: userForm.authorizedLocations || null,
+        updatedAt: serverTimestamp()
+      }
+      if (editingUser === 'new') {
+        await setDoc(doc(db, 'users', userForm.id), {
+          ...payload,
+          createdAt: serverTimestamp()
+        })
+      } else {
+        await updateDoc(doc(db, 'users', userForm.id), payload)
+      }
       alert('User saved successfully!')
       setEditingUser(null)
       loadUsers()
@@ -415,16 +463,30 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
 
     try {
       if (editingAssignment === 'new') {
-        await addDoc(collection(db, 'bhtAssignments'), {
+        const createdRef = await addDoc(collection(db, 'bhtAssignments'), {
           ...payload,
           effectiveFrom: serverTimestamp(),
           effectiveTo: null,
           createdAt: serverTimestamp()
         })
+        await writeAuditLog({
+          action: 'assignment_create',
+          collectionPath: 'bhtAssignments',
+          documentId: createdRef.id,
+          reason: 'Supervisor created assignment',
+          extra: { locationId: payload.locationId, shiftId: payload.shiftId }
+        })
       } else {
         await updateDoc(doc(db, 'bhtAssignments', editingAssignment), {
           ...payload,
           updatedAt: serverTimestamp()
+        })
+        await writeAuditLog({
+          action: 'assignment_update',
+          collectionPath: 'bhtAssignments',
+          documentId: editingAssignment,
+          reason: 'Supervisor updated assignment',
+          extra: { locationId: payload.locationId, shiftId: payload.shiftId }
         })
       }
       setEditingAssignment(null)
@@ -1223,12 +1285,12 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                   </div>
                   <div>
                     <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                      PIN (4 digits) *
+                      PIN (4 digits) * {editingUser !== 'new' ? '(set new PIN to rotate)' : ''}
                     </label>
                     <input
                       type="text"
                       value={userForm.pin}
-                      onChange={(e) => setUserForm({ ...userForm, pin: e.target.value })}
+                      onChange={(e) => setUserForm({ ...userForm, pin: e.target.value.replace(/\D/g, '') })}
                       placeholder="1234"
                       maxLength="4"
                       style={{
@@ -1370,8 +1432,10 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                       <div style={{ fontSize: '14px' }}>{user.name}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: '#8899aa' }}>PIN</div>
-                      <div style={{ fontSize: '14px', fontFamily: 'monospace' }}>{user.pin}</div>
+                      <div style={{ fontSize: '11px', color: '#8899aa' }}>PIN Storage</div>
+                      <div style={{ fontSize: '14px', fontFamily: 'monospace' }}>
+                        {user.pinHash ? 'hashed (v1)' : (user.pin ? 'legacy plaintext' : 'unset')}
+                      </div>
                     </div>
                     <div>
                       <div style={{ fontSize: '11px', color: '#8899aa' }}>Role</div>
@@ -1528,7 +1592,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                     onChange={(e) => setQueueView(e.target.value)}
                     style={selectStyle}
                   >
-                    <option value="issues">Open Issues ({queueCounts.issues})</option>
+                    <option value="issues">Active Issues ({queueCounts.issues})</option>
                     <option value="overdue">Overdue Tasks ({queueCounts.overdue})</option>
                     <option value="alerts">Unread Alerts ({queueCounts.alerts})</option>
                   </select>
@@ -1553,7 +1617,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
               {/* Queue list */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {queueView === 'issues' && filteredIssueQueue.length === 0 && (
-                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No open issues for this filter.</div>
+                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No active issues for this filter.</div>
                 )}
                 {queueView === 'issues' && filteredIssueQueue.map(issue => (
                   <div key={issue.id} style={{
@@ -1564,9 +1628,14 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <span style={{ fontWeight: 700, fontSize: '14px' }}>{issue.label}</span>
-                      <span className={`chip severity-${issue.severity}`} style={{ fontSize: '11px', textTransform: 'capitalize' }}>
-                        {issue.severity}
-                      </span>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <span className={`chip severity-${issue.severity}`} style={{ fontSize: '11px', textTransform: 'capitalize' }}>
+                          {issue.severity}
+                        </span>
+                        <span className="chip" style={{ fontSize: '11px', textTransform: 'uppercase' }}>
+                          {issue.status || 'open'}
+                        </span>
+                      </div>
                     </div>
                     <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '4px' }}>{issue.description}</div>
                     <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
@@ -1574,11 +1643,24 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                       {issue.vanId ? ` \u00B7 ${VANS.find(v => v.id === issue.vanId)?.label || issue.vanId}` : ''}
                     </div>
 
-                    {eocResolvingId === issue.id ? (
+                    {issue.status === 'open' && (
+                      <button
+                        onClick={() => handleDashStartIssue(issue.id)}
+                        style={{
+                          padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8',
+                          border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Start Progress
+                      </button>
+                    )}
+
+                    {issue.status === 'in_progress' && eocResolvingId === issue.id ? (
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <input
                           className="input"
-                          placeholder="Resolution notes..."
+                          placeholder="Resolution notes (required)..."
                           value={eocResolveNotes}
                           onChange={e => setEocResolveNotes(e.target.value)}
                           style={{ flex: 1, padding: '6px 10px', fontSize: '13px' }}
@@ -1603,7 +1685,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                           Cancel
                         </button>
                       </div>
-                    ) : (
+                    ) : issue.status === 'in_progress' ? (
                       <button
                         onClick={() => setEocResolvingId(issue.id)}
                         style={{
@@ -1612,8 +1694,13 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                           cursor: 'pointer'
                         }}
                       >
-                        Mark Resolved
+                        Resolve
                       </button>
+                    ) : null}
+                    {issue.status === 'in_progress' && issue.inProgressByName && (
+                      <div style={{ fontSize: '11px', color: '#8899aa', marginTop: '6px' }}>
+                        In progress by {issue.inProgressByName}
+                      </div>
                     )}
                   </div>
                 ))}

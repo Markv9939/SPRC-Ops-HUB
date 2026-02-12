@@ -119,6 +119,33 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 - EOC issue resolution workflow (queue action + linked alert lifecycle update)
 - Admin hard-delete workflow (reason required + audit log write in same mutation batch)
 
+## Data Model and Interfaces (Canonical v1)
+- Canonical assignment model: `bhtAssignments`.
+- Canonical generated task model: `eocTasks` with deterministic cycle keys.
+- Legacy `eocAssignments` remains read-only during migration; active writes belong to `bhtAssignments`/`eocTasks` workflows.
+- User credential contract: `pinHash` (`v1_sha256`) for active authentication storage; legacy plaintext PIN is staged for migration/removal.
+
+## Write Integrity and Concurrency
+- Write batches are used for multi-document integrity flows (submission + task completion + issue/alert creation).
+- Deterministic task keys prevent duplicate due-cycle task creation.
+- Concurrency/version token contract is still pending for mutable records (`version`/`expectedVersion` backlog item).
+
+## Authorization and Rules Contract
+- Firestore rules enforce schema-level constraints and key lifecycle invariants (submission immutability, required resolution notes).
+- Full auth-backed role/location enforcement remains backlog until Firebase Auth + trusted claim path is adopted.
+- Client scope checks currently enforce most location restrictions in UI workflows.
+
+## Free-Tier Automation Model
+- No Cloud Functions scheduler in v1.
+- EOC generation + overdue flipping occurs through idempotent in-app sync (`syncEocTasksForUserScope`) on authenticated sessions.
+- Behavior remains deterministic through cycle-key identity and status-transition rules.
+
+## One-Time Reset and Cutover Runbook
+- Runbook reference: `docs/CUTOVER_RUNBOOK.md`.
+- UAT execution references:
+- `docs/UAT_WALKTHROUGH_PHASE9.md`
+- `docs/REGRESSION_UAT_PHASE9.md`
+
 ## Security Rules and Permission Contract
 - Move from client-trust to auth-backed role/location checks.
 - All writes validate:
@@ -266,26 +293,33 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 | 2026-02-12 | Phase 9 | Replaced legacy user seed script with destructive clean-state UAT reset/seed flow and linked it into walkthrough prerequisites to prevent stale-data regressions | `scripts/seedUsers.js`, `package.json`, `docs/UAT_WALKTHROUGH_PHASE9.md`, `docs/REGRESSION_UAT_PHASE9.md`, `plan.md` | `npm run seed` (guard verified), `npm run smoke:phase9` |
 | 2026-02-12 | Phase 9 | Hardened reset script to continue on permission-denied collections, executed reset, and documented active Firestore-rule blocker for `bhtAssignments`/`eocTasks` | `scripts/seedUsers.js`, `docs/REGRESSION_UAT_PHASE9.md`, `docs/UAT_WALKTHROUGH_PHASE9.md`, `plan.md` | `npm run reset:uat` (partial due rules), `npm run smoke:phase9` |
 | 2026-02-12 | Phase 9 | Deployed Firestore rules to `sprc-tx-l`, reran reset, and verified full clean-state seeding including assignments/tasks | `firestore.rules`, `scripts/seedUsers.js`, `docs/REGRESSION_UAT_PHASE9.md`, `docs/UAT_WALKTHROUGH_PHASE9.md`, `plan.md` | `firebase deploy --only firestore:rules --project sprc-tx-l`, `npm run reset:uat` |
+| 2026-02-12 | Backlog Closure | Implemented hashed PIN storage (`pinHash`) with staged legacy-login migration; removed plaintext seed dependency | `src/utils/pinHash.js`, `src/components/PinLogin.jsx`, `src/components/SupervisorDashboard.jsx`, `scripts/seedUsers.js`, `firestore.rules`, `plan.md` | `npm run build`, `npm run reset:uat` |
+| 2026-02-12 | Backlog Closure | Implemented transport lifecycle hardening: single-active guard, multi-site picker flow, and active-transport lock/logout guard | `src/App.jsx`, `plan.md` | `npm run build` |
+| 2026-02-12 | Backlog Closure | Implemented explicit BHT EOC state indicators and `Mark All OK` workflow support in hub/checklist | `src/components/BhtHub.jsx`, `src/components/EocChecklist.jsx`, `plan.md` | `npm run build` |
+| 2026-02-12 | Backlog Closure | Implemented full issue queue lifecycle (`open -> in_progress -> resolved`) with required resolution notes | `src/components/SupervisorDashboard.jsx`, `firestore.rules`, `plan.md` | `npm run build` |
+| 2026-02-12 | Backlog Closure | Added canonical blueprint contract sections and linked cutover runbook artifacts | `plan.md`, `docs/CUTOVER_RUNBOOK.md` | Manual blueprint contract review |
+| 2026-02-12 | Backlog Closure | Marked legacy `eocAssignments` controls read-only in Supervisor EOC panel with migration guidance | `src/components/SupervisorEocPanel.jsx`, `plan.md` | `npm run build` |
+| 2026-02-12 | Backlog Closure | Expanded audit logging coverage for assignment mutations, issue lifecycle actions, and transport close workflow | `src/components/SupervisorDashboard.jsx`, `src/components/CloseChecklist.jsx`, `src/App.jsx`, `plan.md` | `npm run build` |
 
 ## Upcoming Tasks (Gap Closure Backlog)
 
 ### P0 Critical (Must Land Before Broader Rollout)
-1. **Fix blueprint section contract drift**
-- Add missing required sections from the agreed replacement format:
+1. **Fix blueprint section contract drift (Completed 2026-02-12)**
+- Added required canonical sections:
 - `Data Model and Interfaces (Canonical v1)`
 - `Write Integrity and Concurrency`
 - `Authorization and Rules Contract`
 - `Free-Tier Automation Model`
 - `One-Time Reset and Cutover Runbook`
-- `Open Questions / Future Decisions`
 - Done when: `plan.md` structure fully matches the agreed canonical outline.
 
 2. **Replace client-trust security model with auth-backed enforcement**
 - Current rules explicitly state client-side trust and allow broad reads/writes (`firestore.rules`).
 - Done when: Firestore rules enforce role/location scope server-side and deny unauthorized paths.
 
-3. **Harden PIN auth model**
-- Current login queries plaintext PIN, and `users` schema still includes raw `pin`.
+3. **Harden PIN auth model (In Progress 2026-02-12)**
+- Implemented hash-based login contract (`pinHash`) and staged legacy plaintext migration on successful login.
+- Remaining: forced PIN change UX and full retirement/cleanup validation for any lingering plaintext records.
 - Done when: hashed PIN contract is implemented (`pinHash`, algo params), forced change flow exists, plaintext pins retired.
 
 4. **Enforce location scope on all data reads/writes**
@@ -305,28 +339,30 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 - Resolve `alerts` vs `supervisorAlerts`, `bhtAssignments` vs `shiftAssignments`, and legacy/target collection coexistence.
 - Done when: one authoritative schema set is documented and implemented.
 
-3. **Align deterministic EOC task ID contract**
-- Current IDs are `task_*` while prior blueprint text referenced house/van deterministic IDs.
+3. **Align deterministic EOC task ID contract (Completed 2026-02-12)**
+- Canonical task IDs are finalized as deterministic `task_{locationId}_{shiftId}_{taskType}_{...}_{dueDate}` cycle keys.
 - Done when: deterministic format is finalized and duplicate prevention is verified.
 
-4. **Retire legacy `eocAssignments` paths**
-- `SupervisorEocPanel` still uses legacy collection and workflows.
+4. **Retire legacy `eocAssignments` paths (In Progress 2026-02-12)**
+- `SupervisorEocPanel` legacy assignment writes are now blocked/read-only with migration guidance to `bhtAssignments`.
+- Remaining: remove legacy read dependencies after migration cutover confirms no historical dependency.
 - Done when: legacy reads/writes removed or explicitly marked read-only with migration plan.
 
-5. **Implement full issue lifecycle**
-- Required lifecycle is `open -> in_progress -> resolved` with required resolution note; current flow resolves directly.
+5. **Implement full issue lifecycle (Completed 2026-02-12)**
+- Lifecycle now supports `open -> in_progress -> resolved` with required resolution note in supervisor queue workflow.
 - Done when: state machine, validation, and queue UX support all states.
 
 6. **Add concurrency/version protection**
 - No `version` / `expectedVersion` checks currently.
 - Done when: optimistic concurrency is enforced on critical mutable records with conflict UX.
 
-7. **Implement audit trail for critical actions**
-- Add audit writes for assignment changes, issue resolution, closed transport edits, and hard deletes.
+7. **Implement audit trail for critical actions (In Progress 2026-02-12)**
+- Added/expanded audit writes for assignment create/update, issue in-progress/resolution, transport close, and hard-delete flows.
+- Remaining: complete audit coverage matrix for any remaining critical mutation paths.
 - Done when: `auditLogs` entries exist for all critical action categories.
 
-8. **Implement soft-delete + admin hard-delete workflow**
-- Include mandatory reason and immutable audit linkage.
+8. **Implement soft-delete + admin hard-delete workflow (Completed 2026-02-12)**
+- Soft-delete and admin hard-delete protections are implemented with mandatory reasons and audit log linkage.
 - Done when: soft-delete fields standardized and admin hard-delete guarded by policy.
 
 9. **Implement backup access grant/revoke contract**
@@ -338,28 +374,28 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 - Done when: policy is encoded in assignment/task services and audited.
 
 ### P2 Medium (UX and Operations Hardening)
-1. **Complete BHT EOC home state contract**
-- Add explicit button states (`Not Due`, `Due`, `Overdue`, `Completed`) and `Mark All OK`.
+1. **Complete BHT EOC home state contract (Completed 2026-02-12)**
+- Added explicit state indicators (`Not Due`, `Due`, `Overdue`, `Completed`) and `Mark All OK` helper workflow.
 - Done when: UI behavior matches blueprint verbatim.
 
-2. **Enforce single-active transport per BHT**
-- Current flow allows creating new transport without active guard.
+2. **Enforce single-active transport per BHT (Completed 2026-02-12)**
+- New transport start now checks for existing active transport and routes user to continue/close instead of creating duplicate active sessions.
 - Done when: second active start is blocked at UI and write layer.
 
-3. **Implement location picker logic for New Transport**
-- Single-location direct start; multi-location forced picker.
+3. **Implement location picker logic for New Transport (Completed 2026-02-12)**
+- Single location auto-start remains direct; multi-location accounts now require explicit site selection with default suggestion from last-used site.
 - Done when: start flow behavior is role/scope aware and tested.
 
-4. **Implement active-transport session guards**
-- Lock/logout should be blocked until close, with close-only recovery path.
+4. **Implement active-transport session guards (Completed 2026-02-12)**
+- Lock/logout now blocks while active transport exists and routes back to transport/close recovery flow.
 - Done when: session control rules match blueprint behavior.
 
 5. **Add offline read-only mode**
 - Writes should block cleanly while showing clear offline status.
 - Done when: offline write attempts are prevented and user informed.
 
-6. **Build cutover runbook and verification checklist**
-- Add one-time reset, seed, smoke checks, rollback path, and signoff flow.
+6. **Build cutover runbook and verification checklist (Completed 2026-02-12)**
+- Added `docs/CUTOVER_RUNBOOK.md` with reset, smoke, rollback, and signoff flow.
 - Done when: runbook is executable and rehearsal-validated.
 
 7. **Add acceptance and regression test suite**

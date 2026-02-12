@@ -162,6 +162,16 @@ function EocChecklist({ taskId, user, onComplete, onBack }) {
     return null
   }
 
+  const handleMarkAllOk = () => {
+    const nextAnswers = {}
+    for (const item of activeTemplate) {
+      nextAnswers[item.id] = 'ok'
+    }
+    setAnswers(nextAnswers)
+    setRepairDetails({})
+    setError('')
+  }
+
   const handleSubmit = async () => {
     const validationError = validate()
     if (validationError) {
@@ -357,6 +367,16 @@ function EocChecklist({ taskId, user, onComplete, onBack }) {
             House: {LOCATIONS.find(l => l.id === task?.locationId)?.label || task?.locationId}
           </div>
         )}
+      </div>
+
+      <div style={{ marginBottom: '14px' }}>
+        <button
+          className="btn btn-eoc"
+          onClick={handleMarkAllOk}
+          style={{ width: '100%', fontSize: '14px', borderRadius: '8px' }}
+        >
+          Mark All OK
+        </button>
       </div>
 
       {categories.map(cat => (

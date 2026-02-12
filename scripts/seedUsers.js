@@ -8,6 +8,7 @@ import {
   setDoc,
   serverTimestamp
 } from 'firebase/firestore'
+import { createHash } from 'crypto'
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDkeTilCGBAxaR9Vz4uiIHsxLENvvRsy7U',
@@ -37,6 +38,12 @@ const OPTIONAL_COLLECTIONS_TO_CLEAR = ['clients', 'destinations']
 
 const app = initializeApp(firebaseConfig)
 const db = getFirestore(app)
+
+function hashPin(pin) {
+  return createHash('sha256')
+    .update(`sprc-pin-v1:${String(pin || '').trim()}`)
+    .digest('hex')
+}
 
 function toPhoenixDateStr(dayOffset = 0) {
   const formatter = new Intl.DateTimeFormat('en-US', {
@@ -141,8 +148,12 @@ async function seedUsers() {
 
   let seededCount = 0
   for (const user of users) {
+    const { pin, ...rest } = user
     await setDoc(doc(db, 'users', user.id), {
-      ...user,
+      ...rest,
+      pinHash: hashPin(pin),
+      pinVersion: 'v1_sha256',
+      pinUpdatedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     })

@@ -4,12 +4,11 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ============================================================================
-    // PIN-BASED AUTHENTICATION MODEL
+    // PIN-BASED AUTHENTICATION MODEL (FREE-TIER V1)
     // ============================================================================
-    // This app uses custom PIN authentication (not Firebase Auth).
-    // request.auth will always be null since we don't use Firebase Auth tokens.
-    // Rules provide field-level validation and data integrity.
-    // Role/location enforcement is handled client-side in the React app.
+    // This app currently uses custom PIN login without Firebase Auth tokens.
+    // Rules focus on data integrity constraints and immutable/audit protections.
+    // PIN storage is hash-only (`pinHash`) with legacy plaintext fallback removed over time.
     // ============================================================================
 
     // Helper: prevent createdAt from being changed after creation
@@ -18,21 +17,29 @@ service cloud.firestore {
              || request.resource.data.createdAt == resource.data.createdAt;
     }
 
+    function validRole(role) {
+      return role in ['tech', 'supervisor', 'admin'];
+    }
+
+    function validUserWriteData(data) {
+      return data.keys().hasAll(['name', 'pinHash', 'role', 'active'])
+        && data.name is string
+        && data.pinHash is string
+        && data.pinHash.size() >= 32
+        && validRole(data.role)
+        && data.active is bool
+        && (!('site' in data) || data.site is string)
+        && (!('authorizedLocations' in data) || data.authorizedLocations is list)
+        && (!('pin' in data) || data.pin is string);
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if true;
 
-      allow create: if request.resource.data.keys().hasAll(['name', 'pin', 'role', 'active'])
-        && request.resource.data.name is string
-        && request.resource.data.pin is string
-        && request.resource.data.role in ['tech', 'supervisor', 'admin']
-        && request.resource.data.active is bool;
+      allow create: if validUserWriteData(request.resource.data);
 
-      allow update: if request.resource.data.keys().hasAll(['name', 'pin', 'role', 'active'])
-        && request.resource.data.name is string
-        && request.resource.data.pin is string
-        && request.resource.data.role in ['tech', 'supervisor', 'admin']
-        && request.resource.data.active is bool
+      allow update: if validUserWriteData(request.resource.data)
         && createdAtUnchanged();
 
       allow delete: if true;
@@ -114,9 +121,19 @@ service cloud.firestore {
 
       allow create: if request.resource.data.keys().hasAll([
         'locationId', 'eocType', 'label', 'status', 'reportedByUserId'
-      ]);
+      ])
+        && request.resource.data.status == 'open';
 
-      allow update: if createdAtUnchanged();
+      allow update: if request.resource.data.status in ['open', 'in_progress', 'resolved']
+        && (
+          request.resource.data.status != 'resolved'
+          || (
+            request.resource.data.keys().hasAny(['resolvedNotes'])
+            && request.resource.data.resolvedNotes is string
+            && request.resource.data.resolvedNotes.size() > 0
+          )
+        )
+        && createdAtUnchanged();
       allow delete: if true;
     }
 

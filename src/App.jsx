@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { db } from './firebase'
-import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore'
+import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, getDocs } from 'firebase/firestore'
 import PinLogin from './components/PinLogin'
 import Header from './components/Header'
 import BhtHub from './components/BhtHub'
@@ -12,10 +12,15 @@ import { syncEocTasksForUserScope } from './services/eocTaskEngine'
 
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
 const TRANSPORT_SITES = new Set(['PHP', 'RTC'])
+const ACTIVE_TRANSPORT_STATUSES = new Set(['open', 'arrived', 'returned'])
+
+function getLastTransportSiteKey(userId) {
+  return `lastTransportSite:${userId || 'unknown'}`
+}
 
 function getScopedTransportSites(user) {
   if (!user) return []
-  if (user.role === 'admin') return []
+  if (user.role === 'admin') return Array.from(TRANSPORT_SITES)
 
   const raw = []
   if (user.site) raw.push(user.site)
@@ -23,6 +28,25 @@ function getScopedTransportSites(user) {
 
   const normalized = [...new Set(raw.map(v => String(v || '').trim().toUpperCase()))]
   return normalized.filter(v => TRANSPORT_SITES.has(v))
+}
+
+function promptForTransportSite(sites, defaultSite) {
+  const suggestion = defaultSite && sites.includes(defaultSite) ? defaultSite : sites[0]
+  const promptText = [
+    'Select transport site:',
+    sites.map(site => `- ${site}`).join('\n'),
+    '',
+    'Type site code exactly (e.g. PHP).'
+  ].join('\n')
+
+  const input = window.prompt(promptText, suggestion)
+  if (input === null) return null
+  const normalized = String(input || '').trim().toUpperCase()
+  if (!sites.includes(normalized)) {
+    alert(`Invalid site. Allowed: ${sites.join(', ')}`)
+    return null
+  }
+  return normalized
 }
 
 function App() {
@@ -41,18 +65,38 @@ function App() {
   const [transports, setTransports] = useState([])
   const [currentTransportId, setCurrentTransportId] = useState(null)
   const [currentTaskId, setCurrentTaskId] = useState(null)
-  const [lastActivity, setLastActivity] = useState(Date.now())
   const [alertCount, setAlertCount] = useState(0)
+
+  const getActiveTransport = () => {
+    if (!user || user.role !== 'tech') return null
+    return transports.find(t => ACTIVE_TRANSPORT_STATUSES.has(String(t.status || '').toLowerCase())) || null
+  }
+
+  const resumeActiveTransport = (transport) => {
+    if (!transport?.id) return
+    setCurrentTransportId(transport.id)
+    if (transport.status === 'returned') {
+      setPage('closeChecklist')
+      return
+    }
+    setPage('transport')
+  }
 
   function handleLogin(userData) {
     sessionStorage.setItem('bhtUser', JSON.stringify(userData))
     setUser(userData)
     setPage('home')
-    setLastActivity(Date.now())
     localStorage.setItem('lastActivity', Date.now().toString())
   }
 
   function handleLogout() {
+    const activeTransport = getActiveTransport()
+    if (activeTransport) {
+      alert('You cannot lock/logout while a transport is active. Close the transport first.')
+      resumeActiveTransport(activeTransport)
+      return
+    }
+
     sessionStorage.removeItem('bhtUser')
     setUser(null)
     setPage('home')
@@ -67,7 +111,6 @@ function App() {
     if (!user) return
 
     const updateActivity = () => {
-      setLastActivity(Date.now())
       localStorage.setItem('lastActivity', Date.now().toString())
     }
 
@@ -83,6 +126,12 @@ function App() {
       const timeSinceActivity = Date.now() - lastActivityTime
 
       if (timeSinceActivity > AUTO_LOCK_TIMEOUT) {
+        const activeTransport = getActiveTransport()
+        if (activeTransport) {
+          localStorage.setItem('lastActivity', Date.now().toString())
+          resumeActiveTransport(activeTransport)
+          return
+        }
         alert('Session expired due to inactivity. Please log in again.')
         handleLogout()
       }
@@ -133,7 +182,7 @@ function App() {
     })
 
     return () => unsubscribe()
-  }, [user])
+  }, [user, transports])
 
   // Sync EOC task generation + overdue status on session start.
   useEffect(() => {
@@ -189,14 +238,46 @@ function App() {
 
   async function handleNewTransport() {
     try {
-      const scopedSites = getScopedTransportSites(user)
-      const transportSite =
-        String(user?.site || '').trim().toUpperCase() ||
-        scopedSites[0] ||
-        ''
+      const activeTransport = getActiveTransport()
+      if (activeTransport) {
+        alert('You already have an active transport. Continue/close it before starting a new one.')
+        resumeActiveTransport(activeTransport)
+        return
+      }
 
-      if (!TRANSPORT_SITES.has(transportSite)) {
+      const scopedSites = getScopedTransportSites(user)
+      const allowedSites = scopedSites.filter(site => TRANSPORT_SITES.has(site))
+      if (allowedSites.length === 0) {
         alert('No valid transport site is configured for your account.')
+        return
+      }
+
+      const lastSiteKey = getLastTransportSiteKey(user?.id)
+      const lastUsedSite = String(localStorage.getItem(lastSiteKey) || '').trim().toUpperCase()
+      const profileSite = String(user?.site || '').trim().toUpperCase()
+
+      let transportSite = ''
+      if (allowedSites.length === 1) {
+        transportSite = allowedSites[0]
+      } else {
+        const preferredSite = [lastUsedSite, profileSite].find(site => allowedSites.includes(site)) || allowedSites[0]
+        transportSite = promptForTransportSite(allowedSites, preferredSite) || ''
+      }
+
+      if (!TRANSPORT_SITES.has(transportSite)) return
+
+      // Write-layer guard (client-enforced in free-tier v1): prevent duplicate active transport creation.
+      const activeSnapshot = await getDocs(
+        query(
+          collection(db, 'transports'),
+          where('createdByUserId', '==', user.id),
+          where('status', 'in', ['open', 'arrived', 'returned'])
+        )
+      )
+      if (!activeSnapshot.empty) {
+        const existing = activeSnapshot.docs[0]
+        alert('Active transport already exists. Redirecting to continue it.')
+        resumeActiveTransport({ id: existing.id, ...existing.data() })
         return
       }
 
@@ -216,6 +297,7 @@ function App() {
       }
 
       const docRef = await addDoc(collection(db, 'transports'), newTransport)
+      localStorage.setItem(lastSiteKey, transportSite)
       setCurrentTransportId(docRef.id)
       setPage('transport')
     } catch (error) {
@@ -273,6 +355,7 @@ function App() {
         <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
         <CloseChecklist
           transportId={currentTransportId}
+          user={user}
           onClose={handleCloseChecklistBack}
           onComplete={handleCloseChecklistComplete}
         />

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, getDoc, updateDoc, serverTimestamp, addDoc, collection } from 'firebase/firestore'
 
-function CloseChecklist({ transportId, onClose, onComplete }) {
+function CloseChecklist({ transportId, onClose, onComplete, user }) {
   const [loading, setLoading] = useState(true)
   const [transport, setTransport] = useState(null)
   const [errors, setErrors] = useState([])
@@ -65,6 +65,17 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
         closedAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       })
+      if (user?.id && user?.name) {
+        await addDoc(collection(db, 'auditLogs'), {
+          action: 'transport_close',
+          collectionPath: 'transports',
+          documentId: transportId,
+          performedByUserId: user.id,
+          performedByName: user.name,
+          reason: 'Transport closed via close checklist',
+          createdAt: serverTimestamp()
+        })
+      }
       onComplete()
     } catch (error) {
       console.error('Error closing transport:', error)

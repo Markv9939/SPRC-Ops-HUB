@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { collection, query, where, getDocs } from 'firebase/firestore'
+import { collection, query, where, getDocs, updateDoc, doc, deleteField, serverTimestamp } from 'firebase/firestore'
+import { hashPin } from '../utils/pinHash'
 
 const MAX_FAILED_ATTEMPTS = 5
 const LOCKOUT_DURATION_MS = 5 * 60 * 1000 // 5 minutes
@@ -64,9 +65,25 @@ function PinLogin({ onLogin }) {
     setError('')
 
     try {
+      const pinHash = await hashPin(pin)
       const usersRef = collection(db, 'users')
-      const q = query(usersRef, where('pin', '==', pin), where('active', '==', true))
-      const querySnapshot = await getDocs(q)
+      const hashQuery = query(usersRef, where('pinHash', '==', pinHash), where('active', '==', true))
+      let querySnapshot = await getDocs(hashQuery)
+
+      // Staged migration support: fallback to legacy plaintext PIN docs, then upgrade in place.
+      if (querySnapshot.empty) {
+        const legacyQuery = query(usersRef, where('pin', '==', pin), where('active', '==', true))
+        querySnapshot = await getDocs(legacyQuery)
+        if (!querySnapshot.empty) {
+          const legacyDoc = querySnapshot.docs[0]
+          await updateDoc(doc(db, 'users', legacyDoc.id), {
+            pinHash,
+            pin: deleteField(),
+            pinMigratedAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          })
+        }
+      }
 
       if (querySnapshot.empty) {
         const newFailedAttempts = failedAttempts + 1
