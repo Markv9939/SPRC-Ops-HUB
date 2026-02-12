@@ -98,7 +98,8 @@ function PinLogin({ onLogin }) {
           site: userData.site,
           locationId: userData.locationId || null,
           shiftId: userData.shiftId || null,
-          vanId: userData.vanId || null
+          vanId: userData.vanId || null,
+          authorizedLocations: userData.authorizedLocations || null
         })
       }
     } catch (err) {
@@ -145,7 +146,7 @@ function PinLogin({ onLogin }) {
           color: '#e8e8e8',
           marginBottom: '5px'
         }}>
-          BHT Hub
+          SPRC Ops Hub
         </h1>
 
         <p style={{

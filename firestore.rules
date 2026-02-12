@@ -4,61 +4,161 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ============================================================================
-    // IMPORTANT: PIN-BASED AUTHENTICATION MODEL
+    // PIN-BASED AUTHENTICATION MODEL
     // ============================================================================
     // This app uses custom PIN authentication (not Firebase Auth).
-    // Users log in via PinLogin.jsx which queries the users collection directly.
     // request.auth will always be null since we don't use Firebase Auth tokens.
-    //
-    // SECURITY MODEL:
-    // - We rely on client-side role enforcement in the React app
-    // - These rules provide basic validation and data integrity
-    // - For production, consider adding Firebase Anonymous Auth + Custom Claims
-    //   to properly enforce role-based permissions server-side
+    // Rules provide field-level validation and data integrity.
+    // Role/location enforcement is handled client-side in the React app.
     // ============================================================================
 
-    // Users collection (managed via supervisor dashboard)
+    // Helper: prevent createdAt from being changed after creation
+    function createdAtUnchanged() {
+      return !('createdAt' in resource.data)
+             || request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    // Users collection
     match /users/{userId} {
-      // Open read for PIN authentication lookups
       allow read: if true;
-      // Open write for user management via supervisor dashboard
-      // In production, consider adding role-based checks via Custom Claims
-      allow write: if true;
+
+      allow create: if request.resource.data.keys().hasAll(['name', 'pin', 'role', 'active'])
+        && request.resource.data.name is string
+        && request.resource.data.pin is string
+        && request.resource.data.role in ['tech', 'supervisor', 'admin']
+        && request.resource.data.active is bool;
+
+      allow update: if request.resource.data.keys().hasAll(['name', 'pin', 'role', 'active'])
+        && request.resource.data.name is string
+        && request.resource.data.pin is string
+        && request.resource.data.role in ['tech', 'supervisor', 'admin']
+        && request.resource.data.active is bool
+        && createdAtUnchanged();
+
+      allow delete: if true;
     }
 
     // Clients collection (autocomplete suggestions)
     match /clients/{clientId} {
-      // Open read/write for all users
       allow read, write: if true;
     }
 
     // Destinations collection (autocomplete suggestions)
     match /destinations/{destinationId} {
-      // Open read/write for all users
       allow read, write: if true;
     }
 
-    // EOC collections
+    // BHT Assignments collection
+    match /bhtAssignments/{docId} {
+      allow read: if true;
+
+      allow create: if request.resource.data.keys().hasAll([
+        'bhtUserId', 'bhtUserName', 'locationId', 'shiftId', 'vanIds',
+        'isHousePrimary', 'active'
+      ])
+        && request.resource.data.bhtUserId is string
+        && request.resource.data.locationId is string
+        && request.resource.data.shiftId is string
+        && request.resource.data.vanIds is list
+        && request.resource.data.isHousePrimary is bool
+        && request.resource.data.active is bool;
+
+      allow update: if createdAtUnchanged();
+      allow delete: if true;
+    }
+
+    // EOC Tasks collection
+    match /eocTasks/{docId} {
+      allow read: if true;
+
+      allow create: if request.resource.data.keys().hasAll([
+        'taskType', 'locationId', 'shiftId', 'assigneeUserId',
+        'dueDate', 'status', 'cycleKey'
+      ])
+        && request.resource.data.taskType in ['house', 'van']
+        && request.resource.data.status in ['pending', 'overdue', 'completed'];
+
+      allow update: if request.resource.data.status in ['pending', 'overdue', 'completed']
+        && createdAtUnchanged();
+
+      allow delete: if true;
+    }
+
+    // EOC Assignments (legacy — kept for historical data)
     match /eocAssignments/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+
+      allow create: if request.resource.data.keys().hasAll([
+        'locationId', 'shiftId', 'dueDate', 'assignedTechId', 'eocType', 'status'
+      ]);
+
+      allow update: if createdAtUnchanged();
+      allow delete: if true;
     }
-    match /eocIssues/{docId} {
-      allow read, write: if true;
-    }
+
+    // EOC Submissions
     match /eocSubmissions/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+
+      allow create: if request.resource.data.keys().hasAll([
+        'locationId', 'shiftId', 'eocType', 'submittedByUserId', 'submittedByName'
+      ]);
+
+      allow update: if createdAtUnchanged();
+      allow delete: if true;
     }
+
+    // EOC Issues
+    match /eocIssues/{docId} {
+      allow read: if true;
+
+      allow create: if request.resource.data.keys().hasAll([
+        'locationId', 'eocType', 'label', 'status', 'reportedByUserId'
+      ]);
+
+      allow update: if createdAtUnchanged();
+      allow delete: if true;
+    }
+
+    // Supervisor Alerts
     match /supervisorAlerts/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+
+      allow create: if request.resource.data.keys().hasAll([
+        'type', 'message', 'read'
+      ])
+        && request.resource.data.read is bool;
+
+      allow update: if createdAtUnchanged();
+      allow delete: if true;
     }
+
+    // Audit Logs
+    match /auditLogs/{docId} {
+      allow read: if true;
+
+      allow create: if request.resource.data.keys().hasAll([
+        'action', 'collectionPath', 'documentId',
+        'performedByUserId', 'performedByName', 'reason'
+      ])
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() > 0;
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // EOC Checklist Template
     match /eocChecklistTemplate/{docId} {
       allow read, write: if true;
     }
+
+    // EOC Vehicles
     match /eocVehicles/{docId} {
       allow read, write: if true;
     }
 
-    // Compliance collections (dashboard tracking)
+    // Compliance collections
     match /complianceEmployees/{employeeId} {
       allow read, write: if true;
     }
@@ -71,57 +171,43 @@ service cloud.firestore {
 
     // Transports collection
     match /transports/{transportId} {
-      // Read: Open to all (client-side filtering by role)
       allow read: if true;
 
-      // Create: Require essential fields
       allow create: if request.resource.data.keys().hasAll([
-        'site',
-        'createdByUserId',
-        'createdByName',
-        'status',
-        'departedAt',
-        'createdAt'
-      ]) &&
-      // Validate status is one of allowed values
-      request.resource.data.status in ['open', 'arrived', 'returned', 'closed'] &&
-      // Validate site is PHP or RTC
-      request.resource.data.site in ['PHP', 'RTC'];
+        'site', 'createdByUserId', 'createdByName', 'status', 'departedAt', 'createdAt'
+      ])
+        && request.resource.data.status in ['open', 'arrived', 'returned', 'closed']
+        && request.resource.data.site in ['PHP', 'RTC'];
 
-      // Update: Require essential fields remain
       allow update: if request.resource.data.keys().hasAll([
-        'site',
-        'createdByUserId',
-        'createdByName',
-        'status',
-        'departedAt',
-        'updatedAt'
-      ]) &&
-      // Validate status transitions
-      request.resource.data.status in ['open', 'arrived', 'returned', 'closed'] &&
-      // Prevent changing the creator
-      request.resource.data.createdByUserId == resource.data.createdByUserId &&
-      request.resource.data.createdByName == resource.data.createdByName &&
-      // Prevent changing the site
-      request.resource.data.site == resource.data.site &&
-      // When setting status to returned or closed, require dcPaperworkStatus
-      (
-        !(request.resource.data.status in ['returned', 'closed'])
-        || (
-          request.resource.data.keys().hasAny(['dcPaperworkStatus'])
-          && request.resource.data.dcPaperworkStatus in ['collected', 'na', 'other']
-          && (
-            request.resource.data.dcPaperworkStatus != 'other'
-            || (request.resource.data.keys().hasAny(['dcPaperworkOtherNote'])
-                && request.resource.data.dcPaperworkOtherNote is string
-                && request.resource.data.dcPaperworkOtherNote.size() > 0)
+        'site', 'createdByUserId', 'createdByName', 'status', 'departedAt', 'updatedAt'
+      ])
+        && request.resource.data.status in ['open', 'arrived', 'returned', 'closed']
+        && request.resource.data.createdByUserId == resource.data.createdByUserId
+        && request.resource.data.createdByName == resource.data.createdByName
+        && request.resource.data.site == resource.data.site
+        && createdAtUnchanged()
+        && (
+          !(request.resource.data.status in ['returned', 'closed'])
+          || (
+            request.resource.data.keys().hasAny(['dcPaperworkStatus'])
+            && request.resource.data.dcPaperworkStatus in ['collected', 'na', 'other']
+            && (
+              request.resource.data.dcPaperworkStatus != 'other'
+              || (request.resource.data.keys().hasAny(['dcPaperworkOtherNote'])
+                  && request.resource.data.dcPaperworkOtherNote is string
+                  && request.resource.data.dcPaperworkOtherNote.size() > 0)
+            )
           )
-        )
-      );
+        );
 
-      // Delete: Open (client-side role enforcement)
-      // In production, this should be restricted to supervisors via custom claims
       allow delete: if true;
+    }
+
+    // App settings
+    match /appSettings/{docId} {
+      allow read: if true;
+      allow write: if true;
     }
 
     // Deny all other paths

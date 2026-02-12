@@ -26,7 +26,8 @@ function App() {
   const [page, setPage] = useState('home')
   const [transports, setTransports] = useState([])
   const [currentTransportId, setCurrentTransportId] = useState(null)
-  const [currentAssignmentId, setCurrentAssignmentId] = useState(null)
+  const [currentTaskId, setCurrentTaskId] = useState(null)
+  const [currentTaskVanId, setCurrentTaskVanId] = useState(null)
   const [lastActivity, setLastActivity] = useState(Date.now())
   const [alertCount, setAlertCount] = useState(0)
 
@@ -44,7 +45,8 @@ function App() {
     setPage('home')
     setTransports([])
     setCurrentTransportId(null)
-    setCurrentAssignmentId(null)
+    setCurrentTaskId(null)
+    setCurrentTaskVanId(null)
     localStorage.removeItem('lastActivity')
   }
 
@@ -89,8 +91,8 @@ function App() {
     const transportsRef = collection(db, 'transports')
     let q
 
-    if (user.role === 'supervisor') {
-      // Supervisor sees all transports
+    if (user.role === 'supervisor' || user.role === 'admin') {
+      // Supervisor and admin see all transports
       q = query(transportsRef, orderBy('departedAt', 'desc'))
     } else {
       // Tech sees only their own transports
@@ -112,9 +114,9 @@ function App() {
     return () => unsubscribe()
   }, [user])
 
-  // Supervisor alert count listener
+  // Supervisor/admin alert count listener
   useEffect(() => {
-    if (!user || user.role !== 'supervisor') return
+    if (!user || (user.role !== 'supervisor' && user.role !== 'admin')) return
 
     const q = query(
       collection(db, 'supervisorAlerts'),
@@ -128,18 +130,21 @@ function App() {
     return () => unsubscribe()
   }, [user])
 
-  function handleStartEoc(assignmentId) {
-    setCurrentAssignmentId(assignmentId)
+  function handleStartEoc(taskId, vanId) {
+    setCurrentTaskId(taskId)
+    setCurrentTaskVanId(vanId || null)
     setPage('eocForm')
   }
 
   function handleEocComplete() {
-    setCurrentAssignmentId(null)
+    setCurrentTaskId(null)
+    setCurrentTaskVanId(null)
     setPage('home')
   }
 
   function handleEocBack() {
-    setCurrentAssignmentId(null)
+    setCurrentTaskId(null)
+    setCurrentTaskVanId(null)
     setPage('home')
   }
 
@@ -230,7 +235,8 @@ function App() {
       <div className="app-bg">
         <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
         <EocChecklist
-          assignmentId={currentAssignmentId}
+          taskId={currentTaskId}
+          vanId={currentTaskVanId}
           user={user}
           onComplete={handleEocComplete}
           onBack={handleEocBack}
@@ -239,12 +245,13 @@ function App() {
     )
   }
 
-  // Show supervisor dashboard for supervisor role
-  if (user.role === 'supervisor') {
+  // Show supervisor dashboard for supervisor or admin role
+  if (user.role === 'supervisor' || user.role === 'admin') {
     return (
       <div className="app-bg">
         <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
         <SupervisorDashboard
+          user={user}
           onNewTransport={handleNewTransport}
           onLogout={handleLogout}
           userName={user.name}
