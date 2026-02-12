@@ -18,6 +18,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
   const [showArriveReminder, setShowArriveReminder] = useState(false)
   const [dcPaperworkStatus, setDcPaperworkStatus] = useState(null)
   const [dcPaperworkOtherNote, setDcPaperworkOtherNote] = useState('')
+  const submitLocked = status === 'returned' || status === 'closed'
 
   const reasonOptions = [
     'Medical X appointment',
@@ -63,9 +64,16 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
 
   const save = async (updates) => {
     if (!transportId) return
+    if (submitLocked) return
     try {
       await updateDoc(doc(db, 'transports', transportId), { ...updates, notes, updatedAt: serverTimestamp() })
     } catch (err) { console.error('Save error:', err) }
+  }
+
+  const blockIfLocked = () => {
+    if (!submitLocked) return false
+    alert('This transport has been submitted and is locked from further edits.')
+    return true
   }
 
   // --- client usage tracking ---
@@ -90,6 +98,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
 
   // --- clients ---
   const handleAddClient = async (clientName) => {
+    if (blockIfLocked()) return
     const updated = [...clients, clientName]
     setClients(updated)
     await touchClientUsage(clientName) // Update lastUsedAt
@@ -97,6 +106,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
   }
 
   const removeClient = (i) => {
+    if (blockIfLocked()) return
     const updated = clients.filter((_, idx) => idx !== i)
     setClients(updated)
     save({ clients: updated })
@@ -104,18 +114,21 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
 
   // --- reasons ---
   const toggleReason = (r) => {
+    if (blockIfLocked()) return
     const updated = reasons.includes(r) ? reasons.filter(x => x !== r) : [...reasons, r]
     setReasons(updated); save({ reasons: updated })
   }
 
   // --- destinations ---
   const handleAddDestination = async (destination) => {
+    if (blockIfLocked()) return
     const updated = [...destinations, destination]
     setDestinations(updated)
     await save({ destinations: updated })
   }
 
   const removeDest = (i) => {
+    if (blockIfLocked()) return
     const updated = destinations.filter((_, idx) => idx !== i)
     setDestinations(updated)
     save({ destinations: updated })
@@ -123,10 +136,12 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
 
   // --- arrive (logs time, shows DC reminder) ---
   const handleArrive = () => {
+    if (blockIfLocked()) return
     setShowArriveReminder(true)
   }
 
   const handleArriveConfirm = () => {
+    if (blockIfLocked()) return
     setShowArriveReminder(false)
     const stop = { arrivedAt: new Date().toISOString() }
     const updated = [...stops, stop]
@@ -151,11 +166,13 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
   }
 
   const handleFinish = () => {
+    if (blockIfLocked()) return
     if (!canFinish) { alert('Missing: ' + missingMsg()); return }
     setShowDCPaperwork(true)
   }
 
   const handleDCPaperworkComplete = async (result) => {
+    if (submitLocked) return
     setShowDCPaperwork(false)
     setDcPaperworkStatus(result.status)
     setDcPaperworkOtherNote(result.otherNote || '')
@@ -202,11 +219,18 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
       <button
         className={`btn btn-arrive pulse`}
         onClick={handleArrive}
+        disabled={submitLocked}
         style={{ width: '100%', fontSize: '18px', marginBottom: '6px', borderRadius: 'var(--radius)' }}
       >
         ARRIVE{stops.length > 0 ? ` (${stops.length} logged)` : ''}
       </button>
       <p style={{ textAlign: 'center', fontSize: '11px', color: '#556677', marginBottom: '16px' }}>Tap to log an arrival time</p>
+
+      {submitLocked && (
+        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#FF9800', textAlign: 'center' }}>
+          Transport is submitted and locked. You can review details, but editing is disabled.
+        </div>
+      )}
 
       {/* Arrivals */}
       {stops.length > 0 && (
@@ -250,15 +274,20 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
             </div>
             <button
               onClick={() => removeDest(i)}
+              disabled={submitLocked}
               style={{ background: 'none', border: 'none', color: '#C94A3F', cursor: 'pointer', fontSize: '18px', padding: '0 4px', lineHeight: 1 }}
             >×</button>
           </div>
         ))}
 
-        <DestinationAutocomplete
-          onAddDestination={handleAddDestination}
-          existingDestinations={destinations}
-        />
+        {!submitLocked ? (
+          <DestinationAutocomplete
+            onAddDestination={handleAddDestination}
+            existingDestinations={destinations}
+          />
+        ) : (
+          <div style={{ fontSize: '12px', color: '#8899aa' }}>Destination editing is locked after submit.</div>
+        )}
       </div>
 
       {/* Clients */}
@@ -268,15 +297,19 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
           {clients.map((c, i) => (
             <div key={i} className="chip chip-client">
               <span>{c}</span>
-              <button onClick={() => removeClient(i)} style={{ background: 'none', border: 'none', color: '#2E7D32', cursor: 'pointer', fontSize: '16px', padding: 0, lineHeight: 1 }}>×</button>
+              <button onClick={() => removeClient(i)} disabled={submitLocked} style={{ background: 'none', border: 'none', color: '#2E7D32', cursor: 'pointer', fontSize: '16px', padding: 0, lineHeight: 1 }}>×</button>
             </div>
           ))}
         </div>
-        <ClientAutocomplete
-          onAddClient={handleAddClient}
-          existingClients={clients}
-          transportId={transportId}
-        />
+        {!submitLocked ? (
+          <ClientAutocomplete
+            onAddClient={handleAddClient}
+            existingClients={clients}
+            transportId={transportId}
+          />
+        ) : (
+          <div style={{ fontSize: '12px', color: '#8899aa' }}>Client editing is locked after submit.</div>
+        )}
       </div>
 
       {/* Reasons */}
@@ -284,7 +317,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
         <div className="section-label">Reason(s)</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
           {reasonOptions.map((r) => (
-            <button key={r} className={`chip ${reasons.includes(r) ? 'chip-selected' : 'chip-unselected'}`} onClick={() => toggleReason(r)}>
+            <button key={r} className={`chip ${reasons.includes(r) ? 'chip-selected' : 'chip-unselected'}`} onClick={() => toggleReason(r)} disabled={submitLocked}>
               {r}
             </button>
           ))}
@@ -298,7 +331,8 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
           className="input"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          onBlur={() => save({ notes })}
+          onBlur={() => { if (!submitLocked) save({ notes }) }}
+          readOnly={submitLocked}
           placeholder="Any additional notes..."
           rows={3}
           style={{ resize: 'vertical', fontFamily: 'inherit' }}
@@ -309,7 +343,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
       <button
         className={`btn ${canFinish ? 'btn-finish' : 'btn-disabled'}`}
         onClick={handleFinish}
-        disabled={!canFinish}
+        disabled={!canFinish || submitLocked}
         style={{ width: '100%', fontSize: '18px', padding: '16px', borderRadius: 'var(--radius)' }}
       >
         Finish TX
@@ -403,3 +437,4 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
 }
 
 export default TransportCard
+

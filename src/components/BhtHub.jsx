@@ -1,8 +1,12 @@
+import { useEffect, useState } from 'react'
 import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 import useEocAssignments from '../hooks/useEocAssignments'
+import useEocTasks from '../hooks/useEocTasks'
 
 function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStartEoc }) {
   const { assignment, loading: assignmentLoading } = useEocAssignments(user)
+  const { tasks, loading: tasksLoading } = useEocTasks(user)
+  const [selectedVanTaskId, setSelectedVanTaskId] = useState('')
 
   const hasAssignment = !!assignment
   const locationLabel = hasAssignment ? LOCATIONS.find(l => l.id === assignment.locationId)?.label : null
@@ -10,6 +14,20 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
   const vanLabels = hasAssignment && assignment.vanIds?.length > 0
     ? assignment.vanIds.map(vid => VANS.find(v => v.id === vid)?.label || vid)
     : []
+
+  const actionableTasks = hasAssignment
+    ? tasks.filter(t => t.status === 'pending' || t.status === 'overdue')
+    : []
+  const houseTask = actionableTasks.find(t => t.taskType === 'house') || null
+  const vanTasks = actionableTasks.filter(t => t.taskType === 'van')
+  const selectedVanTask = vanTasks.find(t => t.id === selectedVanTaskId) || null
+
+  const actionableByLocation = actionableTasks.reduce((acc, task) => {
+    const key = task.locationId || 'unknown'
+    if (!acc[key]) acc[key] = []
+    acc[key].push(task)
+    return acc
+  }, {})
 
   const formatTime = (timestamp) => {
     if (!timestamp) return '--:--'
@@ -37,9 +55,36 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
     return `badge ${map[status] || ''}`
   }
 
+  const taskTitle = (task) => {
+    if (task.taskType === 'house') return 'House EOC'
+    const vanLabel = VANS.find(v => v.id === task.vanId)?.label || task.vanId || 'Van'
+    return `Van EOC - ${vanLabel}`
+  }
+
+  const taskSubtitle = (task) => {
+    const shift = SHIFTS.find(s => s.id === task.shiftId)?.label || task.shiftId
+    return `${shift} - Due ${task.dueDate}`
+  }
+
   const openTransports = transports.filter(t => t.status !== 'closed')
 
-  if (assignmentLoading) {
+  useEffect(() => {
+    if (!hasAssignment) {
+      if (selectedVanTaskId) setSelectedVanTaskId('')
+      return
+    }
+
+    if (vanTasks.length === 0) {
+      if (selectedVanTaskId) setSelectedVanTaskId('')
+      return
+    }
+
+    if (!vanTasks.some(t => t.id === selectedVanTaskId)) {
+      setSelectedVanTaskId(vanTasks[0].id)
+    }
+  }, [hasAssignment, selectedVanTaskId, vanTasks, tasks])
+
+  if (assignmentLoading || tasksLoading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: '#556677' }}>
         Loading...
@@ -57,13 +102,13 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
         </div>
         {hasAssignment ? (
           <div style={{ fontSize: '13px', color: '#8899aa' }}>
-            {locationLabel} &bull; {shiftLabel}
-            {vanLabels.length > 0 ? ` \u00B7 ${vanLabels.join(', ')}` : ''}
+            {locationLabel} - {shiftLabel}
+            {vanLabels.length > 0 ? ` - ${vanLabels.join(', ')}` : ''}
             {assignment.isHousePrimary && <span style={{ color: '#4CAF50', marginLeft: '8px' }}>House Primary</span>}
           </div>
         ) : (
           <div style={{ fontSize: '13px', color: '#FF9800' }}>
-            No active assignment — contact a supervisor
+            No active assignment - contact a supervisor
           </div>
         )}
       </div>
@@ -84,7 +129,7 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
         </div>
       )}
 
-      {/* Transport button — always available */}
+      {/* Transport button - always available */}
       <button
         className="btn btn-primary hub-action-btn"
         onClick={onNewTransport}
@@ -93,24 +138,127 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
         + New Transport
       </button>
 
-      {/* EOC buttons — only when assigned */}
-      {hasAssignment && assignment.isHousePrimary && (
-        <button
-          className="btn btn-eoc hub-action-btn"
-          onClick={() => onStartEoc(null, null)}
-          style={{ width: '100%', fontSize: '18px', marginBottom: '10px', borderRadius: 'var(--radius)' }}
-        >
-          Complete House EOC
-        </button>
-      )}
-      {hasAssignment && assignment.vanIds?.length > 0 && (
-        <button
-          className="btn btn-eoc hub-action-btn"
-          onClick={() => onStartEoc(null, assignment.vanIds.length === 1 ? assignment.vanIds[0] : null)}
-          style={{ width: '100%', fontSize: '18px', marginBottom: '20px', borderRadius: 'var(--radius)' }}
-        >
-          Complete Van EOC
-        </button>
+      {/* Assignment-driven EOC tasks */}
+      {hasAssignment && (
+        <div className="glass-card" style={{ marginBottom: '20px', padding: '16px' }}>
+          <div className="section-label" style={{ marginBottom: '10px' }}>Due EOCs</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: actionableTasks.length > 0 ? '12px' : '0' }}>
+            {houseTask && (
+              <button
+                className="btn btn-eoc hub-action-btn"
+                onClick={() => onStartEoc(houseTask.id)}
+                style={{ width: '100%', fontSize: '16px', marginBottom: '0', borderRadius: 'var(--radius)' }}
+              >
+                Complete House EOC
+              </button>
+            )}
+            {vanTasks.length === 1 && (
+              <button
+                className="btn btn-eoc hub-action-btn"
+                onClick={() => onStartEoc(vanTasks[0].id)}
+                style={{ width: '100%', fontSize: '16px', marginBottom: '0', borderRadius: 'var(--radius)' }}
+              >
+                Complete Van EOC
+              </button>
+            )}
+            {vanTasks.length > 1 && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr auto',
+                gap: '8px',
+                alignItems: 'center',
+                backgroundColor: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '10px',
+                padding: '10px'
+              }}>
+                <select
+                  value={selectedVanTaskId}
+                  onChange={(e) => setSelectedVanTaskId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    backgroundColor: 'rgba(255,255,255,0.06)',
+                    color: '#e8e8e8',
+                    fontSize: '14px'
+                  }}
+                >
+                  {vanTasks.map(task => {
+                    const location = LOCATIONS.find(l => l.id === task.locationId)?.label || task.locationId
+                    const shift = SHIFTS.find(s => s.id === task.shiftId)?.label || task.shiftId
+                    const van = VANS.find(v => v.id === task.vanId)?.label || task.vanId || 'Van'
+                    return (
+                      <option key={task.id} value={task.id}>
+                        {`${van} - ${location} - ${shift} - ${task.status.toUpperCase()}`}
+                      </option>
+                    )
+                  })}
+                </select>
+                <button
+                  className="btn btn-eoc"
+                  onClick={() => selectedVanTask && onStartEoc(selectedVanTask.id)}
+                  disabled={!selectedVanTask}
+                  style={{
+                    padding: '10px 14px',
+                    fontSize: '14px',
+                    borderRadius: '8px',
+                    opacity: selectedVanTask ? 1 : 0.7
+                  }}
+                >
+                  Van Picker
+                </button>
+              </div>
+            )}
+          </div>
+
+          {actionableTasks.length === 0 ? (
+            <div style={{ fontSize: '13px', color: '#8899aa' }}>
+              No pending or overdue EOC tasks.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {Object.entries(actionableByLocation).map(([locationId, locationTasks]) => (
+                <div key={locationId}>
+                  <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '6px' }}>
+                    {LOCATIONS.find(l => l.id === locationId)?.label || locationId}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {locationTasks.map(task => (
+                      <button
+                        key={task.id}
+                        className="btn btn-eoc hub-action-btn"
+                        onClick={() => onStartEoc(task.id)}
+                        style={{
+                          width: '100%',
+                          fontSize: '15px',
+                          marginBottom: '0',
+                          borderRadius: 'var(--radius)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '10px'
+                        }}
+                      >
+                        <span style={{ textAlign: 'left' }}>
+                          <div style={{ fontWeight: 700 }}>{taskTitle(task)}</div>
+                          <div style={{ fontSize: '12px', opacity: 0.9 }}>{taskSubtitle(task)}</div>
+                        </span>
+                        <span
+                          className={`badge ${task.status === 'overdue' ? 'badge-overdue' : 'badge-eoc-pending'}`}
+                          style={{ whiteSpace: 'nowrap' }}
+                        >
+                          {task.status.toUpperCase()}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Status cards */}
@@ -122,6 +270,12 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
           ) : (
             <span className="badge badge-eoc-missed">None</span>
           )}
+        </div>
+        <div className="glass-card" style={{ padding: '14px' }}>
+          <div className="section-label" style={{ marginBottom: '6px' }}>Due EOCs</div>
+          <span style={{ fontSize: '22px', fontWeight: 700, color: actionableTasks.length > 0 ? '#FF9800' : '#556677' }}>
+            {actionableTasks.length}
+          </span>
         </div>
         <div className="glass-card" style={{ padding: '14px' }}>
           <div className="section-label" style={{ marginBottom: '6px' }}>Active Transports</div>
@@ -166,7 +320,7 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
                 </div>
                 {isClickable && (
                   <div style={{ fontSize: '11px', color: '#E53935', marginTop: '8px', fontWeight: 600 }}>
-                    Tap to continue →
+                    Tap to continue {'->'}
                   </div>
                 )}
               </div>

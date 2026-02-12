@@ -8,8 +8,22 @@ import TransportCard from './components/TransportCard'
 import CloseChecklist from './components/CloseChecklist'
 import EocChecklist from './components/EocChecklist'
 import SupervisorDashboard from './components/SupervisorDashboard'
+import { syncEocTasksForUserScope } from './services/eocTaskEngine'
 
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
+const TRANSPORT_SITES = new Set(['PHP', 'RTC'])
+
+function getScopedTransportSites(user) {
+  if (!user) return []
+  if (user.role === 'admin') return []
+
+  const raw = []
+  if (user.site) raw.push(user.site)
+  if (Array.isArray(user.authorizedLocations)) raw.push(...user.authorizedLocations)
+
+  const normalized = [...new Set(raw.map(v => String(v || '').trim().toUpperCase()))]
+  return normalized.filter(v => TRANSPORT_SITES.has(v))
+}
 
 function App() {
   const [user, setUser] = useState(() => {
@@ -27,7 +41,6 @@ function App() {
   const [transports, setTransports] = useState([])
   const [currentTransportId, setCurrentTransportId] = useState(null)
   const [currentTaskId, setCurrentTaskId] = useState(null)
-  const [currentTaskVanId, setCurrentTaskVanId] = useState(null)
   const [lastActivity, setLastActivity] = useState(Date.now())
   const [alertCount, setAlertCount] = useState(0)
 
@@ -46,7 +59,6 @@ function App() {
     setTransports([])
     setCurrentTransportId(null)
     setCurrentTaskId(null)
-    setCurrentTaskVanId(null)
     localStorage.removeItem('lastActivity')
   }
 
@@ -104,14 +116,44 @@ function App() {
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const transportData = snapshot.docs.map(doc => ({
+      let transportData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }))
+
+      if (user.role === 'supervisor') {
+        const scopedSites = getScopedTransportSites(user)
+        if (scopedSites.length > 0) {
+          const siteSet = new Set(scopedSites)
+          transportData = transportData.filter(t => siteSet.has(String(t.site || '').trim().toUpperCase()))
+        }
+      }
+
       setTransports(transportData)
     })
 
     return () => unsubscribe()
+  }, [user])
+
+  // Sync EOC task generation + overdue status on session start.
+  useEffect(() => {
+    if (!user) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const result = await syncEocTasksForUserScope(user)
+        if (!cancelled && (result.created > 0 || result.updated > 0)) {
+          console.info('EOC task engine sync complete:', result)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('EOC task engine sync failed:', err)
+        }
+      }
+    })()
+
+    return () => { cancelled = true }
   }, [user])
 
   // Supervisor/admin alert count listener
@@ -130,28 +172,36 @@ function App() {
     return () => unsubscribe()
   }, [user])
 
-  function handleStartEoc(taskId, vanId) {
+  function handleStartEoc(taskId) {
     setCurrentTaskId(taskId)
-    setCurrentTaskVanId(vanId || null)
     setPage('eocForm')
   }
 
   function handleEocComplete() {
     setCurrentTaskId(null)
-    setCurrentTaskVanId(null)
     setPage('home')
   }
 
   function handleEocBack() {
     setCurrentTaskId(null)
-    setCurrentTaskVanId(null)
     setPage('home')
   }
 
   async function handleNewTransport() {
     try {
+      const scopedSites = getScopedTransportSites(user)
+      const transportSite =
+        String(user?.site || '').trim().toUpperCase() ||
+        scopedSites[0] ||
+        ''
+
+      if (!TRANSPORT_SITES.has(transportSite)) {
+        alert('No valid transport site is configured for your account.')
+        return
+      }
+
       const newTransport = {
-        site: user.site,
+        site: transportSite,
         createdByUserId: user.id,
         createdByName: user.name,
         status: 'open',
@@ -236,7 +286,6 @@ function App() {
         <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
         <EocChecklist
           taskId={currentTaskId}
-          vanId={currentTaskVanId}
           user={user}
           onComplete={handleEocComplete}
           onBack={handleEocBack}

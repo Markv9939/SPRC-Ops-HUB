@@ -123,14 +123,24 @@ function statusBadge(status) {
 }
 
 // ─── SUB-TAB: EMPLOYEES ────────────────────────────────────────────────────────
-function EmployeesTab({ employees, complianceItems }) {
+function EmployeesTab({ employees, complianceItems, siteOptions }) {
+  const defaultSite = siteOptions[0] || 'RTC'
   const [search, setSearch] = useState('')
   const [siteFilter, setSiteFilter] = useState('All')
   const [expandedId, setExpandedId] = useState(null)
   const [adding, setAdding] = useState(false)
-  const [form, setForm] = useState({ name: '', site: 'RTC' })
+  const [form, setForm] = useState({ name: '', site: defaultSite })
   const [editingId, setEditingId] = useState(null)
-  const [editForm, setEditForm] = useState({ name: '', site: 'RTC', active: true })
+  const [editForm, setEditForm] = useState({ name: '', site: defaultSite, active: true })
+
+  useEffect(() => {
+    if (!siteOptions.includes(form.site)) {
+      setForm(prev => ({ ...prev, site: defaultSite }))
+    }
+    if (!siteOptions.includes(editForm.site)) {
+      setEditForm(prev => ({ ...prev, site: defaultSite }))
+    }
+  }, [defaultSite, editForm.site, form.site, siteOptions])
 
   const itemsByEmployee = useMemo(() => {
     const map = {}
@@ -156,7 +166,7 @@ function EmployeesTab({ employees, complianceItems }) {
       linkedUserId: null,
       createdAt: serverTimestamp()
     })
-    setForm({ name: '', site: 'RTC' })
+    setForm({ name: '', site: defaultSite })
     setAdding(false)
   }
 
@@ -194,8 +204,7 @@ function EmployeesTab({ employees, complianceItems }) {
         />
         <select value={siteFilter} onChange={e => setSiteFilter(e.target.value)} style={{ ...inputStyle, width: 'auto', minWidth: '100px' }}>
           <option value="All">All Sites</option>
-          <option value="RTC">RTC</option>
-          <option value="OTC">OTC</option>
+          {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
         </select>
         <button onClick={() => setAdding(!adding)} style={btnPrimary}>+ Add Employee</button>
       </div>
@@ -212,8 +221,7 @@ function EmployeesTab({ employees, complianceItems }) {
             <div>
               <label style={labelStyle}>Site</label>
               <select style={inputStyle} value={form.site} onChange={e => setForm({ ...form, site: e.target.value })}>
-                <option value="RTC">RTC</option>
-                <option value="OTC">OTC</option>
+                {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
               </select>
             </div>
           </div>
@@ -248,8 +256,7 @@ function EmployeesTab({ employees, complianceItems }) {
                     <div>
                       <label style={labelStyle}>Site</label>
                       <select style={inputStyle} value={editForm.site} onChange={e => setEditForm({ ...editForm, site: e.target.value })}>
-                        <option value="RTC">RTC</option>
-                        <option value="OTC">OTC</option>
+                        {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
                       </select>
                     </div>
                     <div>
@@ -320,7 +327,7 @@ function EmployeesTab({ employees, complianceItems }) {
 }
 
 // ─── SUB-TAB: ITEMS ────────────────────────────────────────────────────────────
-function ItemsTab({ employees, complianceItems }) {
+function ItemsTab({ employees, complianceItems, siteOptions }) {
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [siteFilter, setSiteFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -336,10 +343,11 @@ function ItemsTab({ employees, complianceItems }) {
   }, [employees])
 
   const filtered = complianceItems.filter(item => {
+    const emp = employeeMap[item.employeeId]
+    if (!emp) return false
     if (categoryFilter !== 'all' && item.category !== categoryFilter) return false
     if (siteFilter !== 'all') {
-      const emp = employeeMap[item.employeeId]
-      if (!emp || emp.site !== siteFilter) return false
+      if (emp.site !== siteFilter) return false
     }
     if (statusFilter !== 'all') {
       const s = getStatus(item.dueDate)
@@ -367,6 +375,7 @@ function ItemsTab({ employees, complianceItems }) {
     await addDoc(collection(db, 'complianceItems'), {
       employeeId: addForm.employeeId,
       employeeName: emp?.name || '',
+      employeeSite: emp?.site || null,
       category: addForm.category,
       subtype: addForm.subtype || null,
       lastCompleted: addForm.lastCompleted ? Timestamp.fromDate(new Date(addForm.lastCompleted)) : null,
@@ -402,8 +411,7 @@ function ItemsTab({ employees, complianceItems }) {
         </select>
         <select style={{ ...inputStyle, width: 'auto', minWidth: '100px' }} value={siteFilter} onChange={e => setSiteFilter(e.target.value)}>
           <option value="all">All Sites</option>
-          <option value="RTC">RTC</option>
-          <option value="OTC">OTC</option>
+          {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
         </select>
         <select style={{ ...inputStyle, width: 'auto', minWidth: '130px' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="all">All Status</option>
@@ -1167,38 +1175,87 @@ function ImportTab() {
 }
 
 // ─── MAIN COMPLIANCE PANEL ─────────────────────────────────────────────────────
-function CompliancePanel() {
+function CompliancePanel({ user, scopeSites = null }) {
   const [subTab, setSubTab] = useState('employees')
   const [employees, setEmployees] = useState([])
   const [complianceItems, setComplianceItems] = useState([])
   const [cintasServices, setCintasServices] = useState([])
+  const isAdmin = user?.role === 'admin'
+  const normalizedScopeSites = useMemo(() => {
+    if (!Array.isArray(scopeSites)) return []
+    return [...new Set(scopeSites.map(s => String(s || '').trim().toUpperCase()).filter(Boolean))]
+  }, [scopeSites])
+  const siteOptions = normalizedScopeSites.length > 0 ? normalizedScopeSites : ['RTC', 'OTC']
+  const hasComplianceScope = isAdmin || normalizedScopeSites.length > 0
+  const inComplianceScope = (site) => (
+    isAdmin || normalizedScopeSites.includes(String(site || '').trim().toUpperCase())
+  )
 
   // Real-time listeners
   useEffect(() => {
+    if (!hasComplianceScope) {
+      setEmployees([])
+      setComplianceItems([])
+      setCintasServices([])
+      return () => {}
+    }
+
     const unsub1 = onSnapshot(
       query(collection(db, 'complianceEmployees'), orderBy('name', 'asc')),
-      snap => setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      snap => {
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        setEmployees(rows.filter(e => inComplianceScope(e.site)))
+      }
     )
     const unsub2 = onSnapshot(
       query(collection(db, 'complianceItems'), orderBy('employeeName', 'asc')),
       snap => setComplianceItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     )
-    const unsub3 = onSnapshot(
-      query(collection(db, 'cintasServices'), orderBy('siteAddress', 'asc')),
-      snap => setCintasServices(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    )
+    if (!isAdmin) setCintasServices([])
+    const unsub3 = isAdmin
+      ? onSnapshot(
+          query(collection(db, 'cintasServices'), orderBy('siteAddress', 'asc')),
+          snap => setCintasServices(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+        )
+      : () => {}
     return () => { unsub1(); unsub2(); unsub3() }
-  }, [])
+  }, [hasComplianceScope, isAdmin, normalizedScopeSites])
 
-  const SUB_TABS = {
-    employees: 'Employees',
-    items: 'Items',
-    cintas: 'Cintas',
-    import: 'Import'
-  }
+  const SUB_TABS = isAdmin
+    ? {
+        employees: 'Employees',
+        items: 'Items',
+        cintas: 'Cintas',
+        import: 'Import'
+      }
+    : {
+        employees: 'Employees',
+        items: 'Items'
+      }
+
+  useEffect(() => {
+    if (!Object.prototype.hasOwnProperty.call(SUB_TABS, subTab)) {
+      setSubTab('employees')
+    }
+  }, [SUB_TABS, subTab])
 
   return (
     <div>
+      {!hasComplianceScope && (
+        <div style={{
+          padding: '16px',
+          borderRadius: '10px',
+          backgroundColor: 'rgba(255,152,0,0.15)',
+          border: '1px solid rgba(255,152,0,0.3)',
+          color: '#FF9800',
+          fontSize: '13px'
+        }}>
+          No compliance site scope is configured for this account.
+        </div>
+      )}
+
+      {hasComplianceScope && (
+        <>
       {/* Sub-tab navigation */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '20px', flexWrap: 'wrap' }}>
         {Object.entries(SUB_TABS).map(([key, label]) => (
@@ -1221,13 +1278,16 @@ function CompliancePanel() {
         ))}
       </div>
 
-      {subTab === 'employees' && <EmployeesTab employees={employees} complianceItems={complianceItems} />}
-      {subTab === 'items' && <ItemsTab employees={employees} complianceItems={complianceItems} />}
+      {subTab === 'employees' && <EmployeesTab employees={employees} complianceItems={complianceItems} siteOptions={siteOptions} />}
+      {subTab === 'items' && <ItemsTab employees={employees} complianceItems={complianceItems} siteOptions={siteOptions} />}
       {subTab === 'cintas' && <CintasTab cintasServices={cintasServices} />}
       {subTab === 'import' && <ImportTab />}
+        </>
+      )}
     </div>
   )
 }
 
 export default CompliancePanel
 export { COMPLIANCE_CATEGORIES, getStatus }
+

@@ -30,6 +30,10 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
   const validateTransport = (data) => {
     const validationErrors = []
 
+    if (data.status !== 'returned') {
+      validationErrors.push('Transport must be in returned status before closing')
+    }
+
     if (!data.clients || data.clients.length === 0) {
       validationErrors.push('At least one client is required')
     }
@@ -47,6 +51,11 @@ function CloseChecklist({ transportId, onClose, onComplete }) {
 
   const handleCloseTransport = async () => {
     if (errors.length > 0) {
+      return
+    }
+
+    if (!transport || transport.status !== 'returned') {
+      alert('Only returned transports can be closed.')
       return
     }
 

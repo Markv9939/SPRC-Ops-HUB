@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { db } from '../firebase'
-import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, deleteDoc, getDocs, updateDoc, serverTimestamp, addDoc } from 'firebase/firestore'
+import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, getDocs, updateDoc, serverTimestamp, addDoc, writeBatch } from 'firebase/firestore'
 import * as XLSX from 'xlsx'
 import SupervisorEocPanel from './SupervisorEocPanel'
 import CompliancePanel, { getStatus } from './CompliancePanel'
@@ -12,9 +12,12 @@ const TAB_LABELS = {
   users: '\u{1F465} Users',
   assignments: '\u{1F4CB} Assignments',
   eoc: '\u{1F527} EOC',
-  compliance: '\u{1F4CB} Compliance'
+  compliance: '\u{1F4CB} Compliance',
+  audit: '\u{1F9FE} Audit'
 }
 const TAB_KEYS = Object.keys(TAB_LABELS)
+const TRANSPORT_SITES = new Set(['PHP', 'RTC'])
+const COMPLIANCE_SITES = new Set(['RTC', 'OTC'])
 
 function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   const [activeTab, setActiveTab] = useState('dashboard')
@@ -42,12 +45,16 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
 
   // EOC Dashboard summary
   const [eocIssues, setEocIssues] = useState([])
-  const [eocAssignments, setEocAssignments] = useState([])
+  const [eocOverdueTasks, setEocOverdueTasks] = useState([])
+  const [eocAlerts, setEocAlerts] = useState([])
+  const [queueView, setQueueView] = useState('issues')
+  const [queueLocationFilter, setQueueLocationFilter] = useState('all')
   const [eocResolvingId, setEocResolvingId] = useState(null)
   const [eocResolveNotes, setEocResolveNotes] = useState('')
 
   // Compliance dashboard summary
   const [complianceItems, setComplianceItems] = useState([])
+  const [auditLogs, setAuditLogs] = useState([])
 
   // User Management
   const [users, setUsers] = useState([])
@@ -62,6 +69,16 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   })
 
   const isAdmin = user?.role === 'admin'
+  const availableTabKeys = isAdmin ? TAB_KEYS : TAB_KEYS.filter(k => k !== 'audit')
+  const rawScopes = Array.isArray(user?.authorizedLocations) ? user.authorizedLocations : []
+  const normalizedScopes = [...new Set([
+    ...(user?.site ? [user.site] : []),
+    ...rawScopes
+  ].map(v => String(v || '').trim().toUpperCase()))]
+  const allowedTransportSites = isAdmin ? [] : normalizedScopes.filter(v => TRANSPORT_SITES.has(v))
+  const allowedComplianceSites = isAdmin ? [] : normalizedScopes.filter(v => COMPLIANCE_SITES.has(v))
+  const inTransportScope = (site) => isAdmin || allowedTransportSites.includes(String(site || '').trim().toUpperCase())
+  const inComplianceScope = (site) => isAdmin || allowedComplianceSites.includes(String(site || '').trim().toUpperCase())
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 600px)')
@@ -70,44 +87,101 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     return () => mq.removeEventListener('change', handler)
   }, [])
 
-  // Real-time EOC issues + assignments for dashboard summary
+  useEffect(() => {
+    if (!isAdmin && activeTab === 'audit') {
+      setActiveTab('dashboard')
+    }
+  }, [activeTab, isAdmin])
+
+  // Real-time EOC issues + overdue tasks for dashboard summary
   useEffect(() => {
     const unsubIssues = onSnapshot(
       query(collection(db, 'eocIssues'), where('status', '==', 'open'), orderBy('createdAt', 'desc')),
       (snap) => setEocIssues(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     )
-    const unsubAssignments = onSnapshot(
-      query(collection(db, 'eocAssignments'), where('status', '==', 'missed'), orderBy('dueDate', 'desc')),
-      (snap) => setEocAssignments(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    const unsubOverdueTasks = onSnapshot(
+      query(collection(db, 'eocTasks'), where('status', '==', 'overdue')),
+      (snap) => {
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        rows.sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''))
+        setEocOverdueTasks(rows)
+      }
+    )
+    const unsubAlerts = onSnapshot(
+      query(collection(db, 'supervisorAlerts'), where('read', '==', false)),
+      (snap) => {
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        rows.sort((a, b) => {
+          const aMs = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0
+          const bMs = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0
+          return bMs - aMs
+        })
+        setEocAlerts(rows)
+      }
     )
     const unsubCompliance = onSnapshot(
       collection(db, 'complianceItems'),
       (snap) => setComplianceItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     )
-    return () => { unsubIssues(); unsubAssignments(); unsubCompliance() }
+    return () => { unsubIssues(); unsubOverdueTasks(); unsubAlerts(); unsubCompliance() }
   }, [])
 
   // Load BHT Assignments
   useEffect(() => {
     const unsub = onSnapshot(
       query(collection(db, 'bhtAssignments'), orderBy('bhtUserName', 'asc')),
-      (snap) => setBhtAssignments(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      (snap) => {
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        setBhtAssignments(rows.filter(a => !a.deletedAt && a.deleted !== true))
+      }
     )
     return unsub
   }, [])
 
   const handleDashResolveIssue = async (issueId) => {
     try {
-      await updateDoc(doc(db, 'eocIssues', issueId), {
+      const batch = writeBatch(db)
+
+      batch.update(doc(db, 'eocIssues', issueId), {
         status: 'resolved',
         resolvedNotes: eocResolveNotes,
         resolvedAt: serverTimestamp()
       })
+
+      // Close any open alerts tied to this issue as part of resolution lifecycle.
+      const relatedAlerts = await getDocs(
+        query(collection(db, 'supervisorAlerts'), where('issueId', '==', issueId))
+      )
+      relatedAlerts.docs.forEach(alertDoc => {
+        if (alertDoc.data().read === true) return
+        batch.update(alertDoc.ref, {
+          read: true,
+          resolvedAt: serverTimestamp(),
+          resolvedByUserId: user?.id || null,
+          resolvedByName: user?.name || null
+        })
+      })
+
+      await batch.commit()
       setEocResolvingId(null)
       setEocResolveNotes('')
     } catch (err) {
       console.error('Error resolving issue:', err)
       alert('Failed to resolve issue')
+    }
+  }
+
+  const handleMarkAlertRead = async (alertId) => {
+    try {
+      await updateDoc(doc(db, 'supervisorAlerts', alertId), {
+        read: true,
+        readAt: serverTimestamp(),
+        readByUserId: user?.id || null,
+        readByName: user?.name || null
+      })
+    } catch (err) {
+      console.error('Error marking alert read:', err)
+      alert('Failed to mark alert as read')
     }
   }
 
@@ -124,16 +198,53 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     loadUsers()
   }, [])
 
+  useEffect(() => {
+    if (!isAdmin) {
+      setAuditLogs([])
+      return
+    }
+
+    const unsub = onSnapshot(
+      query(collection(db, 'auditLogs'), orderBy('createdAt', 'desc')),
+      (snap) => setAuditLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    )
+    return unsub
+  }, [isAdmin])
+
   const loadUsers = async () => {
     const usersSnapshot = await getDocs(collection(db, 'users'))
     const usersData = usersSnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }))
-    setUsers(usersData)
+    setUsers(usersData.filter(u => !u.deletedAt && u.deleted !== true))
   }
 
   const techUsers = users.filter(u => u.role === 'tech' && u.active)
+
+  const writeAuditLog = async ({ action, collectionPath, documentId, reason, extra = {} }) => {
+    if (!user?.id || !user?.name) return
+    await addDoc(collection(db, 'auditLogs'), {
+      action,
+      collectionPath,
+      documentId,
+      performedByUserId: user.id,
+      performedByName: user.name,
+      reason,
+      createdAt: serverTimestamp(),
+      ...extra
+    })
+  }
+
+  const promptDeleteReason = (label) => {
+    const reason = prompt(`Enter reason for ${label}:`)
+    if (reason === null) return null
+    if (!reason.trim()) {
+      alert('Reason is required.')
+      return null
+    }
+    return reason.trim()
+  }
 
   const handleAddUser = () => {
     setEditingUser('new')
@@ -175,15 +286,70 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   }
 
   const handleDeleteUser = async (userId) => {
-    if (!confirm(`Are you sure you want to delete user ${userId}?`)) return
+    if (!confirm(`Soft-delete user ${userId}?`)) return
+
+    const reason = promptDeleteReason(`soft-delete of user ${userId}`)
+    if (!reason) return
 
     try {
-      await deleteDoc(doc(db, 'users', userId))
-      alert('User deleted successfully!')
+      await updateDoc(doc(db, 'users', userId), {
+        deleted: true,
+        deletedAt: serverTimestamp(),
+        deletedByUserId: user?.id || null,
+        deletedByName: user?.name || null,
+        deleteReason: reason,
+        active: false,
+        updatedAt: serverTimestamp()
+      })
+      await writeAuditLog({
+        action: 'soft_delete',
+        collectionPath: 'users',
+        documentId: userId,
+        reason
+      })
+      alert('User soft-deleted successfully.')
       loadUsers()
     } catch (error) {
       console.error('Error deleting user:', error)
       alert('Error deleting user: ' + error.message)
+    }
+  }
+
+  const handleHardDeleteUser = async (userId) => {
+    if (!isAdmin) {
+      alert('Only admin can hard-delete records.')
+      return
+    }
+
+    if (userId === user?.id) {
+      alert('You cannot hard-delete your own user while logged in.')
+      return
+    }
+
+    if (!confirm(`Permanently hard-delete user ${userId}? This cannot be undone.`)) return
+
+    const reason = promptDeleteReason(`hard-delete of user ${userId}`)
+    if (!reason) return
+
+    try {
+      const batch = writeBatch(db)
+      const auditRef = doc(collection(db, 'auditLogs'))
+      batch.set(auditRef, {
+        action: 'hard_delete',
+        collectionPath: 'users',
+        documentId: userId,
+        performedByUserId: user?.id || null,
+        performedByName: user?.name || null,
+        reason,
+        createdAt: serverTimestamp()
+      })
+      batch.delete(doc(db, 'users', userId))
+      await batch.commit()
+      alert('User hard-deleted successfully.')
+      loadUsers()
+    } catch (error) {
+      console.error('Error hard deleting user:', error)
+      alert('Error hard deleting user: ' + error.message)
     }
   }
 
@@ -269,12 +435,61 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   }
 
   const handleDeleteAssignment = async (id) => {
-    if (!confirm('Delete this assignment?')) return
+    if (!confirm('Soft-delete this assignment?')) return
+
+    const reason = promptDeleteReason('soft-delete of assignment')
+    if (!reason) return
+
     try {
-      await deleteDoc(doc(db, 'bhtAssignments', id))
+      await updateDoc(doc(db, 'bhtAssignments', id), {
+        deleted: true,
+        deletedAt: serverTimestamp(),
+        deletedByUserId: user?.id || null,
+        deletedByName: user?.name || null,
+        deleteReason: reason,
+        active: false,
+        updatedAt: serverTimestamp()
+      })
+      await writeAuditLog({
+        action: 'soft_delete',
+        collectionPath: 'bhtAssignments',
+        documentId: id,
+        reason
+      })
     } catch (err) {
       console.error('Error deleting assignment:', err)
       alert('Failed to delete assignment')
+    }
+  }
+
+  const handleHardDeleteAssignment = async (id) => {
+    if (!isAdmin) {
+      alert('Only admin can hard-delete records.')
+      return
+    }
+
+    if (!confirm('Permanently hard-delete this assignment? This cannot be undone.')) return
+
+    const reason = promptDeleteReason('hard-delete of assignment')
+    if (!reason) return
+
+    try {
+      const batch = writeBatch(db)
+      const auditRef = doc(collection(db, 'auditLogs'))
+      batch.set(auditRef, {
+        action: 'hard_delete',
+        collectionPath: 'bhtAssignments',
+        documentId: id,
+        performedByUserId: user?.id || null,
+        performedByName: user?.name || null,
+        reason,
+        createdAt: serverTimestamp()
+      })
+      batch.delete(doc(db, 'bhtAssignments', id))
+      await batch.commit()
+    } catch (err) {
+      console.error('Error hard deleting assignment:', err)
+      alert('Failed to hard-delete assignment')
     }
   }
 
@@ -285,6 +500,19 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
         ? prev.vanIds.filter(v => v !== vanId)
         : [...prev.vanIds, vanId]
     }))
+  }
+
+  const handleQueueReassign = (task) => {
+    setActiveTab('assignments')
+    setEditingAssignment('new')
+    setAssignmentForm({
+      bhtUserId: task.assigneeUserId || '',
+      locationId: task.locationId || '',
+      shiftId: task.shiftId || '',
+      vanIds: task.taskType === 'van' && task.vanId ? [task.vanId] : [],
+      isHousePrimary: task.taskType === 'house',
+      active: true
+    })
   }
 
   useEffect(() => {
@@ -303,10 +531,12 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     )
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
+      let data = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }))
+
+      data = data.filter(t => inTransportScope(t.site))
       setTransports(data)
 
       // Extract unique drivers
@@ -315,7 +545,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     })
 
     return () => unsubscribe()
-  }, [startDate, endDate])
+  }, [startDate, endDate, user?.role, user?.site, JSON.stringify(user?.authorizedLocations || [])])
 
   useEffect(() => {
     let filtered = [...transports]
@@ -364,6 +594,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
         let data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
 
         // Client-side filters
+        data = data.filter(t => inTransportScope(t.site))
         data = data.filter(t => t.status === 'returned' || t.status === 'closed')
         if (dashSite !== 'ALL') {
           data = data.filter(t => t.site === dashSite)
@@ -378,7 +609,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     }
 
     fetchDashData()
-  }, [activeTab, dashMonth, dashSite])
+  }, [activeTab, dashMonth, dashSite, user?.role, user?.site, JSON.stringify(user?.authorizedLocations || [])])
 
   // Dashboard aggregation
   const dashStats = useMemo(() => {
@@ -413,16 +644,21 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
 
   const complianceSummary = useMemo(() => {
     const summary = { overdue: 0, upcoming: 0, current: 0, none: 0, total: 0 }
-    complianceItems.forEach(item => {
+    const scoped = complianceItems.filter(item => {
+      if (isAdmin) return true
+      if (!item.employeeSite) return false
+      return inComplianceScope(item.employeeSite)
+    })
+    scoped.forEach(item => {
       const status = getStatus(item.dueDate)
       if (status === 'overdue') summary.overdue += 1
       else if (status === 'upcoming') summary.upcoming += 1
       else if (status === 'current') summary.current += 1
       else summary.none += 1
     })
-    summary.total = complianceItems.length
+    summary.total = scoped.length
     return summary
-  }, [complianceItems])
+  }, [complianceItems, isAdmin, JSON.stringify(allowedComplianceSites)])
 
   const isOverdue = (transport) => {
     if (transport.status === 'closed' || transport.status === 'returned') {
@@ -454,6 +690,21 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       day: '2-digit',
       year: 'numeric'
     })
+  }
+
+  const locationMatchesQueueFilter = (locationId) => {
+    if (queueLocationFilter === 'all') return true
+    return locationId === queueLocationFilter
+  }
+
+  const filteredIssueQueue = eocIssues.filter(issue => locationMatchesQueueFilter(issue.locationId))
+  const filteredOverdueTaskQueue = eocOverdueTasks.filter(task => locationMatchesQueueFilter(task.locationId))
+  const filteredAlertQueue = eocAlerts.filter(alert => locationMatchesQueueFilter(alert.locationId))
+
+  const queueCounts = {
+    issues: filteredIssueQueue.length,
+    overdue: filteredOverdueTaskQueue.length,
+    alerts: filteredAlertQueue.length
   }
 
   const exportToExcel = () => {
@@ -542,7 +793,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
               backgroundSize: '12px'
             }}
           >
-            {TAB_KEYS.map(tab => (
+            {availableTabKeys.map(tab => (
               <option key={tab} value={tab}>{TAB_LABELS[tab]}</option>
             ))}
           </select>
@@ -555,7 +806,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
           borderBottom: '2px solid rgba(255,255,255,0.08)',
           flexWrap: 'wrap'
         }}>
-          {TAB_KEYS.map(tab => (
+          {availableTabKeys.map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -582,7 +833,65 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       {activeTab === 'eoc' && <SupervisorEocPanel />}
 
       {/* Compliance Tab */}
-      {activeTab === 'compliance' && <CompliancePanel />}
+      {activeTab === 'compliance' && (
+        <CompliancePanel
+          user={user}
+          scopeSites={isAdmin ? null : allowedComplianceSites}
+        />
+      )}
+
+      {/* Audit Tab (Admin) */}
+      {activeTab === 'audit' && isAdmin && (
+        <div>
+          <div style={{
+            backgroundColor: 'rgba(255,255,255,0.05)',
+            borderRadius: '12px',
+            padding: '20px',
+            marginBottom: '20px',
+            border: '1px solid rgba(229,57,53,0.2)',
+            backdropFilter: 'blur(12px)'
+          }}>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#e8e8e8' }}>
+              Audit Logs ({auditLogs.length})
+            </h3>
+
+            {auditLogs.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#556677' }}>
+                No audit entries yet.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {auditLogs.map(log => (
+                  <div
+                    key={log.id}
+                    style={{
+                      padding: '12px',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      backgroundColor: 'rgba(255,255,255,0.03)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                      <div style={{ fontWeight: 700, fontSize: '13px', color: '#e8e8e8' }}>
+                        {(log.action || 'action').toUpperCase()} &bull; {log.collectionPath || '--'} &bull; {log.documentId || '--'}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#8899aa' }}>
+                        {formatDate(log.createdAt)} {formatTime(log.createdAt)}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#8899aa', marginTop: '4px' }}>
+                      By: {log.performedByName || log.performedByUserId || 'Unknown'}
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#e8e8e8', marginTop: '6px' }}>
+                      Reason: {log.reason || '(none)'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Assignments Tab */}
       {activeTab === 'assignments' && (
@@ -795,8 +1104,25 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                         cursor: 'pointer'
                       }}
                     >
-                      Delete
+                      Soft Delete
                     </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => handleHardDeleteAssignment(a.id)}
+                        style={{
+                          padding: '8px 16px',
+                          backgroundColor: '#7B1FA2',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Hard Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1095,8 +1421,25 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                         cursor: 'pointer'
                       }}
                     >
-                      Delete
+                      Soft Delete
                     </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => handleHardDeleteUser(user.id)}
+                        style={{
+                          padding: '8px 16px',
+                          backgroundColor: '#7B1FA2',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Hard Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1109,7 +1452,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       {activeTab === 'dashboard' && (
         <div>
           {/* EOC Summary */}
-            {(eocIssues.length > 0 || eocAssignments.length > 0) && (
+            {(eocIssues.length > 0 || eocOverdueTasks.length > 0 || eocAlerts.length > 0) && (
               <div style={{
                 backgroundColor: 'rgba(255,255,255,0.05)',
               borderRadius: '12px',
@@ -1120,101 +1463,239 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
             }}>
               <h3 style={{ margin: '0 0 14px 0', fontSize: '16px', color: '#e8e8e8' }}>EOC Status</h3>
 
-              {/* Count badges */}
-              <div style={{ display: 'flex', gap: '12px', marginBottom: eocIssues.length > 0 ? '16px' : '0', flexWrap: 'wrap' }}>
-                {eocIssues.length > 0 && (
-                  <div style={{
+              {/* Clickable KPI cards */}
+              <div style={{ display: 'flex', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setQueueView('issues')}
+                  style={{
                     padding: '10px 20px',
                     backgroundColor: 'rgba(255,87,34,0.15)',
                     borderRadius: '8px',
                     textAlign: 'center',
-                    border: '1px solid rgba(255,87,34,0.3)'
-                  }}>
-                    <div style={{ fontSize: '12px', color: '#FF5722' }}>Open Issues</div>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF5722' }}>{eocIssues.length}</div>
-                  </div>
-                )}
-                {eocAssignments.length > 0 && (
-                  <div style={{
+                    border: queueView === 'issues' ? '2px solid #FF5722' : '1px solid rgba(255,87,34,0.3)',
+                    cursor: 'pointer',
+                    color: 'inherit'
+                  }}
+                >
+                  <div style={{ fontSize: '12px', color: '#FF5722' }}>Open Issues</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF5722' }}>{eocIssues.length}</div>
+                </button>
+                <button
+                  onClick={() => setQueueView('overdue')}
+                  style={{
                     padding: '10px 20px',
                     backgroundColor: 'rgba(255,152,0,0.15)',
                     borderRadius: '8px',
                     textAlign: 'center',
-                    border: '1px solid rgba(255,152,0,0.3)'
-                  }}>
-                    <div style={{ fontSize: '12px', color: '#FF9800' }}>Missed Assignments</div>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF9800' }}>{eocAssignments.length}</div>
-                  </div>
-                )}
+                    border: queueView === 'overdue' ? '2px solid #FF9800' : '1px solid rgba(255,152,0,0.3)',
+                    cursor: 'pointer',
+                    color: 'inherit'
+                  }}
+                >
+                  <div style={{ fontSize: '12px', color: '#FF9800' }}>Overdue Tasks</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF9800' }}>{eocOverdueTasks.length}</div>
+                </button>
+                <button
+                  onClick={() => setQueueView('alerts')}
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: 'rgba(33,150,243,0.15)',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    border: queueView === 'alerts' ? '2px solid #2196F3' : '1px solid rgba(33,150,243,0.3)',
+                    cursor: 'pointer',
+                    color: 'inherit'
+                  }}
+                >
+                  <div style={{ fontSize: '12px', color: '#64B5F6' }}>Unread Alerts</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#64B5F6' }}>{eocAlerts.length}</div>
+                </button>
               </div>
 
-              {/* Inline open issues list with resolve */}
-              {eocIssues.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {eocIssues.map(issue => (
-                    <div key={issue.id} style={{
-                      padding: '12px',
-                      borderRadius: '8px',
-                      border: issue.severity === 'high' ? '2px solid #FF5722' : '1px solid rgba(255,255,255,0.08)',
-                      backgroundColor: 'rgba(255,255,255,0.04)'
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <span style={{ fontWeight: 700, fontSize: '14px' }}>{issue.label}</span>
-                        <span className={`chip severity-${issue.severity}`} style={{ fontSize: '11px', textTransform: 'capitalize' }}>
-                          {issue.severity}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '4px' }}>{issue.description}</div>
-                      <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
-                        {LOCATIONS.find(l => l.id === issue.locationId)?.label || issue.locationId} &bull; {issue.reportedByName}
-                        {issue.vanId ? ` \u00B7 ${VANS.find(v => v.id === issue.vanId)?.label || issue.vanId}` : ''}
-                      </div>
+              {/* Queue controls */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '10px',
+                marginBottom: '12px'
+              }}>
+                <div>
+                  <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+                    Queue
+                  </label>
+                  <select
+                    value={queueView}
+                    onChange={(e) => setQueueView(e.target.value)}
+                    style={selectStyle}
+                  >
+                    <option value="issues">Open Issues ({queueCounts.issues})</option>
+                    <option value="overdue">Overdue Tasks ({queueCounts.overdue})</option>
+                    <option value="alerts">Unread Alerts ({queueCounts.alerts})</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+                    Location
+                  </label>
+                  <select
+                    value={queueLocationFilter}
+                    onChange={(e) => setQueueLocationFilter(e.target.value)}
+                    style={selectStyle}
+                  >
+                    <option value="all">All Locations</option>
+                    {LOCATIONS.map(loc => (
+                      <option key={loc.id} value={loc.id}>{loc.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-                      {eocResolvingId === issue.id ? (
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                          <input
-                            className="input"
-                            placeholder="Resolution notes..."
-                            value={eocResolveNotes}
-                            onChange={e => setEocResolveNotes(e.target.value)}
-                            style={{ flex: 1, padding: '6px 10px', fontSize: '13px' }}
-                          />
-                          <button
-                            onClick={() => handleDashResolveIssue(issue.id)}
-                            style={{
-                              padding: '6px 14px', backgroundColor: '#4CAF50', color: 'white',
-                              border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Resolve
-                          </button>
-                          <button
-                            onClick={() => { setEocResolvingId(null); setEocResolveNotes('') }}
-                            style={{
-                              padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#8899aa',
-                              border: 'none', borderRadius: '6px', fontSize: '13px', cursor: 'pointer'
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
+              {/* Queue list */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {queueView === 'issues' && filteredIssueQueue.length === 0 && (
+                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No open issues for this filter.</div>
+                )}
+                {queueView === 'issues' && filteredIssueQueue.map(issue => (
+                  <div key={issue.id} style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: issue.severity === 'high' ? '2px solid #FF5722' : '1px solid rgba(255,255,255,0.08)',
+                    backgroundColor: 'rgba(255,255,255,0.04)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '14px' }}>{issue.label}</span>
+                      <span className={`chip severity-${issue.severity}`} style={{ fontSize: '11px', textTransform: 'capitalize' }}>
+                        {issue.severity}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '4px' }}>{issue.description}</div>
+                    <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
+                      {LOCATIONS.find(l => l.id === issue.locationId)?.label || issue.locationId} &bull; {issue.reportedByName}
+                      {issue.vanId ? ` \u00B7 ${VANS.find(v => v.id === issue.vanId)?.label || issue.vanId}` : ''}
+                    </div>
+
+                    {eocResolvingId === issue.id ? (
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <input
+                          className="input"
+                          placeholder="Resolution notes..."
+                          value={eocResolveNotes}
+                          onChange={e => setEocResolveNotes(e.target.value)}
+                          style={{ flex: 1, padding: '6px 10px', fontSize: '13px' }}
+                        />
                         <button
-                          onClick={() => setEocResolvingId(issue.id)}
+                          onClick={() => handleDashResolveIssue(issue.id)}
                           style={{
-                            padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8',
+                            padding: '6px 14px', backgroundColor: '#4CAF50', color: 'white',
                             border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
                             cursor: 'pointer'
                           }}
                         >
-                          Mark Resolved
+                          Resolve
                         </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                        <button
+                          onClick={() => { setEocResolvingId(null); setEocResolveNotes('') }}
+                          style={{
+                            padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#8899aa',
+                            border: 'none', borderRadius: '6px', fontSize: '13px', cursor: 'pointer'
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setEocResolvingId(issue.id)}
+                        style={{
+                          padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8',
+                          border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Mark Resolved
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                {queueView === 'overdue' && filteredOverdueTaskQueue.length === 0 && (
+                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No overdue tasks for this filter.</div>
                 )}
+                {queueView === 'overdue' && filteredOverdueTaskQueue.map(task => (
+                  <div key={task.id} style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    backgroundColor: 'rgba(255,255,255,0.04)'
+                  }}>
+                    <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>
+                      {task.taskType === 'house'
+                        ? 'House EOC'
+                        : `Van EOC (${VANS.find(v => v.id === task.vanId)?.label || task.vanId || 'Van'})`}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
+                      {LOCATIONS.find(l => l.id === task.locationId)?.label || task.locationId}
+                      {' '} &bull; {SHIFTS.find(s => s.id === task.shiftId)?.label || task.shiftId}
+                      {' '} &bull; Due {task.dueDate}
+                      {' '} &bull; Assigned {task.assigneeUserName || task.assigneeUserId || 'Unassigned'}
+                    </div>
+                    <button
+                      onClick={() => handleQueueReassign(task)}
+                      style={{
+                        padding: '6px 14px',
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        color: '#e8e8e8',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Open Reassign Flow
+                    </button>
+                  </div>
+                ))}
+
+                {queueView === 'alerts' && filteredAlertQueue.length === 0 && (
+                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No unread alerts for this filter.</div>
+                )}
+                {queueView === 'alerts' && filteredAlertQueue.map(alertItem => (
+                  <div key={alertItem.id} style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    backgroundColor: 'rgba(255,255,255,0.04)'
+                  }}>
+                    <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>
+                      {alertItem.type || 'Alert'}
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '6px' }}>
+                      {alertItem.message || '(no message)'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
+                      {LOCATIONS.find(l => l.id === alertItem.locationId)?.label || alertItem.locationId || 'Unknown location'}
+                      {' '} &bull; {formatDate(alertItem.createdAt)} {formatTime(alertItem.createdAt)}
+                      {alertItem.techName ? ` \u00B7 ${alertItem.techName}` : ''}
+                    </div>
+                    <button
+                      onClick={() => handleMarkAlertRead(alertItem.id)}
+                      style={{
+                        padding: '6px 14px',
+                        backgroundColor: '#2196F3',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Mark Read
+                    </button>
+                  </div>
+                ))}
+              </div>
               </div>
             )}
 

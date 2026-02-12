@@ -7,8 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "smoke:phase9": "npm run build",
+    "smoke:phase9:full": "npm run build && npm run lint",
     "preview": "vite preview",
     "seed": "node scripts/seedUsers.js",
+    "reset:uat": "node scripts/seedUsers.js --confirm",
     "migrate-clients": "node scripts/migrateExistingClients.js",
     "cleanup-clients": "node scripts/deactivateStaleClients.js"
   },

@@ -1,331 +1,374 @@
-# SPRC TX Log
-
-## What This Is
-
-A **transport logging app** for SPRC (a facility with two sites: PHP and RTC). Staff ("techs") use it on their phones to log client transports — recording when they depart, arrive at destinations, and return. Supervisors can review all transports, filter/export data, and manage user accounts.
-
-**Live at:** https://sprc-tx-l.web.app
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React 19 (Vite 7, SPA) |
-| Database | Cloud Firestore |
-| Auth | PIN-based (4-digit numeric, looked up against Firestore `users` collection — no Firebase Auth) |
-| Hosting | Firebase Hosting (project: `sprc-tx-l`) |
-| Export | xlsx library for Excel spreadsheet export |
-| Styling | Plain CSS with custom properties (no framework) |
-
----
-
-## How The App Works
-
-### Transport Workflow (Tech View)
-
-1. **Login** — Enter 4-digit PIN. 5 failed attempts = 5-minute lockout. 60-minute inactivity auto-lock.
-2. **Home screen** — See your open/returned transports. Overdue transports (>8 hrs without return) show a red badge.
-3. **New Transport** — Creates a transport with departure time, site auto-set from user profile.
-4. **Add clients** — Type a name, autocomplete suggests from history. Selecting a suggestion auto-adds it. Can also type a new name and click "+ Add". Shown as removable chips.
-5. **Add reasons** — Toggle buttons: Medical X appointment, Outside Provider, Court, Admin (e.g., SSA), Recreational, Other.
-6. **ARRIVE** — Tap "ARRIVE" → DC paperwork reminder modal → confirms → logs arrival time.
-7. **Add destinations** — Name (optional) + address (required). Autocomplete suggests from history; selecting a suggestion auto-adds it. Can add multiple destinations.
-8. **Notes** — Optional freeform text.
-9. **Finish TX** — Validates: at least 1 arrival, 1 client, and all destinations have addresses. Opens DC Paperwork modal (Collected / N/A / Other with required note). On submit → status becomes `returned`.
-10. **Close Checklist** — Supervisor (or tech via return flow) reviews the transport, sees all data + DC paperwork status. Validates requirements, then closes it.
-
-### Supervisor View
-
-- **Transports tab** — See all transports across both sites. Filter by date range (default: current month), driver, overdue status, client name search. Export filtered results to Excel.
-- **Manage Users tab** — Full CRUD for user accounts (name, PIN, role, site, active status).
-- **Dashboard tab** — Monthly aggregated stats for completed (`returned`/`closed`) transports. Month picker with prev/next navigation, site filter (All/PHP/RTC). Shows: total count, breakdown by reason, breakdown by tech, DC paperwork status counts. Uses one-time `getDocs` query (not real-time) with client-side filtering.
-
----
-
-## File Map
-
-### Source Files (`src/`)
-
-| File | What It Does |
-|------|-------------|
-| `main.jsx` | React entry point |
-| `App.jsx` | Top-level routing and state. Manages login, auto-lock (60 min), role-based views (tech vs supervisor). Creates new transports. |
-| `firebase.js` | Firebase/Firestore initialization and config |
-| `index.css` | All global styles — CSS variables, glass cards, buttons, chips, badges, status colors, animations, SPRC watermark logo |
-| `hooks/useAutocomplete.js` | Reusable hook for Firestore autocomplete. Debounced (150ms), prefix matching, filters active-only, max 5 results. |
-
-### Components (`src/components/`)
-
-| Component | File | What It Does |
-|-----------|------|-------------|
-| PinLogin | `PinLogin.jsx` | PIN input, queries `users` where pin matches and active=true. 5-fail lockout via localStorage. |
-| Header | `Header.jsx` | Sticky header with SPRC logo, app title, username, Lock button |
-| TransportList | `TransportList.jsx` | Tech home screen. Real-time Firestore listener for user's transports. Shows status badges, overdue detection (>8 hrs). Click to open/continue. |
-| TransportCard | `TransportCard.jsx` | The main transport editing screen. Manages the full workflow: clients, reasons, ARRIVE, destinations, notes, Finish TX. Contains the arrive reminder modal inline. |
-| ClientAutocomplete | `ClientAutocomplete.jsx` | Input + "+ Add" button. Uses `useAutocomplete` hook against `clients` collection. Selecting a suggestion auto-adds it. Upserts client to Firestore with `lastUsedAt` tracking. |
-| DestinationAutocomplete | `DestinationAutocomplete.jsx` | Two fields: name (optional) + address (required). Custom Firestore search (not using the shared hook — searches by both name and address fields). Selecting a suggestion auto-adds it. Dedupes by normalized address. |
-| AutocompleteDropdown | `AutocompleteDropdown.jsx` | Shared dropdown UI. Renders via `createPortal` to `document.body` to escape parent overflow. Positions with `getBoundingClientRect()`, updates on scroll/resize. z-index 9999. |
-| DCPaperworkModal | `DCCheckModal.jsx` | Modal with 3 options: Collected, N/A, Other (requires note). Returns `{status, otherNote}`. Triggers when user taps "Finish TX". |
-| CloseChecklist | `CloseChecklist.jsx` | Pre-close validation. Checks: has clients, has stops with addresses. Displays DC paperwork status. Sets status to `closed` with `closedAt` timestamp. |
-| SupervisorDashboard | `SupervisorDashboard.jsx` | Three tabs. **Transports:** date range filter, driver filter, overdue filter, client search, Excel export. **Users:** add/edit/delete users with inline form. **Dashboard:** monthly stats for completed transports — totals, breakdowns by reason/tech/DC paperwork status, with month nav and site filter. |
-
-### Scripts (`scripts/`)
-
-| Script | Command | What It Does |
-|--------|---------|-------------|
-| `seedUsers.js` | `npm run seed` | Resets `users` collection with 3 test users (2 techs, 1 supervisor). Uses client SDK. |
-| `migrateExistingClients.js` | `npm run migrate-clients` | One-time migration: adds `active=true` and `lastUsedAt` to existing client docs. Uses admin SDK. |
-| `deactivateStaleClients.js` | `npm run cleanup-clients` | Marks clients as `active=false` if unused for 90+ days. Uses admin SDK. Needs `serviceAccountKey.json`. |
-
-### Config Files
-
-| File | Purpose |
-|------|---------|
-| `firebase.json` | Firebase config — Firestore rules/indexes paths, hosting config (public: dist, SPA rewrite) |
-| `.firebaserc` | Firebase project alias (default: `sprc-tx-l`) |
-| `firestore.rules` | Security rules (see below) |
-| `firestore.indexes.json` | Composite indexes for client autocomplete queries |
-| `vite.config.js` | Standard Vite + React config |
-| `package.json` | Dependencies and npm scripts |
-
----
-
-## Firestore Data Model
-
-### `users` collection
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Display name |
-| `pin` | string | 4-digit login PIN |
-| `role` | string | `tech` or `supervisor` |
-| `site` | string | `PHP` or `RTC` |
-| `active` | boolean | Can this user log in? |
-
-### `transports` collection
-| Field | Type | Description |
-|-------|------|-------------|
-| `site` | string | `PHP` or `RTC` (from user profile) |
-| `createdByUserId` | string | User doc ID |
-| `createdByName` | string | User display name |
-| `status` | string | `open` → `arrived` → `returned` → `closed` |
-| `departedAt` | timestamp | When transport started |
-| `returnedAt` | timestamp | When Finish TX was submitted |
-| `closedAt` | timestamp | When Close Checklist completed |
-| `clients` | array of strings | Client names |
-| `reasons` | array of strings | Selected reason labels |
-| `destinations` | array of objects | `{name, address}` for each destination |
-| `stops` | array of objects | `{arrivedAt}` — one entry per ARRIVE tap |
-| `dcPaperworkStatus` | string | `collected`, `na`, or `other` (set at Finish) |
-| `dcPaperworkOtherNote` | string | Required note when status is `other` |
-| `notes` | string | Freeform notes |
-| `createdAt` | timestamp | Auto-set |
-| `updatedAt` | timestamp | Auto-set on every save |
-
-### `clients` collection
-| Field | Type | Description |
-|-------|------|-------------|
-| `label` | string | Display name (as entered) |
-| `normalizedLabel` | string | Lowercase, trimmed, collapsed spaces (used for search) |
-| `active` | boolean | Shown in autocomplete when true. Set false after 90 days unused. |
-| `lastUsedAt` | timestamp | Updated every time client is added to a transport |
-| `createdAt` | timestamp | First time this client was entered |
-
-### `destinations` collection
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Location name (optional) |
-| `address` | string | Street address |
-| `normalizedName` | string | Lowercase for search |
-| `normalizedAddress` | string | Lowercase for search and dedup (also used as doc ID) |
-| `createdAt` | timestamp | First time this destination was entered |
-
-### Firestore Indexes
-- `clients`: composite index on `active` (ASC) + `normalizedLabel` (ASC) — for autocomplete
-- `clients`: composite index on `active` (ASC) + `lastUsedAt` (ASC) — for cleanup script
-
----
-
-## Firestore Security Rules
-
-The app uses **PIN auth, not Firebase Auth**, so `request.auth` is always null. Rules are permissive with field-level validation:
-
-- **users, clients, destinations** — Open read/write
-- **transports — create:** Validates required fields exist, status must be in allowed values, site must be PHP or RTC
-- **transports — update:** Prevents changing `createdByUserId`, `createdByName`, `site`. When status changes to `returned` or `closed`, requires `dcPaperworkStatus` to be set (must be `collected`, `na`, or `other`; if `other`, `dcPaperworkOtherNote` must be a non-empty string).
-- **transports — delete:** Open (should be supervisor-only in production)
-
----
-
-## Development & Deployment
-
-```bash
-# Local development
-npm run dev
-
-# Build for production
-npm run build          # outputs to dist/
-
-# Deploy everything (hosting + firestore rules)
-npx firebase deploy
-
-# Deploy just hosting
-npx firebase deploy --only hosting
-
-# Deploy just firestore rules
-npx firebase deploy --only firestore:rules
-
-# Utility scripts
-npm run seed              # Reset users to test data
-npm run migrate-clients   # One-time: add active/lastUsedAt to existing clients
-npm run cleanup-clients   # Deactivate clients unused 90+ days (needs serviceAccountKey.json)
-```
-
-### Dependencies
-- `firebase` ^12.9.0
-- `react` ^19.2.0 / `react-dom` ^19.2.0
-- `xlsx` ^0.18.5
-- Dev: Vite 7, ESLint 9
-
----
-
-## Commit History (Newest First)
-
-| Commit | Description |
-|--------|-------------|
-| *(pending)* | Add supervisor Dashboard tab with monthly stats (reason/tech/paperwork breakdowns) |
-| `985a6fa` | Update plan.md |
-| `d7ddc51` | Auto-add destination on autocomplete selection (match client behavior) |
-| `1822c8d` | Restructure DC paperwork flow (moved to Finish step), autocomplete portal fix, arrive reminder modal |
-| `d31cb45` | Implement autocomplete system with reusable components, useAutocomplete hook, 90-day client lifecycle |
-| `1995765` | Update plan.md |
-| `16fc005` | Add Firebase project config, user management dashboard (CRUD in supervisor view) |
-| `0175df8` | UI redesign, restructure destinations/ARRIVE flow |
-| `34b675c` | Restructure ARRIVE flow: log time first, fill location after |
-| `5afd2af` | Phase 6: Security rules, auto-lock, deployment config |
-| `63a3f54` | Phases 3-5: Suggestions, overdue tracking, supervisor dashboard |
-| `6f75051` | Phase 2: Multi-stop workflow, DC checks, close checklist |
-| `1437b19` | Firestore transports with role-based access |
-| `b0af371` | Add seed script |
-| `1799b80` | Phase 1: Firestore PIN login with lockout |
-
----
-
-## Known Limitations
-
-1. **No server-side auth** — PIN auth is client-side only. Anyone with the Firestore project ID could read/write data directly. For production hardening, would need Firebase Auth (anonymous or email) with custom claims for role enforcement.
-2. **No push notifications** — Requires Cloud Functions (paid Firebase plan).
-3. **Client cleanup is manual** — `npm run cleanup-clients` must be run manually or set up as a cron/Cloud Function.
-4. **TransportList backwards compatibility** — Still handles legacy `stops[]` array format (with destination info embedded in stops) from earlier data model.
-
----
-
-## Possible Future Work
-
-- Push notifications for overdue transports (needs Cloud Functions)
-- Server-side auth hardening (Firebase Auth + custom claims)
-- Automated client cleanup via Cloud Function
-- "Recently used" section in client autocomplete
-- Client merge tool for duplicates
-- Bulk management tools in supervisor dashboard
-
----
-
-## Upcoming Features & Bugs
-
-- **Supervisor Dashboard Mobile Navigation**
-  - Problem: On small screens, the top tab strip overflows horizontally and hides the EOC tab.
-  - Solution: Replace the tab strip with a mobile-friendly dropdown on narrow viewports while keeping tabs on desktop.
-  - Acceptance: All tabs are accessible without horizontal scrolling on mobile.
-
-- **Default Supervisor Landing Tab**
-  - Problem: Supervisors land on Transports by default.
-  - Solution: Default the active tab to Dashboard on login.
-  - Acceptance: Supervisors see Dashboard content immediately after login.
-
-- **Dashboard EOC Summary + Inline Issue Resolution**
-  - Problem: Dashboard lacks EOC status and requires switching tabs to resolve issues.
-  - Solution: Add open-issue and missed-assignment counts plus inline issue resolution from Dashboard.
-  - Acceptance: Supervisors can resolve open EOC issues directly from Dashboard.
-
-- **EOC Template Editor** *(DONE)*
-  - Goal: Allow supervisors to view/edit the EOC checklist template from the EOC dashboard.
-  - Solution: Add Template tab with CRUD + seed-from-default, and load template from Firestore in the tech checklist (fallback to defaults if empty).
-
-- **Split House vs Van EOC** *(DONE)*
-  - Goal: Separate House and Van EOC checklists with independent templates.
-  - Scope: Two EOCs due per cycle (House + Van), supervisor-managed vehicles, and auto van assignment by location.
-  - Completed:
-    - Two EOC buttons for techs (House + Van).
-    - Separate templates with per-type seeding and editing.
-    - Vehicle management tab (name/VIN + van/location).
-    - Van auto-assign by location with supervisor override per assignment.
-    - Techs cannot edit vehicle/VIN fields.
-
-- **Compliance Tracking System** *(DONE)*
-  - Goal: Replace Excel-based compliance tracking with in-app records.
-  - Scope: FPCC, TB Test, CPR & First Aid, Food Handlers, Drivers License, Annual Orientation, Performance Evaluation, Misc., Cintas Service Sheet.
-  - Data model: `complianceEmployees`, `complianceItems`, `cintasServices` collections.
-
-  **Implementation Progress:**
-  1. ~~Create `src/components/CompliancePanel.jsx`~~ — DONE. Full component with 4 sub-tabs (Employees, Items, Cintas, Import), category constants, CRUD, Excel import with preview, status badges.
-  2. ~~Update `SupervisorDashboard.jsx`~~ — DONE:
-     - ~~Added `compliance` to TAB_LABELS~~
-     - ~~Imported CompliancePanel + getStatus~~
-     - ~~Added `complianceItems` state + real-time listener~~
-     - ~~Add `complianceSummary` useMemo (overdue + upcoming counts)~~
-     - ~~Render compliance summary card on Dashboard tab (after EOC Summary section)~~
-     - ~~Render `<CompliancePanel />` when `activeTab === 'compliance'`~~
-  3. ~~Update `firestore.rules` — add open read/write rules for `complianceEmployees`, `complianceItems`, `cintasServices`~~ (deployed 2026-02-10)
-  4. ~~Update `firestore.indexes.json` — add composite indexes for `complianceItems` (category+dueDate, employeeId+category)~~ (deployed 2026-02-10)
-  5. ~~Build verification — `npm run build`~~ (completed 2026-02-10)
-  6. ~~One-time compliance + Cintas seed from Excel files~~ (completed 2026-02-10; source files should not be reused)
-  7. ~~Compliance/Cintas seed data imported into Firestore~~ (completed 2026-02-10)
-
-### Google Places Autocomplete for Destinations
-
-Replace the "Click here to search in Google Maps" link with real-time address autocomplete powered by the Google Places API. Existing Firestore-based suggestions (previously saved destinations) still appear alongside Google results.
-
-**Prerequisites:**
-1. Get a Google API key from https://console.cloud.google.com/
-2. Enable the **Places API** in the API Library
-3. (Recommended) Restrict the key: HTTP referrers → `localhost:*` + production domain; API restrictions → Places API only
-
-**Implementation steps:**
-
-1. **Add API key via environment variable** — Create `.env.local` in project root:
-   ```
-   VITE_GOOGLE_PLACES_API_KEY=your_key_here
-   ```
-   Add `.env.local` to `.gitignore` if not already there.
-
-2. **Load Google Maps script in `index.html`** — Add before closing `</head>`:
-   ```html
-   <script>
-     (function() {
-       var key = '%VITE_GOOGLE_PLACES_API_KEY%';
-       if (key && !key.startsWith('%')) {
-         var s = document.createElement('script');
-         s.src = 'https://maps.googleapis.com/maps/api/js?key=' + key + '&libraries=places';
-         s.async = true;
-         document.head.appendChild(s);
-       }
-     })();
-   </script>
-   ```
-   Note: Vite replaces `%VITE_*%` in index.html with env values at build time.
-
-3. **Modify `src/components/DestinationAutocomplete.jsx`:**
-   - Add `useEffect` to initialize `google.maps.places.AutocompleteService` once Google script loads
-   - Add `googleSuggestions` state alongside existing `suggestions` (Firestore)
-   - **Hybrid search** on address field: Firestore results first (labeled "Recent"), then a divider, then Google Places results via `AutocompleteService.getPlacePredictions()`
-   - **On Google Place selection:** call `PlacesService.getDetails()` to get full address + place name, auto-fill both fields
-   - **Remove** the "Click here to search in Google Maps" `<a>` tag (no longer needed)
-   - Keep existing Firestore persistence (destinations still saved on add)
-
-**Files modified:**
-- `.env.local` — new file, API key (git-ignored)
-- `.gitignore` — add `.env.local` if missing
-- `index.html` — add Google Maps script tag
-- `src/components/DestinationAutocomplete.jsx` — add Google Places integration, hybrid dropdown
+# SPRC Operations Hub Blueprint v1 (Scope, Flow, Data Contract)
+
+Last updated: 2026-02-12
+Status: Active Blueprint
+Source of truth: This file is the product blueprint and implementation DNA for SPRC Operations Hub.
+
+## Summary
+This plan makes `plan.md` the system blueprint for a full operations app (EOCs + transports + supervisor oversight), with clear role boundaries, deterministic EOC automation, and auditable workflows.
+
+Transport flow remains mostly as-is; overhaul focus is assignment-driven EOC orchestration, supervisor action queues, and location-scoped permissions.
+
+## Scope + Flow (Canonical)
+Goal: One app that BHTs and supervisors use for daily operations: EOCs + transports + supervisor oversight. The app is being overhauled to replace cobbled-together behavior with consistent, assignment-driven workflows.
+
+### Roles
+- `Admin/Owner`: Full control across all locations; controls system settings and hard deletes.
+- `Supervisor`: Can only manage authorized location(s); no cross-location control.
+- `BHT`: Completes assigned EOCs, runs transports, and relays issues to supervisors.
+
+### Locations
+- Mesquite
+- Lone Mountain
+- RES
+
+### EOC Rules
+- EOC = Environment of Care.
+- EOC types: House EOC and Van EOC.
+- Due schedule is configurable by Admin (v1 starts with Sunday=1st shift, Wednesday=2nd shift).
+- On due cycles, each location must complete House EOC + required Van EOCs.
+- Van EOC required for all active vans assigned at that location/shift.
+- A BHT may be assigned multiple vans.
+- Van EOC UI uses van picker when BHT has multiple assigned vans.
+- User-facing status terms: Pending -> Overdue -> Completed.
+- Overdue flips at 12:00 AM America/Phoenix on the day after due date.
+- Overdue tasks remain open; new cycle tasks are still generated.
+
+### Assignment Rules
+- Persistent assignments (not reset each shift).
+- Supervisor assigns BHTs to location + shift + van list (immediate effect for future tasks).
+- If only one BHT exists for location+shift, House EOC auto-assigns to that BHT.
+- If multiple BHTs exist for location+shift, supervisor must designate one primary House EOC assignee.
+- Mid-cycle reassignments do not move already-generated tasks; only future tasks follow new assignment.
+
+## Decision-Complete Product Behavior
+
+### 1. Role and Access Model
+#### Admin
+- Global read/write across all modules and locations.
+- Manages shift/scheduling settings, global templates, and hard deletes.
+
+#### Supervisor
+- Location-scoped read/write for operations in authorized location(s).
+- Can onboard BHTs only inside authorized location(s).
+- Can assign/reassign BHTs/vans/shifts within scope.
+
+#### BHT
+- Can view and act on assigned location/shift tasks.
+- Cannot edit submitted records.
+- If no active assignment: login allowed, blocked-action screen (`No Active Assignment`).
+
+### 2. End-User Flow
+#### BHT Flow
+1. Login by PIN.
+2. Home remains close to current layout, but task logic becomes assignment-driven.
+3. Due/overdue EOCs displayed first-class with location grouping.
+4. Van EOC:
+- Single assigned van: enter checklist directly.
+- Multiple assigned vans: choose van, then checklist.
+5. EOC issue (repair/attention) requires note; submit creates supervisor alert.
+6. New transport requires explicit location selection (default last-used).
+7. Submitted items are locked for BHT.
+
+#### Supervisor Flow
+1. Landing tab: Dashboard Metrics.
+2. KPI cards are clickable and open filtered action queues.
+3. Supervisor resolves issues/reassigns from queue views.
+4. Alerts remain active until formally resolved.
+
+### 3. EOC Automation and Lifecycle
+- Idempotent in-app sync runs on authenticated app sessions (`syncEocTasksForUserScope`).
+- Sync generates due EOC tasks for active assignments per configured due-day rules.
+- Sync flips prior-day pending tasks to overdue once app activity occurs after 12:00 AM Phoenix.
+- Task states (user-facing): `pending`, `overdue`, `completed`.
+- Internal/audit markers may include `archived`, `hard_deleted` (admin only, logged).
+
+### 4. Transports and Compliance (v1 Refinement)
+- Transport UX and flow stay mostly unchanged.
+- Add stricter location-scoped access and immutable submit behavior.
+- Compliance module remains Supervisor/Admin only.
+- In-app alerts only (no email/SMS in v1).
+
+## Important Changes To Public Interfaces / Types
+
+### Firestore Collections (authoritative)
+- `appSettings`
+- `scheduling`: shift definitions, due-day config, timezone (`America/Phoenix`).
+- `users`
+- role, active, auth scope, location authorizations.
+- `bhtAssignments` (new canonical assignment model)
+- `bhtUserId`, `locationId`, `shiftId`, `vanIds[]`, `isHousePrimary`, `active`, `effectiveFrom`, `effectiveTo`.
+- `eocTasks` (generated work items)
+- `taskType` (`house|van`), `locationId`, `shiftId`, `vanId?`, `assigneeUserId`, `dueDate`, `status`, `generatedAt`.
+- `eocSubmissions`
+- immutable submission payload + timestamps.
+- `eocIssues`
+- created from repair/attention checklist items; resolution fields.
+- `alerts`
+- in-app notification records tied to location and module.
+- `auditLogs`
+- required for supervisor/admin corrections and all admin hard deletes.
+
+### Existing Modules Updated
+- `transports`: add strict location scope, BHT submit-lock enforcement.
+- `compliance*`: keep current model; enforce role/location scope.
+
+### Service Interfaces (Free-Tier App Workflows)
+- `syncEocTasksForUserScope(user)` (idempotent task generation + overdue flip on app session entry)
+- Assignment save workflow (supervisor-scoped writes; future-task effect)
+- EOC issue resolution workflow (queue action + linked alert lifecycle update)
+- Admin hard-delete workflow (reason required + audit log write in same mutation batch)
+
+## Security Rules and Permission Contract
+- Move from client-trust to auth-backed role/location checks.
+- All writes validate:
+- role eligibility
+- location scope
+- immutable submission constraints
+- Supervisor cannot write records outside authorized locations.
+- BHT cannot modify completed/submitted records.
+- Admin hard delete only, with mandatory reason and audit log linkage.
+
+## Testing and Acceptance Scenarios
+
+### Role/Scope
+1. Supervisor cannot create/assign BHT outside authorized location.
+2. BHT cannot view records from non-assigned locations.
+3. Admin can access all locations.
+
+### Assignment/EOC Generation
+1. Single BHT at location+shift auto-gets House EOC owner status.
+2. Multiple BHTs at same location+shift requires primary before save.
+3. Multi-van BHT sees picker; each van requires independent completion.
+4. Reassignment affects future tasks only; old tasks stay with original assignee.
+
+### Overdue Rules
+1. Pending due task flips to overdue at 12:00 AM next day (Phoenix).
+2. Overdue task stays open while next due-cycle task is still generated.
+
+### Issue + Alert Workflow
+1. Repair/attention submission fails without note.
+2. Submission creates supervisor alert in correct location queue.
+3. Alert remains open until supervisor resolves with optional resolution note.
+
+### Data Integrity
+1. BHT cannot edit after submit.
+2. Supervisor/admin correction writes audit trail.
+3. Soft delete hides record from default views.
+4. Admin hard delete succeeds only with reason and audit log entry.
+
+### Scheduler
+1. Daily run creates correct tasks by assignment/due config.
+2. Daily run idempotency: duplicate tasks are not created for same cycle key.
+
+## Implementation Plan (Phased)
+
+### 1. Blueprint Lock (Completed 2026-02-12)
+- Insert canonical Scope + Flow section at top of `plan.md`.
+- Align rest of `plan.md` headings to this contract.
+
+### 2. Auth + Rules Foundation (Completed 2026-02-12)
+- Add auth-backed role/location claims.
+- Implement Firestore rules by role/scope/action.
+
+### 3. Assignment Engine (Completed 2026-02-12)
+- Introduce `bhtAssignments`.
+- Build supervisor assignment UI and validations.
+
+### 4. EOC Task Engine (In Progress 2026-02-12)
+- Add `eocTasks` and in-app sync generation.
+- Migrate current EOC assignment flow to task-based model.
+
+### 5. BHT UX Update (Completed 2026-02-12)
+- Keep current visual feel.
+- Add assignment-aware queue + van picker + no-assignment blocked screen.
+
+### 6. Supervisor Action Queues (Completed 2026-02-12)
+- KPI click-through queues.
+- Resolve/reassign workflows and alert lifecycle.
+
+### 7. Audit + Delete Controls (Completed 2026-02-12)
+- Soft-delete standardization.
+- Admin-only hard-delete path with `auditLogs`.
+
+### 8. Transport/Compliance Scope Hardening (Completed 2026-02-12)
+- Preserve transport behavior.
+- Enforce location scope and submit-lock constraints.
+
+### 9. Regression + UAT (In Progress 2026-02-12)
+- Added executable Phase 9 checklist/matrix: `docs/REGRESSION_UAT_PHASE9.md`.
+- Added guided signoff runbook: `docs/UAT_WALKTHROUGH_PHASE9.md`.
+- Added smoke commands: `npm run smoke:phase9` (build gate) and `npm run smoke:phase9:full` (build + lint baseline report).
+- Added clean-state UAT reset seed flow to remove stale legacy records before walkthrough runs: `npm run seed -- --confirm` (or `npm run reset:uat`).
+- Resolved blocker: deployed local `firestore.rules` to `sprc-tx-l` and confirmed full `reset:uat` completion including `bhtAssignments` and `eocTasks`.
+- Current evidence:
+- `smoke:phase9`: pass (`vite build` successful).
+- `smoke:phase9:full`: fails on existing lint baseline (40 errors / 8 warnings) tracked separately from Phase 9 walkthrough signoff.
+- Remaining for phase completion: admin + supervisor walkthrough and signoff on UAT matrix scenarios.
+
+## Assumptions and Defaults Chosen
+- `America/Phoenix` is canonical timezone.
+- EOC automation is lazy in-app idempotent sync in v1 (no Cloud Functions).
+- Alerts are in-app only in v1.
+- Transport workflow remains mostly unchanged.
+- Compliance is supervisor/admin-only, not self-service for BHTs.
+- Supervisors are location-scoped; admin is global.
+- Soft delete default; admin hard delete allowed only with audit reason.
+
+## Continuous Update Instructions (Mandatory)
+1. Update this file after every meaningful merged change.
+2. Update `Last updated` date each time.
+3. Update progress statuses in Progress Snapshot.
+4. Add one entry to Change Log for every implementation change.
+5. If behavior or schema changes, update Decision Log with reason.
+6. If interface changes, update interface sections first, then implementation.
+7. If implementation diverges from blueprint, log as Deviation with owner and resolution date.
+8. Never remove historical Change Log entries.
+
+## Progress Snapshot
+| Area | Status | Owner | Target Date | Notes |
+|---|---|---|---|---|
+| Blueprint Lock | Completed | Claude Code | 2026-02-12 | Canonical Scope + Flow blueprint adopted and aligned as system source of truth |
+| Auth + Role Scope | Completed | Claude Code | 2026-02-12 | Phase 2 auth/rules foundation implemented (`firestore.rules`, `src/App.jsx`, `src/components/PinLogin.jsx`, `src/components/SupervisorDashboard.jsx`) |
+| Assignment Engine | Completed | Claude Code | 2026-02-12 | Persistent `bhtAssignments` model and assignment UI/logic implemented (`src/hooks/useEocAssignments.js`, `src/components/SupervisorDashboard.jsx`, `src/components/BhtHub.jsx`) |
+| EOC Task Engine | In Progress | Claude Code | 2026-02-12 | Added `eocTasks` sync engine, overdue flip logic, and task-based checklist submit flow using free-tier in-app lazy sync (no Cloud Functions) |
+| BHT UX Update | Completed | Claude Code | 2026-02-12 | Assignment-aware due/overdue queue is live with no-assignment blocked screen and multi-van picker flow for van EOC task selection |
+| Transport Hardening | Completed | Claude Code | 2026-02-12 | Enforced transport site scope for supervisor views and added submit-lock behavior to prevent post-submit edits in transport workflow |
+| Supervisor Queues | Completed | Claude Code | 2026-02-12 | Clickable KPI cards now drive queue views (issues/overdue/alerts), with resolve and reassign actions plus alert close/read lifecycle behavior |
+| Admin Controls + Audit | Completed | Claude Code | 2026-02-12 | Soft delete standardized for users/assignments; admin-only hard delete requires reason and writes immutable audit log entry; admin audit center view added |
+| Regression + UAT | In Progress | Claude Code + Admin/Supervisor | 2026-02-12 | Added Phase 9 checklist/matrix and smoke scripts; build smoke passes; final walkthrough signoff still required |
+
+## Decision Log
+| Date | Decision | Why | Impact |
+|---|---|---|---|
+| 2026-02-12 | Scope + Flow First blueprint adopted as source of truth | Align product behavior before deep build changes | Reduces rework and inconsistent implementations |
+| 2026-02-12 | Assignment-driven EOC orchestration is canonical | Replace ad hoc/manual coupling | Enables deterministic task generation and accountability |
+| 2026-02-12 | Location-scoped permissions are mandatory | Prevent cross-location data/control leakage | Drives rules and role model across modules |
+| 2026-02-12 | Free-tier automation model selected: lazy in-app task sync (no Cloud Functions) | Keep v1 on free Firebase while preserving deterministic task generation behavior | Scheduler behavior is implemented from app sessions rather than backend cron |
+
+## Change Log
+| Date | Module | Change | Files/Collections | Verification |
+|---|---|---|---|---|
+| 2026-02-12 | Blueprint | Replaced plan with Scope + Flow First Blueprint v1 content and living update rules | `plan.md` | Manual section-by-section verification |
+| 2026-02-12 | Phase 1 | Marked Blueprint Lock as completed in implementation tracking | `plan.md` | Reviewed plan status against current blueprint sections |
+| 2026-02-12 | Phase 2 | Marked Auth + Rules Foundation as completed in implementation tracking | `plan.md`, `firestore.rules`, `src/App.jsx`, `src/components/PinLogin.jsx`, `src/components/SupervisorDashboard.jsx` | Reviewed implementation references from recent history (`c56e5f3`) |
+| 2026-02-12 | Phase 3 | Marked Assignment Engine as completed in implementation tracking | `plan.md`, `src/hooks/useEocAssignments.js`, `src/components/SupervisorDashboard.jsx`, `src/components/BhtHub.jsx` | Reviewed implementation references from recent history (`a7de4ae`) |
+| 2026-02-12 | Phase 4 | Started EOC Task Engine migration to task-based workflow and sync generation | `src/services/eocTaskEngine.js`, `src/App.jsx`, `src/components/EocChecklist.jsx`, `src/components/SupervisorDashboard.jsx`, `src/hooks/useEocTasks.js` | `npm run build` |
+| 2026-02-12 | Phase 5 | Started BHT UX update with assignment-aware task queue and task launch flow | `src/components/BhtHub.jsx`, `src/hooks/useEocTasks.js`, `src/App.jsx` | `npm run build` |
+| 2026-02-12 | Phase 5 | Completed BHT UX update with multi-van picker, assignment-driven queue, and blocked no-assignment state | `src/components/BhtHub.jsx`, `src/hooks/useEocTasks.js`, `src/App.jsx`, `plan.md` | `npm run build` |
+| 2026-02-12 | Blueprint | Added detailed gap-closure backlog and open decision tracker from full conversation-to-repo parity audit | `plan.md` | Manual parity audit against `plan.md`, `firestore.rules`, and `src/` modules |
+| 2026-02-12 | Phase 6 | Completed supervisor action queues with clickable KPI routing and queue lifecycle actions | `src/components/SupervisorDashboard.jsx`, `plan.md` | `npm run build` |
+| 2026-02-12 | Phase 7 | Completed audit + delete controls with soft-delete defaults, admin hard-delete path, and audit center UI | `src/components/SupervisorDashboard.jsx`, `plan.md` | `npm run build` |
+| 2026-02-12 | Phase 8 | Completed transport/compliance scope hardening with scoped supervisor reads and transport submit-lock constraints | `src/App.jsx`, `src/components/TransportCard.jsx`, `src/components/CloseChecklist.jsx`, `src/components/SupervisorDashboard.jsx`, `src/components/CompliancePanel.jsx`, `plan.md` | `npm run build` |
+| 2026-02-12 | Phase 9 | Added regression/UAT checklist artifact and executable smoke commands; recorded current smoke evidence and signoff dependencies | `docs/REGRESSION_UAT_PHASE9.md`, `package.json`, `plan.md` | `npm run smoke:phase9` (pass), `npm run smoke:phase9:full` (lint baseline fail: 40 errors / 8 warnings) |
+| 2026-02-12 | Phase 9 | Added guided UAT walkthrough script mapped to the regression matrix for admin/supervisor signoff execution | `docs/UAT_WALKTHROUGH_PHASE9.md`, `docs/REGRESSION_UAT_PHASE9.md`, `plan.md` | Manual doc review |
+| 2026-02-12 | Blueprint | Removed Cloud Functions/scheduler wording and made free-tier lazy in-app sync canonical across automation/interface sections | `plan.md` | Manual blueprint consistency review against `src/App.jsx` and `src/services/eocTaskEngine.js` |
+| 2026-02-12 | Phase 9 | Replaced legacy user seed script with destructive clean-state UAT reset/seed flow and linked it into walkthrough prerequisites to prevent stale-data regressions | `scripts/seedUsers.js`, `package.json`, `docs/UAT_WALKTHROUGH_PHASE9.md`, `docs/REGRESSION_UAT_PHASE9.md`, `plan.md` | `npm run seed` (guard verified), `npm run smoke:phase9` |
+| 2026-02-12 | Phase 9 | Hardened reset script to continue on permission-denied collections, executed reset, and documented active Firestore-rule blocker for `bhtAssignments`/`eocTasks` | `scripts/seedUsers.js`, `docs/REGRESSION_UAT_PHASE9.md`, `docs/UAT_WALKTHROUGH_PHASE9.md`, `plan.md` | `npm run reset:uat` (partial due rules), `npm run smoke:phase9` |
+| 2026-02-12 | Phase 9 | Deployed Firestore rules to `sprc-tx-l`, reran reset, and verified full clean-state seeding including assignments/tasks | `firestore.rules`, `scripts/seedUsers.js`, `docs/REGRESSION_UAT_PHASE9.md`, `docs/UAT_WALKTHROUGH_PHASE9.md`, `plan.md` | `firebase deploy --only firestore:rules --project sprc-tx-l`, `npm run reset:uat` |
+
+## Upcoming Tasks (Gap Closure Backlog)
+
+### P0 Critical (Must Land Before Broader Rollout)
+1. **Fix blueprint section contract drift**
+- Add missing required sections from the agreed replacement format:
+- `Data Model and Interfaces (Canonical v1)`
+- `Write Integrity and Concurrency`
+- `Authorization and Rules Contract`
+- `Free-Tier Automation Model`
+- `One-Time Reset and Cutover Runbook`
+- `Open Questions / Future Decisions`
+- Done when: `plan.md` structure fully matches the agreed canonical outline.
+
+2. **Replace client-trust security model with auth-backed enforcement**
+- Current rules explicitly state client-side trust and allow broad reads/writes (`firestore.rules`).
+- Done when: Firestore rules enforce role/location scope server-side and deny unauthorized paths.
+
+3. **Harden PIN auth model**
+- Current login queries plaintext PIN, and `users` schema still includes raw `pin`.
+- Done when: hashed PIN contract is implemented (`pinHash`, algo params), forced change flow exists, plaintext pins retired.
+
+4. **Enforce location scope on all data reads/writes**
+- Supervisor/admin dashboards currently query global collections without scope filters.
+- Done when: every query/mutation is constrained by authorized locations and validated by rules.
+
+5. **Correct overstated implementation status in blueprint**
+- `plan.md` marks Auth + Role Scope completed while rules remain client-trust/open.
+- Done when: Progress Snapshot and Change Log are reconciled with actual repo state.
+
+### P1 High (Core Product Contract Completion)
+1. **Finalize and implement canonical interface contract**
+- Add/align service contracts and naming consistency for task generation, issue lifecycle, assignment save, backup access, and transport close/edit flows.
+- Done when: `plan.md` interfaces map 1:1 to implementation entry points.
+
+2. **Finalize canonical collection contract and naming**
+- Resolve `alerts` vs `supervisorAlerts`, `bhtAssignments` vs `shiftAssignments`, and legacy/target collection coexistence.
+- Done when: one authoritative schema set is documented and implemented.
+
+3. **Align deterministic EOC task ID contract**
+- Current IDs are `task_*` while prior blueprint text referenced house/van deterministic IDs.
+- Done when: deterministic format is finalized and duplicate prevention is verified.
+
+4. **Retire legacy `eocAssignments` paths**
+- `SupervisorEocPanel` still uses legacy collection and workflows.
+- Done when: legacy reads/writes removed or explicitly marked read-only with migration plan.
+
+5. **Implement full issue lifecycle**
+- Required lifecycle is `open -> in_progress -> resolved` with required resolution note; current flow resolves directly.
+- Done when: state machine, validation, and queue UX support all states.
+
+6. **Add concurrency/version protection**
+- No `version` / `expectedVersion` checks currently.
+- Done when: optimistic concurrency is enforced on critical mutable records with conflict UX.
+
+7. **Implement audit trail for critical actions**
+- Add audit writes for assignment changes, issue resolution, closed transport edits, and hard deletes.
+- Done when: `auditLogs` entries exist for all critical action categories.
+
+8. **Implement soft-delete + admin hard-delete workflow**
+- Include mandatory reason and immutable audit linkage.
+- Done when: soft-delete fields standardized and admin hard-delete guarded by policy.
+
+9. **Implement backup access grant/revoke contract**
+- Add temporary supervisor cross-location grants with start/end + revoke reason path.
+- Done when: grant lifecycle enforced in UI + rules + data model.
+
+10. **Enforce reassignment policy exceptions**
+- Mid-cycle reassignment should affect future tasks only, except allowed inactive-assignee exception with required reason.
+- Done when: policy is encoded in assignment/task services and audited.
+
+### P2 Medium (UX and Operations Hardening)
+1. **Complete BHT EOC home state contract**
+- Add explicit button states (`Not Due`, `Due`, `Overdue`, `Completed`) and `Mark All OK`.
+- Done when: UI behavior matches blueprint verbatim.
+
+2. **Enforce single-active transport per BHT**
+- Current flow allows creating new transport without active guard.
+- Done when: second active start is blocked at UI and write layer.
+
+3. **Implement location picker logic for New Transport**
+- Single-location direct start; multi-location forced picker.
+- Done when: start flow behavior is role/scope aware and tested.
+
+4. **Implement active-transport session guards**
+- Lock/logout should be blocked until close, with close-only recovery path.
+- Done when: session control rules match blueprint behavior.
+
+5. **Add offline read-only mode**
+- Writes should block cleanly while showing clear offline status.
+- Done when: offline write attempts are prevented and user informed.
+
+6. **Build cutover runbook and verification checklist**
+- Add one-time reset, seed, smoke checks, rollback path, and signoff flow.
+- Done when: runbook is executable and rehearsal-validated.
+
+7. **Add acceptance and regression test suite**
+- Cover scope, EOC lifecycle, transport lifecycle, concurrency, backup expiry, and audit compliance.
+- Done when: test matrix in blueprint has executable test coverage and pass/fail evidence.
+
+## Open Questions / Future Decisions
+| Date | Question | Options | Default if Unanswered | Owner |
+|---|---|---|---|---|
+| 2026-02-12 | Canonical assignment collection name | `bhtAssignments` vs `shiftAssignments` | Keep `bhtAssignments` in v1, map in plan | Admin/Owner |
+| 2026-02-12 | Canonical alerts collection name | `alerts` vs `supervisorAlerts` | Keep `supervisorAlerts` in v1, plan migration | Admin/Owner |
+| 2026-02-12 | PIN model cutover path | Immediate forced migration vs staged migration | Staged migration with forced first-login rotate | Admin/Owner |
