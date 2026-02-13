@@ -37,24 +37,3 @@ export function notifyError(message, duration = 3400) {
 export function getToastEventName() {
   return TOAST_EVENT
 }
-
-export function installAlertToastBridge() {
-  if (typeof window === 'undefined') return () => {}
-  if (window.__sprcAlertToastBridgeInstalled) return () => {}
-
-  const nativeAlert = window.alert.bind(window)
-  window.__sprcNativeAlert = nativeAlert
-  window.__sprcAlertToastBridgeInstalled = true
-
-  window.alert = (message) => {
-    notifyWarning(message)
-  }
-
-  return () => {
-    if (window.__sprcNativeAlert) {
-      window.alert = window.__sprcNativeAlert
-      delete window.__sprcNativeAlert
-    }
-    delete window.__sprcAlertToastBridgeInstalled
-  }
-}

@@ -288,6 +288,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
             eocType,
             severity: 'medium',
             message: `EOC issue: ${issue.label} - ${issue.description}`,
+            bhtName: user.name,
             techName: user.name,
             read: false,
             version: 1,

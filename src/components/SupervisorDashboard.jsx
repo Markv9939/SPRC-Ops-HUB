@@ -11,7 +11,32 @@ import { hashPin } from '../utils/pinHash'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { getAuthPolicy, setAuthScopeEnforced } from '../services/authPolicyService'
 import { notifySuccess } from '../utils/toast'
+import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
 import { getStatus } from '../utils/complianceStatus'
+import {
+  GLOBAL_SCOPE,
+  MAIN_LOCATIONS,
+  MAIN_LOCATION_OTC,
+  ROLE_BHT,
+  buildAuthorizedLocations,
+  buildBhtLocationId,
+  canActorManageRole,
+  formatRoleLabel,
+  getAllowedVanIdsForLocationId,
+  getAllowedVanIdsForMainLocation,
+  getAvailableMainLocationsForUser,
+  getHouseOptionsForMainLocation,
+  isAdminRole,
+  isBhtRole,
+  locationIdToMainLocation,
+  normalizeHouseId,
+  normalizeMainLocation,
+  normalizeRole,
+  normalizeScopeValues,
+  normalizeTransportSite,
+  requiresHouseSelection,
+  roleOptionsForActor
+} from '../utils/orgModel'
 
 const TAB_LABELS = {
   dashboard: '\u{1F4C8} Dashboard',
@@ -23,8 +48,8 @@ const TAB_LABELS = {
   audit: '\u{1F9FE} Audit'
 }
 const TAB_KEYS = Object.keys(TAB_LABELS)
-const TRANSPORT_SITES = new Set(['PHP', 'RTC'])
-const COMPLIANCE_SITES = new Set(['PHP', 'RTC', 'OTC'])
+const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
+const COMPLIANCE_SITES = new Set(MAIN_LOCATIONS)
 const COMPLIANCE_CATEGORY_LABELS = {
   fpcc: 'FPCC',
   tb_test: 'TB Test',
@@ -38,11 +63,11 @@ const COMPLIANCE_CATEGORY_LABELS = {
 }
 
 function locationScopeAlias(locationId) {
+  const normalizedMainLocation = locationIdToMainLocation(locationId)
+  if (normalizedMainLocation) return normalizedMainLocation
+
   const normalized = String(locationId || '').trim().toUpperCase()
-  if (!normalized) return ''
-  if (normalized === 'MESQUITE' || normalized === 'RES') return 'PHP'
-  if (normalized === 'LONE_MOUNTAIN') return 'RTC'
-  return normalized
+  return normalizeMainLocation(normalized) || normalized
 }
 
 function normalizeComplianceSite(siteId) {
@@ -64,9 +89,8 @@ function formatComplianceCategory(category) {
 
 function formatComplianceSiteLabel(siteId) {
   const normalized = normalizeComplianceSite(siteId)
-  if (!normalized) return 'Unknown Site'
-  if (normalized === 'PHP') return 'PHP (RES / Mesquite)'
-  if (normalized === 'RTC') return 'RTC (Lone Mountain)'
+  if (!normalized) return 'Unknown Location'
+  if (normalized === 'OTC') return 'OTC (Mesquite / Lone Mountain)'
   return normalized
 }
 
@@ -107,8 +131,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const [selectedDriver, setSelectedDriver] = useState('')
   const [overdueFilter, setOverdueFilter] = useState('all')
   const [clientSearch, setClientSearch] = useState('')
-  const [isDashboardDrilldownActive, setIsDashboardDrilldownActive] = useState(false)
-  const [drilldownLabel, setDrilldownLabel] = useState('')
 
   const [drivers, setDrivers] = useState([])
 
@@ -132,7 +154,16 @@ function SupervisorDashboard({ user, isOffline = false }) {
   // User Management
   const [users, setUsers] = useState([])
   const [editingUser, setEditingUser] = useState(null)
-  const [userForm, setUserForm] = useState({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true })
+  const [userForm, setUserForm] = useState({
+    id: '',
+    name: '',
+    pin: '',
+    role: '',
+    location: '',
+    house: '',
+    vanId: '',
+    active: true
+  })
   const [authScopeEnforced, setAuthScopeEnforcedState] = useState(false)
   const [authPolicyLoading, setAuthPolicyLoading] = useState(false)
 
@@ -143,23 +174,34 @@ function SupervisorDashboard({ user, isOffline = false }) {
     bhtUserId: '', locationId: '', shiftId: '', vanIds: [], isHousePrimary: false, active: true
   })
 
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = isAdminRole(user?.role)
   const availableTabKeys = isAdmin ? TAB_KEYS : TAB_KEYS.filter(k => k !== 'audit')
+  const actorRoleOptions = useMemo(
+    () => roleOptionsForActor(user?.role),
+    [user?.role]
+  )
+  const managedMainLocations = useMemo(() => {
+    const scopedLocations = getAvailableMainLocationsForUser(user)
+    if (isAdmin) return [...MAIN_LOCATIONS]
+    return scopedLocations.length > 0 ? scopedLocations : [MAIN_LOCATION_OTC]
+  }, [isAdmin, user])
+  const defaultManagedMainLocation = managedMainLocations[0] || MAIN_LOCATION_OTC
   const rawScopes = useMemo(
     () => (Array.isArray(user?.authorizedLocations) ? user.authorizedLocations : []),
     [user?.authorizedLocations]
   )
-  const normalizedScopes = useMemo(() => (
-    [...new Set([
+  const normalizedScopes = useMemo(
+    () => normalizeScopeValues([
       ...(user?.site ? [user.site] : []),
       ...rawScopes
-    ].map(v => String(v || '').trim().toUpperCase()))]
-  ), [rawScopes, user?.site])
+    ]),
+    [rawScopes, user?.site]
+  )
   const primaryScopes = useMemo(() => (
-    [...new Set([
+    normalizeScopeValues([
       ...(Array.isArray(user?.primaryScopes) ? user.primaryScopes : []),
       ...(user?.site ? [user.site] : [])
-    ].map(v => String(v || '').trim().toUpperCase()).filter(Boolean))]
+    ])
   ), [user?.primaryScopes, user?.site])
   const activeBackupGrants = useMemo(
     () => (Array.isArray(user?.activeBackupGrants)
@@ -182,7 +224,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
     [isAdmin, normalizedScopes]
   )
   const inTransportScope = useCallback(
-    (site) => isAdmin || allowedTransportSites.includes(String(site || '').trim().toUpperCase()),
+    (site) => isAdmin || allowedTransportSites.includes(normalizeTransportSite(site)),
     [allowedTransportSites, isAdmin]
   )
   const inComplianceScope = useCallback(
@@ -473,12 +515,39 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
   const loadUsers = useCallback(async () => {
     const usersSnapshot = await getDocs(collection(db, 'users'))
-    const usersData = usersSnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }))
-    setUsers(usersData.filter(u => !u.deletedAt && u.deleted !== true))
-  }, [])
+    const usersData = usersSnapshot.docs
+      .map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      }))
+      .map((loadedUser) => {
+        const normalizedRole = normalizeRole(loadedUser.role)
+        const normalizedLocation = isAdminRole(normalizedRole)
+          ? GLOBAL_SCOPE
+          : (normalizeMainLocation(loadedUser.location || loadedUser.site || loadedUser.locationId) || '')
+        const normalizedHouse = normalizeHouseId(loadedUser.house || loadedUser.locationId)
+        return {
+          ...loadedUser,
+          role: normalizedRole,
+          location: normalizedLocation,
+          site: normalizedLocation,
+          house: normalizedHouse || '',
+          vanId: loadedUser.vanId || ''
+        }
+      })
+      .filter(loadedUser => !loadedUser.deletedAt && loadedUser.deleted !== true)
+
+    if (isAdmin) {
+      setUsers(usersData)
+      return
+    }
+
+    const actorScopeSet = new Set(managedMainLocations)
+    setUsers(usersData.filter(loadedUser => (
+      isBhtRole(loadedUser.role)
+      && actorScopeSet.has(normalizeMainLocation(loadedUser.location || loadedUser.site || loadedUser.locationId))
+    )))
+  }, [isAdmin, managedMainLocations])
 
   const loadAuthPolicyState = useCallback(async () => {
     if (!isAdmin) return
@@ -521,7 +590,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
     return unsub
   }, [isAdmin])
 
-  const techUsers = users.filter(u => u.role === 'tech' && u.active)
+  const bhtUsers = users.filter(u => isBhtRole(u.role) && u.active)
 
   const writeAuditLog = async ({ action, collectionPath, documentId, reason, extra = {} }) => {
     if (!user?.id || !user?.name) return
@@ -562,8 +631,14 @@ function SupervisorDashboard({ user, isOffline = false }) {
     })
   }
 
-  const promptDeleteReason = (label) => {
-    const reason = prompt(`Enter reason for ${label}:`)
+  const promptDeleteReason = async (label) => {
+    const reason = await showPromptDialog(`Enter reason for ${label}:`, {
+      title: 'Reason Required',
+      tone: 'warning',
+      confirmText: 'Continue',
+      cancelText: 'Cancel',
+      placeholder: 'Enter reason'
+    })
     if (reason === null) return null
     if (!reason.trim()) {
       alert('Reason is required.')
@@ -588,7 +663,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
   }
 
   const refreshAdminAuthSession = async () => {
-    if (user?.role !== 'admin') return false
+    if (!isAdminRole(user?.role)) return false
     try {
       if (auth.currentUser) {
         await signOut(auth)
@@ -606,18 +681,48 @@ function SupervisorDashboard({ user, isOffline = false }) {
     }
   }
 
+  const buildDefaultUserForm = useCallback(() => ({
+    id: '',
+    name: '',
+    pin: '',
+    role: '',
+    location: '',
+    house: '',
+    vanId: '',
+    active: true
+  }), [])
+
   const handleAddUser = () => {
+    if (actorRoleOptions.length === 0) {
+      alert('Your account does not have permission to manage users.')
+      return
+    }
+
     setEditingUser('new')
-    setUserForm({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true })
+    setUserForm(buildDefaultUserForm())
   }
 
-  const handleEditUser = (user) => {
-    setEditingUser(user.id)
+  const handleEditUser = (managedUser) => {
+    const normalizedRole = normalizeRole(managedUser?.role)
+    if (!canActorManageRole(user?.role, normalizedRole)) {
+      alert('You can only edit BHT users.')
+      return
+    }
+
+    const normalizedLocation = normalizedRole === 'admin'
+      ? GLOBAL_SCOPE
+      : (normalizeMainLocation(managedUser?.location || managedUser?.site || managedUser?.locationId) || defaultManagedMainLocation)
+
     setUserForm({
-      ...user,
-      site: String(user?.site || (user?.role === 'admin' ? 'GLOBAL' : 'PHP')).trim().toUpperCase(),
+      ...managedUser,
+      role: normalizedRole,
+      location: normalizedLocation,
+      site: normalizedLocation,
+      house: normalizeHouseId(managedUser?.house || managedUser?.locationId),
+      vanId: String(managedUser?.vanId || '').trim().toLowerCase(),
       pin: ''
     })
+    setEditingUser(managedUser.id)
   }
 
   const handleSaveUser = async () => {
@@ -635,23 +740,79 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
     try {
       const pinHash = await hashPin(userForm.pin)
-      const normalizedRole = String(userForm.role || 'tech').trim().toLowerCase()
-      const normalizedSite = String(userForm.site || '').trim().toUpperCase()
-      const requestedScopes = Array.isArray(userForm.authorizedLocations)
-        ? userForm.authorizedLocations
-          .map(value => String(value || '').trim().toUpperCase())
-          .filter(Boolean)
-        : []
-      const authorizedLocations = normalizedRole === 'admin'
-        ? []
-        : [...new Set([...(normalizedSite ? [normalizedSite] : []), ...requestedScopes])]
+      const normalizedRole = normalizeRole(userForm.role || '')
+
+      if (!normalizedRole) {
+        alert('Please select a role.')
+        return
+      }
+
+      if (!canActorManageRole(user?.role, normalizedRole)) {
+        alert('You do not have permission to create this role.')
+        return
+      }
+
+      const normalizedLocation = normalizedRole === 'admin'
+        ? GLOBAL_SCOPE
+        : normalizeMainLocation(userForm.location)
+
+      if (normalizedRole !== 'admin' && !normalizedLocation) {
+        alert('Please select a valid location.')
+        return
+      }
+
+      if (!isAdmin && normalizedLocation && !managedMainLocations.includes(normalizedLocation)) {
+        alert('You can only assign users to your own location.')
+        return
+      }
+
+      let normalizedHouse = ''
+      let normalizedVanId = ''
+      let normalizedLocationId = null
+
+      if (isBhtRole(normalizedRole)) {
+        if (!normalizedLocation) {
+          alert('BHT users must have a location.')
+          return
+        }
+
+        normalizedHouse = normalizeHouseId(userForm.house)
+        if (requiresHouseSelection(normalizedLocation) && !normalizedHouse) {
+          alert('OTC BHTs must be assigned to Mesquite House or Lone Mountain.')
+          return
+        }
+
+        normalizedVanId = String(userForm.vanId || '').trim().toLowerCase()
+        const allowedVans = getAllowedVanIdsForMainLocation(normalizedLocation)
+        if (!normalizedVanId || !allowedVans.includes(normalizedVanId)) {
+          alert(`Please select a valid van for ${normalizedLocation}.`)
+          return
+        }
+
+        normalizedLocationId = buildBhtLocationId(normalizedLocation, normalizedHouse)
+        if (!normalizedLocationId) {
+          alert('Please select a valid BHT location assignment.')
+          return
+        }
+      }
+
+      const authorizedLocations = buildAuthorizedLocations({
+        role: normalizedRole,
+        mainLocation: normalizedLocation,
+        houseId: normalizedHouse
+      })
+
       const payload = {
         name: userForm.name,
         pinHash,
         pinVersion: 'v1_sha256',
         pinUpdatedAt: serverTimestamp(),
         role: normalizedRole,
-        site: normalizedRole === 'admin' ? 'GLOBAL' : (normalizedSite || 'PHP'),
+        site: normalizedRole === 'admin' ? GLOBAL_SCOPE : normalizedLocation,
+        location: normalizedRole === 'admin' ? GLOBAL_SCOPE : normalizedLocation,
+        house: isBhtRole(normalizedRole) ? normalizedHouse || null : null,
+        locationId: isBhtRole(normalizedRole) ? normalizedLocationId : null,
+        vanId: isBhtRole(normalizedRole) ? normalizedVanId : null,
         active: userForm.active === true,
         authorizedLocations,
         updatedAt: serverTimestamp()
@@ -676,9 +837,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const handleDeleteUser = async (userId) => {
     if (blockIfOffline('deleting users')) return
 
-    if (!confirm(`Soft-delete user ${userId}?`)) return
+    if (!(await showConfirmDialog(`Soft-delete user ${userId}?`, {
+      title: 'Soft Delete User',
+      tone: 'danger',
+      confirmText: 'Soft Delete'
+    }))) return
 
-    const reason = promptDeleteReason(`soft-delete of user ${userId}`)
+    const reason = await promptDeleteReason(`soft-delete of user ${userId}`)
     if (!reason) return
 
     try {
@@ -718,9 +883,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
       return
     }
 
-    if (!confirm(`Permanently hard-delete user ${userId}? This cannot be undone.`)) return
+    if (!(await showConfirmDialog(`Permanently hard-delete user ${userId}? This cannot be undone.`, {
+      title: 'Hard Delete User',
+      tone: 'danger',
+      confirmText: 'Hard Delete'
+    }))) return
 
-    const reason = promptDeleteReason(`hard-delete of user ${userId}`)
+    const reason = await promptDeleteReason(`hard-delete of user ${userId}`)
     if (!reason) return
 
     try {
@@ -758,7 +927,16 @@ function SupervisorDashboard({ user, isOffline = false }) {
     }
 
     if (authScopeEnforced === enabled) return
-    const reason = prompt(`Enter reason for ${enabled ? 'enabling' : 'disabling'} strict auth scope enforcement:`)
+    const reason = await showPromptDialog(
+      `Enter reason for ${enabled ? 'enabling' : 'disabling'} strict auth scope enforcement:`,
+      {
+        title: enabled ? 'Enable Strict Auth Scope' : 'Disable Strict Auth Scope',
+        tone: 'warning',
+        confirmText: 'Apply',
+        cancelText: 'Cancel',
+        placeholder: 'Reason required'
+      }
+    )
     if (reason === null) return
     if (!reason.trim()) {
       alert('Reason is required.')
@@ -788,162 +966,249 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
   const handleCancelEdit = () => {
     setEditingUser(null)
-    setUserForm({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true })
+    setUserForm(buildDefaultUserForm())
   }
 
-  const renderUserEditorFields = (isNewUser) => (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-      <div>
-        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-          User ID *
-        </label>
-        <input
-          type="text"
-          value={userForm.id}
-          onChange={(e) => setUserForm({ ...userForm, id: e.target.value })}
-          disabled={!isNewUser}
-          placeholder="e.g., tech3"
-          style={{
-            width: '100%',
-            padding: '8px',
-            border: '2px solid rgba(255,255,255,0.1)',
-            borderRadius: '6px',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            backgroundColor: !isNewUser ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
-            color: '#e8e8e8'
-          }}
-        />
+  const renderUserEditorFields = (isNewUser) => {
+    const normalizedFormRole = normalizeRole(userForm.role || '')
+    const isAdminFormRole = normalizedFormRole === 'admin'
+    const hasRoleSelection = Boolean(normalizedFormRole)
+    const locationSelectDisabled = isAdminFormRole || !hasRoleSelection
+    const effectiveLocation = normalizedFormRole === 'admin'
+      ? GLOBAL_SCOPE
+      : normalizeMainLocation(userForm.location)
+    const showHouseSelect = isBhtRole(normalizedFormRole) && requiresHouseSelection(effectiveLocation)
+    const houseOptions = getHouseOptionsForMainLocation(effectiveLocation)
+    const vanOptions = isBhtRole(normalizedFormRole)
+      ? VANS.filter(v => getAllowedVanIdsForMainLocation(effectiveLocation).includes(v.id))
+      : []
+    const locationOptions = isAdmin ? MAIN_LOCATIONS : managedMainLocations
+
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+        <div>
+          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            User ID *
+          </label>
+          <input
+            type="text"
+            value={userForm.id}
+            onChange={(e) => setUserForm({ ...userForm, id: e.target.value })}
+            disabled={!isNewUser}
+            placeholder="e.g., bht3"
+            style={{
+              width: '100%',
+              padding: '8px',
+              border: '2px solid rgba(255,255,255,0.1)',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box',
+              backgroundColor: !isNewUser ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
+              color: '#e8e8e8'
+            }}
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            Name *
+          </label>
+          <input
+            type="text"
+            value={userForm.name}
+            onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+            placeholder="Full Name"
+            style={{
+              width: '100%',
+              padding: '8px',
+              border: '2px solid rgba(255,255,255,0.1)',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              color: '#e8e8e8'
+            }}
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            PIN (4 digits) * {!isNewUser ? '(set new PIN to rotate)' : ''}
+          </label>
+          <input
+            type="text"
+            value={userForm.pin}
+            onChange={(e) => setUserForm({ ...userForm, pin: e.target.value.replace(/\D/g, '') })}
+            placeholder="1234"
+            maxLength="4"
+            style={{
+              width: '100%',
+              padding: '8px',
+              border: '2px solid rgba(255,255,255,0.1)',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              color: '#e8e8e8'
+            }}
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            Role
+          </label>
+          <select
+            value={normalizedFormRole || ''}
+            onChange={(e) => {
+              const nextRole = normalizeRole(e.target.value)
+              const nextLocation = nextRole === 'admin'
+                ? GLOBAL_SCOPE
+                : normalizeMainLocation(userForm.location)
+              setUserForm(prev => ({
+                ...prev,
+                role: nextRole,
+                location: nextLocation,
+                house: nextRole === ROLE_BHT ? prev.house : '',
+                vanId: nextRole === ROLE_BHT ? prev.vanId : ''
+              }))
+            }}
+            style={{
+              width: '100%',
+              padding: '8px',
+              border: '2px solid rgba(255,255,255,0.1)',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              color: '#e8e8e8'
+            }}
+          >
+            <option value="">Select Role...</option>
+            {actorRoleOptions.map(roleOption => (
+              <option key={roleOption} value={roleOption}>{formatRoleLabel(roleOption)}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            Location
+          </label>
+          <select
+            value={locationSelectDisabled ? (isAdminFormRole ? GLOBAL_SCOPE : '') : (effectiveLocation || '')}
+            onChange={(e) => {
+              const nextLocation = normalizeMainLocation(e.target.value)
+              const allowedVans = getAllowedVanIdsForMainLocation(nextLocation)
+              setUserForm(prev => ({
+                ...prev,
+                location: nextLocation,
+                house: requiresHouseSelection(nextLocation) ? prev.house : '',
+                vanId: allowedVans.includes(prev.vanId) ? prev.vanId : ''
+              }))
+            }}
+            disabled={locationSelectDisabled}
+            style={{
+              width: '100%',
+              padding: '8px',
+              border: '2px solid rgba(255,255,255,0.1)',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box',
+              backgroundColor: locationSelectDisabled ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
+              color: '#e8e8e8',
+              cursor: locationSelectDisabled ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {locationSelectDisabled ? (
+              isAdminFormRole ? (
+                <option value={GLOBAL_SCOPE}>GLOBAL (full access)</option>
+              ) : (
+                <option value="">Select role first</option>
+              )
+            ) : (
+              <>
+                <option value="">Select Location...</option>
+                {locationOptions.map(locationId => (
+                  <option key={locationId} value={locationId}>{locationId}</option>
+                ))}
+              </>
+            )}
+          </select>
+        </div>
+        {showHouseSelect && (
+          <div>
+            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+              OTC House *
+            </label>
+            <select
+              value={normalizeHouseId(userForm.house)}
+              onChange={(e) => setUserForm({ ...userForm, house: normalizeHouseId(e.target.value) })}
+              style={{
+                width: '100%',
+                padding: '8px',
+                border: '2px solid rgba(255,255,255,0.1)',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                color: '#e8e8e8'
+              }}
+            >
+              <option value="">Select House...</option>
+              {houseOptions.map(option => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {isBhtRole(normalizedFormRole) && (
+          <div>
+            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+              Van *
+            </label>
+            <select
+              value={userForm.vanId}
+              onChange={(e) => setUserForm({ ...userForm, vanId: String(e.target.value || '').trim().toLowerCase() })}
+              style={{
+                width: '100%',
+                padding: '8px',
+                border: '2px solid rgba(255,255,255,0.1)',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                color: '#e8e8e8'
+              }}
+            >
+              <option value="">Select Van...</option>
+              {vanOptions.map(vanOption => (
+                <option key={vanOption.id} value={vanOption.id}>{vanOption.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div>
+          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            Active
+          </label>
+          <select
+            value={userForm.active}
+            onChange={(e) => setUserForm({ ...userForm, active: e.target.value === 'true' })}
+            style={{
+              width: '100%',
+              padding: '8px',
+              border: '2px solid rgba(255,255,255,0.1)',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              color: '#e8e8e8'
+            }}
+          >
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </select>
+        </div>
       </div>
-      <div>
-        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-          Name *
-        </label>
-        <input
-          type="text"
-          value={userForm.name}
-          onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
-          placeholder="Full Name"
-          style={{
-            width: '100%',
-            padding: '8px',
-            border: '2px solid rgba(255,255,255,0.1)',
-            borderRadius: '6px',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            color: '#e8e8e8'
-          }}
-        />
-      </div>
-      <div>
-        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-          PIN (4 digits) * {!isNewUser ? '(set new PIN to rotate)' : ''}
-        </label>
-        <input
-          type="text"
-          value={userForm.pin}
-          onChange={(e) => setUserForm({ ...userForm, pin: e.target.value.replace(/\D/g, '') })}
-          placeholder="1234"
-          maxLength="4"
-          style={{
-            width: '100%',
-            padding: '8px',
-            border: '2px solid rgba(255,255,255,0.1)',
-            borderRadius: '6px',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            color: '#e8e8e8'
-          }}
-        />
-      </div>
-      <div>
-        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-          Role
-        </label>
-        <select
-          value={userForm.role}
-          onChange={(e) => {
-            const nextRole = String(e.target.value || '').trim().toLowerCase()
-            setUserForm(prev => ({
-              ...prev,
-              role: nextRole,
-              site: nextRole === 'admin'
-                ? 'GLOBAL'
-                : (String(prev.site || '').trim().toUpperCase() === 'GLOBAL' ? 'PHP' : prev.site)
-            }))
-          }}
-          style={{
-            width: '100%',
-            padding: '8px',
-            border: '2px solid rgba(255,255,255,0.1)',
-            borderRadius: '6px',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            color: '#e8e8e8'
-          }}
-        >
-          <option value="tech">Tech</option>
-          <option value="supervisor">Supervisor</option>
-          <option value="admin">Admin</option>
-        </select>
-      </div>
-      <div>
-        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-          Site
-        </label>
-        <select
-          value={userForm.site}
-          onChange={(e) => setUserForm({ ...userForm, site: e.target.value })}
-          disabled={userForm.role === 'admin'}
-          style={{
-            width: '100%',
-            padding: '8px',
-            border: '2px solid rgba(255,255,255,0.1)',
-            borderRadius: '6px',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            backgroundColor: userForm.role === 'admin' ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
-            color: '#e8e8e8',
-            cursor: userForm.role === 'admin' ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {userForm.role === 'admin' ? (
-            <option value="GLOBAL">GLOBAL (full access)</option>
-          ) : (
-            <>
-              <option value="PHP">PHP</option>
-              <option value="RTC">RTC</option>
-            </>
-          )}
-        </select>
-      </div>
-      <div>
-        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-          Active
-        </label>
-        <select
-          value={userForm.active}
-          onChange={(e) => setUserForm({ ...userForm, active: e.target.value === 'true' })}
-          style={{
-            width: '100%',
-            padding: '8px',
-            border: '2px solid rgba(255,255,255,0.1)',
-            borderRadius: '6px',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            color: '#e8e8e8'
-          }}
-        >
-          <option value="true">Active</option>
-          <option value="false">Inactive</option>
-        </select>
-      </div>
-    </div>
-  )
+    )
+  }
 
   // Assignment handlers
   const handleAddAssignment = () => {
@@ -974,6 +1239,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
     const selectedUser = users.find(u => u.id === assignmentForm.bhtUserId)
     if (!selectedUser) {
       alert('Selected user not found')
+      return
+    }
+
+    const allowedVanIds = getAllowedVanIdsForLocationId(assignmentForm.locationId)
+    const invalidVanIds = assignmentForm.vanIds.filter(vanId => !allowedVanIds.includes(vanId))
+    if (invalidVanIds.length > 0) {
+      alert('Selected van choices do not match the selected location.')
       return
     }
 
@@ -1071,7 +1343,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
       let activeError = err
       console.error('Error saving assignment:', activeError)
 
-      if (activeError?.code === 'permission-denied' && user?.role === 'admin') {
+      if (activeError?.code === 'permission-denied' && isAdminRole(user?.role)) {
         const tokenRole = String(user?.authClaimRole || '').trim() || '(none)'
         const refreshed = await refreshAdminAuthSession()
         if (refreshed) {
@@ -1103,9 +1375,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const handleDeleteAssignment = async (id) => {
     if (blockIfOffline('deleting assignments')) return
 
-    if (!confirm('Soft-delete this assignment?')) return
+    if (!(await showConfirmDialog('Soft-delete this assignment?', {
+      title: 'Soft Delete Assignment',
+      tone: 'danger',
+      confirmText: 'Soft Delete'
+    }))) return
 
-    const reason = promptDeleteReason('soft-delete of assignment')
+    const reason = await promptDeleteReason('soft-delete of assignment')
     if (!reason) return
 
     try {
@@ -1158,9 +1434,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
       return
     }
 
-    if (!confirm('Permanently hard-delete this assignment? This cannot be undone.')) return
+    if (!(await showConfirmDialog('Permanently hard-delete this assignment? This cannot be undone.', {
+      title: 'Hard Delete Assignment',
+      tone: 'danger',
+      confirmText: 'Hard Delete'
+    }))) return
 
-    const reason = promptDeleteReason('hard-delete of assignment')
+    const reason = await promptDeleteReason('hard-delete of assignment')
     if (!reason) return
 
     try {
@@ -1185,6 +1465,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
   }
 
   const toggleVanId = (vanId) => {
+    const allowedVanSet = new Set(getAllowedVanIdsForLocationId(assignmentForm.locationId))
+    if (allowedVanSet.size > 0 && !allowedVanSet.has(vanId)) return
+
     setAssignmentForm(prev => ({
       ...prev,
       vanIds: prev.vanIds.includes(vanId)
@@ -1193,18 +1476,21 @@ function SupervisorDashboard({ user, isOffline = false }) {
     }))
   }
 
-  const getAssignableTechUsersForTask = (task) => {
+  const getAssignableBhtUsersForTask = (task) => {
     const normalizedLocation = String(task?.locationId || '').trim().toUpperCase()
     const scopedLocation = locationScopeAlias(normalizedLocation)
+    const locationHouse = normalizeHouseId(normalizedLocation)
 
-    return techUsers.filter((techUser) => {
-      const techScopes = [...new Set([
-        ...(techUser?.site ? [techUser.site] : []),
-        ...(Array.isArray(techUser?.authorizedLocations) ? techUser.authorizedLocations : [])
-      ].map(value => String(value || '').trim().toUpperCase()).filter(Boolean))]
+    return bhtUsers.filter((candidateUser) => {
+      const candidateScopes = normalizeScopeValues([
+        ...(candidateUser?.site ? [candidateUser.site] : []),
+        ...(Array.isArray(candidateUser?.authorizedLocations) ? candidateUser.authorizedLocations : [])
+      ])
 
-      if (techScopes.length === 0) return true
-      return techScopes.includes(normalizedLocation) || techScopes.includes(scopedLocation)
+      if (candidateScopes.length === 0) return true
+      return candidateScopes.includes(normalizedLocation)
+        || candidateScopes.includes(scopedLocation)
+        || (locationHouse && candidateScopes.includes(locationHouse))
     })
   }
 
@@ -1217,7 +1503,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
   }
 
   const openOverdueTaskReassign = (task) => {
-    const candidates = getAssignableTechUsersForTask(task)
+    const candidates = getAssignableBhtUsersForTask(task)
     const preferredAssignee = candidates.find(candidate => candidate.id === task.assigneeUserId) || candidates[0] || null
     setOverdueTaskActionId(task.id)
     setOverdueTaskActionMode('reassign')
@@ -1244,7 +1530,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
       return
     }
 
-    const candidateUsers = getAssignableTechUsersForTask(task)
+    const candidateUsers = getAssignableBhtUsersForTask(task)
     const selectedAssignee = candidateUsers.find(candidate => candidate.id === overdueTaskAssigneeUserId)
     if (!selectedAssignee) {
       alert('Select a valid assignee for this task.')
@@ -1414,40 +1700,38 @@ function SupervisorDashboard({ user, isOffline = false }) {
     return status === 'returned' || status === 'closed'
   }
 
-  const handleDashboardDrilldown = (type, value = '') => {
-    const startOfMonth = new Date(dashMonth.getFullYear(), dashMonth.getMonth(), 1)
-    const endOfMonth = new Date(dashMonth.getFullYear(), dashMonth.getMonth() + 1, 0)
-
-    setStartDate(toDateInputValue(startOfMonth))
-    setEndDate(toDateInputValue(endOfMonth))
-    setTransportSiteFilter(dashSite)
-    setTransportStatusFilter('completed')
-    setTransportReasonFilter('')
-    setSelectedDriver('')
-    setOverdueFilter('all')
-    setClientSearch('')
-
-    if (type === 'reason' && value) {
-      setTransportReasonFilter(value)
-      setDrilldownLabel(`Reason: ${value}`)
-    } else if (type === 'tech' && value) {
-      setSelectedDriver(value)
-      setDrilldownLabel(`Tech: ${value}`)
-    } else {
-      setDrilldownLabel('Total completed transports')
+  const getMonthDateRange = useCallback((referenceDate = new Date()) => {
+    const startOfMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1)
+    const endOfMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0)
+    return {
+      startDate: toDateInputValue(startOfMonth),
+      endDate: toDateInputValue(endOfMonth)
     }
+  }, [])
 
-    setIsDashboardDrilldownActive(true)
-    setActiveTab('transports')
-  }
-
-  const clearDashboardDrilldown = () => {
+  const clearTransportFilters = useCallback(() => {
+    const { startDate: defaultStartDate, endDate: defaultEndDate } = getMonthDateRange()
+    setStartDate(defaultStartDate)
+    setEndDate(defaultEndDate)
     setTransportSiteFilter('ALL')
     setTransportStatusFilter('all')
     setTransportReasonFilter('')
     setSelectedDriver('')
-    setIsDashboardDrilldownActive(false)
-    setDrilldownLabel('')
+    setOverdueFilter('all')
+    setClientSearch('')
+  }, [getMonthDateRange])
+
+  const handleDashboardDrilldown = (type, value = '') => {
+    const { startDate: monthStartDate, endDate: monthEndDate } = getMonthDateRange(dashMonth)
+    setStartDate(monthStartDate)
+    setEndDate(monthEndDate)
+    setTransportSiteFilter(dashSite)
+    setTransportStatusFilter('completed')
+    setTransportReasonFilter(type === 'reason' && value ? value : '')
+    setSelectedDriver(type === 'bht' && value ? value : '')
+    setOverdueFilter('all')
+    setClientSearch('')
+    setActiveTab('transports')
   }
 
   useEffect(() => {
@@ -1469,6 +1753,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
       let data = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
+      })).map(item => ({
+        ...item,
+        site: normalizeTransportSite(item.site)
       }))
 
       data = data.filter(t => inTransportScope(t.site))
@@ -1486,7 +1773,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
     let filtered = [...transports]
 
     if (transportSiteFilter !== 'ALL') {
-      filtered = filtered.filter(t => String(t.site || '').trim().toUpperCase() === transportSiteFilter)
+      filtered = filtered.filter(t => normalizeTransportSite(t.site) === transportSiteFilter)
     }
 
     if (transportStatusFilter === 'completed') {
@@ -1538,13 +1825,15 @@ function SupervisorDashboard({ user, isOffline = false }) {
         )
 
         const snapshot = await getDocs(q)
-        let data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+        let data = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .map(item => ({ ...item, site: normalizeTransportSite(item.site) }))
 
         // Client-side filters
         data = data.filter(t => inTransportScope(t.site))
         data = data.filter(t => isCompletedTransport(t))
         if (dashSite !== 'ALL') {
-          data = data.filter(t => t.site === dashSite)
+          data = data.filter(t => normalizeTransportSite(t.site) === dashSite)
         }
 
         setDashTransports(data)
@@ -1571,9 +1860,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
           reasonCounts[r] = (reasonCounts[r] || 0) + 1
         })
       }
-      // Tech
-      const tech = t.createdByName || 'Unknown'
-      techCounts[tech] = (techCounts[tech] || 0) + 1
+      // BHT
+      const bhtName = t.createdByName || 'Unknown'
+      techCounts[bhtName] = (techCounts[bhtName] || 0) + 1
       // DC Paperwork
       const pw = t.dcPaperworkStatus || 'unknown'
       paperworkCounts[pw] = (paperworkCounts[pw] || 0) + 1
@@ -1720,11 +2009,11 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const queueLocationOptions = useMemo(() => {
     const options = LOCATIONS.map(loc => ({ value: loc.id, label: loc.label }))
     const seenValues = new Set(options.map(option => String(option.value || '').trim().toUpperCase()))
-    const discoveredSites = new Set()
+    const discoveredLocations = new Set()
 
     const addMappedSite = (locationId) => {
       const mapped = locationScopeAlias(locationId)
-      if (mapped) discoveredSites.add(mapped)
+      if (mapped) discoveredLocations.add(mapped)
     }
 
     eocIssues.forEach(issue => addMappedSite(issue.locationId))
@@ -1732,12 +2021,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
     eocAlerts.forEach(alertItem => addMappedSite(alertItem.locationId))
     scopedComplianceItems.forEach(item => {
       const site = getComplianceItemSite(item)
-      if (site) discoveredSites.add(site)
+      if (site) discoveredLocations.add(site)
     })
 
-    ;[...discoveredSites].sort().forEach(site => {
+    ;[...discoveredLocations].sort().forEach(site => {
       if (seenValues.has(site)) return
-      options.push({ value: site, label: `Site: ${site}` })
+      options.push({ value: site, label: `Location: ${site}` })
       seenValues.add(site)
     })
 
@@ -1784,7 +2073,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         'Departed': formatTime(t.departedAt),
         'Returned': formatTime(t.returnedAt),
         'Driver': t.createdByName || '',
-        'Site': t.site || '',
+        'Location': t.site || '',
         'Clients': t.clients?.join(', ') || '',
         'Reasons': t.reasons?.join(', ') || '',
         'Destinations': destinationsText,
@@ -2067,18 +2356,28 @@ function SupervisorDashboard({ user, isOffline = false }) {
                       style={selectStyle}
                     >
                       <option value="">Select BHT...</option>
-                      {techUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      {bhtUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Location *</label>
                     <select
                       value={assignmentForm.locationId}
-                      onChange={(e) => setAssignmentForm({ ...assignmentForm, locationId: e.target.value })}
+                      onChange={(e) => {
+                        const nextLocationId = e.target.value
+                        const allowedVanIds = getAllowedVanIdsForLocationId(nextLocationId)
+                        setAssignmentForm({
+                          ...assignmentForm,
+                          locationId: nextLocationId,
+                          vanIds: assignmentForm.vanIds.filter(vanId => allowedVanIds.includes(vanId))
+                        })
+                      }}
                       style={selectStyle}
                     >
                       <option value="">Select Location...</option>
-                      {LOCATIONS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
+                      {LOCATIONS
+                        .filter(locationOption => isAdmin || managedMainLocations.includes(locationIdToMainLocation(locationOption.id)))
+                        .map(locationOption => <option key={locationOption.id} value={locationOption.id}>{locationOption.label}</option>)}
                     </select>
                   </div>
                   <div>
@@ -2119,7 +2418,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 <div style={{ marginTop: '12px' }}>
                   <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Assigned Vans (multi-select)</label>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {VANS.map(v => (
+                    {VANS
+                      .filter(v => getAllowedVanIdsForLocationId(assignmentForm.locationId).includes(v.id))
+                      .map(v => (
                       <button
                         key={v.id}
                         className={`chip ${assignmentForm.vanIds.includes(v.id) ? 'chip-selected' : 'chip-unselected'}`}
@@ -2390,6 +2691,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {users.map((managedUser) => {
                 const isEditingThisUser = editingUser === managedUser.id
+                const managedUserLocation = normalizeMainLocation(managedUser.location || managedUser.site || managedUser.locationId)
+                const managedUserHouse = normalizeHouseId(managedUser.house || managedUser.locationId)
                 return (
                   <div
                     key={managedUser.id}
@@ -2418,14 +2721,26 @@ function SupervisorDashboard({ user, isOffline = false }) {
                         </div>
                         <div>
                           <div style={{ fontSize: '11px', color: '#8899aa' }}>Role</div>
-                          <div style={{ fontSize: '14px', textTransform: 'capitalize' }}>{managedUser.role}</div>
+                          <div style={{ fontSize: '14px' }}>{formatRoleLabel(managedUser.role)}</div>
                         </div>
                         <div>
-                          <div style={{ fontSize: '11px', color: '#8899aa' }}>Site</div>
+                          <div style={{ fontSize: '11px', color: '#8899aa' }}>Location</div>
                           <div style={{ fontSize: '14px' }}>
-                            {managedUser.role === 'admin' ? 'GLOBAL (full access)' : (managedUser.site || '--')}
+                            {isAdminRole(managedUser.role) ? 'GLOBAL (full access)' : (managedUserLocation || '--')}
                           </div>
                         </div>
+                        {isBhtRole(managedUser.role) && (
+                          <div>
+                            <div style={{ fontSize: '11px', color: '#8899aa' }}>House / Van</div>
+                            <div style={{ fontSize: '14px' }}>
+                              {managedUserLocation === MAIN_LOCATION_OTC
+                                ? `${managedUserHouse === 'MESQUITE' ? 'Mesquite House' : (managedUserHouse === 'LONE_MOUNTAIN' ? 'Lone Mountain' : '--')}`
+                                : 'N/A'}
+                              {' '} - {' '}
+                              {(VANS.find(v => v.id === managedUser.vanId)?.label || managedUser.vanId || '--')}
+                            </div>
+                          </div>
+                        )}
                         <div>
                           <div style={{ fontSize: '11px', color: '#8899aa' }}>Status</div>
                           <div style={{
@@ -2836,7 +3151,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                             style={selectStyle}
                           >
                             <option value="">Select assignee...</option>
-                            {getAssignableTechUsersForTask(task).map(candidate => (
+                            {getAssignableBhtUsersForTask(task).map(candidate => (
                               <option key={candidate.id} value={candidate.id}>
                                 {candidate.name} ({candidate.id})
                               </option>
@@ -3069,7 +3384,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
                       {LOCATIONS.find(l => l.id === alertItem.locationId)?.label || alertItem.locationId || 'Unknown location'}
                       {' '} &bull; {formatDate(alertItem.createdAt)} {formatTime(alertItem.createdAt)}
-                      {alertItem.techName ? ` \u00B7 ${alertItem.techName}` : ''}
+                      {(alertItem.bhtName || alertItem.techName) ? ` \u00B7 ${alertItem.bhtName || alertItem.techName}` : ''}
                     </div>
                     <button
                       onClick={() => handleMarkAlertRead(alertItem.id)}
@@ -3143,7 +3458,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
               </div>
               <div>
                 <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                  Site
+                  Location
                 </label>
                 <select
                   value={dashSite}
@@ -3157,9 +3472,10 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     boxSizing: 'border-box'
                   }}
                 >
-                  <option value="ALL">All Sites</option>
-                  <option value="PHP">PHP</option>
-                  <option value="RTC">RTC</option>
+                  <option value="ALL">All Locations</option>
+                  {MAIN_LOCATIONS.map(locationId => (
+                    <option key={locationId} value={locationId}>{locationId}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -3239,23 +3555,23 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   )}
                 </div>
 
-                {/* By Tech */}
+                {/* By BHT */}
                 <div className="glass-card" style={{
                   backgroundColor: 'rgba(255,255,255,0.05)',
                   borderRadius: '12px',
                   padding: '20px',
                   border: '1px solid #eee'
                 }}>
-                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#e8e8e8' }}>By Tech</h3>
+                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#e8e8e8' }}>By BHT</h3>
                   {dashStats.byTech.length === 0 ? (
-                    <div style={{ color: '#556677', fontSize: '14px' }}>No tech activity recorded</div>
+                    <div style={{ color: '#556677', fontSize: '14px' }}>No BHT activity recorded</div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {dashStats.byTech.map(([tech, count]) => (
                         <button
                           key={tech}
                           type="button"
-                          onClick={() => handleDashboardDrilldown('tech', tech)}
+                          onClick={() => handleDashboardDrilldown('bht', tech)}
                           style={{
                             width: '100%',
                             display: 'flex',
@@ -3320,7 +3636,32 @@ function SupervisorDashboard({ user, isOffline = false }) {
         marginBottom: '20px',
         border: '1px solid #eee'
       }}>
-        <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#e8e8e8' }}>Filters</h3>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '12px',
+          flexWrap: 'wrap',
+          marginBottom: '16px'
+        }}>
+          <h3 style={{ margin: 0, fontSize: '16px', color: '#e8e8e8' }}>Filters</h3>
+          <button
+            type="button"
+            onClick={clearTransportFilters}
+            style={{
+              padding: '8px 14px',
+              backgroundColor: 'rgba(255,255,255,0.1)',
+              color: '#e8e8e8',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            Clear Filters
+          </button>
+        </div>
 
         <div style={{
           display: 'grid',
@@ -3368,7 +3709,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
           <div>
             <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-              Site
+              Location
             </label>
             <select
               value={transportSiteFilter}
@@ -3382,9 +3723,10 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 boxSizing: 'border-box'
               }}
             >
-              <option value="ALL">All Sites</option>
-              <option value="PHP">PHP</option>
-              <option value="RTC">RTC</option>
+              <option value="ALL">All Locations</option>
+              {MAIN_LOCATIONS.map(locationId => (
+                <option key={locationId} value={locationId}>{locationId}</option>
+              ))}
             </select>
           </div>
 
@@ -3411,7 +3753,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
           <div>
             <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-              Driver
+              BHT
             </label>
             <select
               value={selectedDriver}
@@ -3498,39 +3840,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
           />
         </div>
 
-        {isDashboardDrilldownActive && (
-          <div style={{
-            marginTop: '12px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '12px',
-            flexWrap: 'wrap',
-            padding: '10px 12px',
-            backgroundColor: 'rgba(229,57,53,0.12)',
-            border: '1px solid rgba(229,57,53,0.35)',
-            borderRadius: '8px'
-          }}>
-            <div style={{ fontSize: '12px', color: '#e8e8e8' }}>
-              Active drill-down: {drilldownLabel || 'Dashboard context'}
-            </div>
-            <button
-              type="button"
-              onClick={clearDashboardDrilldown}
-              style={{
-                padding: '6px 12px',
-                backgroundColor: 'rgba(255,255,255,0.1)',
-                color: '#e8e8e8',
-                border: '1px solid rgba(255,255,255,0.2)',
-                borderRadius: '6px',
-                fontSize: '12px',
-                cursor: 'pointer'
-              }}
-            >
-              Clear Drill-down
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Actions */}

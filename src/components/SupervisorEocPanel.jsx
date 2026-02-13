@@ -6,6 +6,7 @@ import {
 } from 'firebase/firestore'
 import { LOCATIONS, SHIFTS, VANS, EOC_VAN_TEMPLATE, EOC_HOUSE_TEMPLATE } from '../data/eocConstants'
 import { notifySuccess } from '../utils/toast'
+import { showConfirmDialog } from '../utils/dialogs'
 
 function templateDiffKey(item) {
   return `${String(item?.category || '').trim().toLowerCase()}::${String(item?.label || '').trim().toLowerCase()}`
@@ -329,7 +330,11 @@ function SupervisorEocPanel({ user, isOffline = false }) {
 
   const handleDeleteTemplateItem = async (id) => {
     if (blockTemplateMutation('deleting template drafts')) return
-    if (!confirm('Delete this draft checklist item?')) return
+    if (!(await showConfirmDialog('Delete this draft checklist item?', {
+      title: 'Delete Draft Item',
+      tone: 'danger',
+      confirmText: 'Delete'
+    }))) return
     try {
       await deleteDoc(doc(db, 'eocTemplateDrafts', id))
       notifySuccess('Draft item deleted')
@@ -371,7 +376,11 @@ function SupervisorEocPanel({ user, isOffline = false }) {
 
   const handleDraftFromPublished = async () => {
     if (blockTemplateMutation('starting template draft')) return
-    if (draftTemplateItems.length > 0 && !confirm('Replace current draft with the latest published template?')) return
+    if (draftTemplateItems.length > 0 && !(await showConfirmDialog('Replace current draft with the latest published template?', {
+      title: 'Replace Draft',
+      tone: 'warning',
+      confirmText: 'Replace'
+    }))) return
 
     const sourceItems = publishedTemplateItems.length > 0
       ? publishedTemplateItems
@@ -393,7 +402,11 @@ function SupervisorEocPanel({ user, isOffline = false }) {
 
   const handleDraftFromDefaults = async () => {
     if (blockTemplateMutation('seeding template defaults')) return
-    if (!confirm('Replace current draft with default template items?')) return
+    if (!(await showConfirmDialog('Replace current draft with default template items?', {
+      title: 'Reset Draft',
+      tone: 'warning',
+      confirmText: 'Reset'
+    }))) return
     try {
       const seededItems = defaultTemplateItems.map((item, idx) => ({
         category: item.category,
@@ -411,7 +424,11 @@ function SupervisorEocPanel({ user, isOffline = false }) {
 
   const handleDiscardDraft = async () => {
     if (blockTemplateMutation('discarding template draft')) return
-    if (!confirm('Discard all draft changes for this template type?')) return
+    if (!(await showConfirmDialog('Discard all draft changes for this template type?', {
+      title: 'Discard Draft Changes',
+      tone: 'danger',
+      confirmText: 'Discard'
+    }))) return
     try {
       const existingDraftSnap = await getDocs(query(
         collection(db, 'eocTemplateDrafts'),
@@ -445,7 +462,11 @@ function SupervisorEocPanel({ user, isOffline = false }) {
       alert('Version note is required before publishing.')
       return
     }
-    if (!confirm('Publish draft to the live template now?')) return
+    if (!(await showConfirmDialog('Publish draft to the live template now?', {
+      title: 'Publish Draft',
+      tone: 'warning',
+      confirmText: 'Publish'
+    }))) return
 
     try {
       const publishedSnap = await getDocs(query(
@@ -558,7 +579,11 @@ function SupervisorEocPanel({ user, isOffline = false }) {
   }
 
   const handleDeleteVehicle = async (id) => {
-    if (!confirm('Delete this vehicle?')) return
+    if (!(await showConfirmDialog('Delete this vehicle?', {
+      title: 'Delete Vehicle',
+      tone: 'danger',
+      confirmText: 'Delete'
+    }))) return
     try {
       await deleteDoc(doc(db, 'eocVehicles', id))
       notifySuccess('Vehicle deleted')
@@ -673,7 +698,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                     {statusBadge(a.status)}
                   </div>
                   <div style={{ fontSize: '13px', color: '#8899aa' }}>
-                    Due: {a.dueDate} &bull; Tech: {a.assignedTechName || 'Unassigned'}
+                    Due: {a.dueDate} &bull; BHT: {a.assignedTechName || 'Unassigned'}
                     {a.eocType ? ` \u00B7 ${a.eocType.toUpperCase()}` : ''}
                     {a.vanId ? ` \u00B7 ${vanLabel(a.vanId)}` : ''}
                   </div>
@@ -693,7 +718,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
             </div>
           )}
           <p style={{ fontSize: '13px', color: '#8899aa', marginBottom: '16px' }}>
-            Manage upcoming assignments — reassign techs or override van assignments.
+            Manage upcoming assignments - reassign BHTs or override van assignments.
           </p>
           {loadingAssignments ? (
             <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>Loading...</div>
@@ -714,7 +739,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                   </div>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <div>
-                      <label style={{ fontSize: '11px', color: '#556677' }}>Tech</label>
+                      <label style={{ fontSize: '11px', color: '#556677' }}>BHT</label>
                       <div style={{ fontSize: '13px', fontWeight: 600 }}>
                         {a.assignedTechName || 'Unassigned'}
                       </div>

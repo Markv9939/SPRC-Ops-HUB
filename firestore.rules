@@ -20,7 +20,97 @@ service cloud.firestore {
     }
 
     function validRole(role) {
-      return role in ['tech', 'supervisor', 'admin'];
+      return role in ['bht', 'supervisor', 'admin', 'tech'];
+    }
+
+    function roleIsBht(role) {
+      return role == 'bht' || role == 'tech';
+    }
+
+    function normalizedMainLocation(locationId) {
+      return (
+        locationId == 'OTC'
+        || locationId == 'PHP'
+        || locationId == 'RTC'
+      )
+        ? 'OTC'
+        : (
+            locationId == 'RES'
+              ? 'RES'
+              : ''
+          );
+    }
+
+    function validMainLocation(locationId) {
+      return normalizedMainLocation(locationId) != '';
+    }
+
+    function validHouseId(houseId) {
+      return houseId in ['MESQUITE', 'LONE_MOUNTAIN'];
+    }
+
+    function validVanId(vanId) {
+      return vanId in ['van_1', 'van_2', 'van_3', 'van_4'];
+    }
+
+    function userLocationValue(data) {
+      return ('location' in data) ? data.location : (('site' in data) ? data.site : '');
+    }
+
+    function validBhtWriteData(data) {
+      let mainLocation = normalizedMainLocation(userLocationValue(data));
+      return roleIsBht(data.role)
+        && (
+          (data.deleted == true && data.active == false)
+          || (
+            validMainLocation(userLocationValue(data))
+            && data.vanId is string
+            && validVanId(data.vanId)
+            && data.locationId is string
+            && (
+              mainLocation == 'OTC'
+                ? (
+                  data.house is string
+                  && validHouseId(data.house)
+                  && data.locationId in ['mesquite', 'lone_mountain']
+                  && data.vanId in ['van_1', 'van_2', 'van_4']
+                )
+                : (
+                  mainLocation == 'RES'
+                  && data.locationId == 'res'
+                  && data.vanId == 'van_3'
+                  && (
+                    !('house' in data)
+                    || data.house == null
+                    || data.house == ''
+                  )
+                )
+              )
+            )
+          );
+    }
+
+    function validSupervisorWriteData(data) {
+      return data.role == 'supervisor'
+        && (
+          (data.deleted == true && data.active == false)
+          || validMainLocation(userLocationValue(data))
+        )
+        && (
+          !('house' in data)
+          || data.house == null
+          || data.house == ''
+        )
+        && (
+          !('vanId' in data)
+          || data.vanId == null
+          || data.vanId == ''
+        );
+    }
+
+    function validAdminWriteData(data) {
+      return data.role == 'admin'
+        && userLocationValue(data) == 'GLOBAL';
     }
 
     function authScopeEnforced() {
@@ -50,31 +140,42 @@ service cloud.firestore {
 
     // Map house location IDs to supervisor site scopes used in auth claims.
     function locationScopeAlias(locationId) {
-      return locationId == 'mesquite' || locationId == 'MESQUITE'
-        ? 'PHP'
+      return (
+        locationId == 'mesquite'
+        || locationId == 'MESQUITE'
+        || locationId == 'lone_mountain'
+        || locationId == 'LONE_MOUNTAIN'
+        || locationId == 'OTC'
+        || locationId == 'PHP'
+        || locationId == 'RTC'
+      )
+        ? 'OTC'
         : (
             locationId == 'res' || locationId == 'RES'
-              ? 'PHP'
-              : (
-                  locationId == 'lone_mountain' || locationId == 'LONE_MOUNTAIN'
-                    ? 'RTC'
-                    : locationId
-                )
+              ? 'RES'
+              : locationId
           );
     }
 
     function authLocationAllowed(locationId) {
+      let normalizedLocation = locationScopeAlias(locationId);
+      let legacyLocationAllowed = (
+        (normalizedLocation == 'OTC' && ('PHP' in authLocations() || 'RTC' in authLocations()))
+        || (normalizedLocation == 'RES' && ('PHP' in authLocations()))
+      );
       return authScopeEnforced()
         ? (hasAuthScopeClaims()
             && (
               authRole() == 'admin'
               || locationId in authLocations()
-              || locationScopeAlias(locationId) in authLocations()
+              || normalizedLocation in authLocations()
+              || legacyLocationAllowed
             ))
         : (!hasAuthScopeClaims()
             || authRole() == 'admin'
             || locationId in authLocations()
-            || locationScopeAlias(locationId) in authLocations());
+            || normalizedLocation in authLocations()
+            || legacyLocationAllowed);
     }
 
     function authRoleAndLocationAllowed(roles, locationId) {
@@ -89,8 +190,26 @@ service cloud.firestore {
         && validRole(data.role)
         && data.active is bool
         && (!('site' in data) || data.site is string)
+        && (!('location' in data) || data.location is string)
+        && (!('house' in data) || data.house == null || data.house is string)
+        && (!('locationId' in data) || data.locationId == null || data.locationId is string)
+        && (!('vanId' in data) || data.vanId == null || data.vanId is string)
         && (!('authorizedLocations' in data) || data.authorizedLocations is list)
-        && (!('pin' in data) || data.pin is string);
+        && (!('pin' in data) || data.pin is string)
+        && (
+          validAdminWriteData(data)
+          || validSupervisorWriteData(data)
+          || validBhtWriteData(data)
+        );
+    }
+
+    function requesterCanManageUser(data) {
+      return authRoleAllowed(['admin'])
+        || (
+          authRoleAllowed(['supervisor'])
+          && roleIsBht(data.role)
+          && authLocationAllowed(userLocationValue(data))
+        );
     }
 
     function validAccessGrantWriteData(data) {
@@ -139,11 +258,11 @@ service cloud.firestore {
       allow read: if true;
 
       allow create: if validUserWriteData(request.resource.data)
-        && authRoleAllowed(['admin'])
+        && requesterCanManageUser(request.resource.data)
         && validVersionField(request.resource.data);
 
       allow update: if validUserWriteData(request.resource.data)
-        && authRoleAllowed(['admin'])
+        && requesterCanManageUser(request.resource.data)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
@@ -194,12 +313,12 @@ service cloud.firestore {
         && request.resource.data.taskType in ['house', 'van']
         && validEocTaskStatus(request.resource.data.status)
         && validIgnoredTaskPayload(request.resource.data)
-        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
       allow update: if validEocTaskStatus(request.resource.data.status)
         && validIgnoredTaskPayload(request.resource.data)
-        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
@@ -227,7 +346,7 @@ service cloud.firestore {
       allow create: if request.resource.data.keys().hasAll([
         'locationId', 'shiftId', 'eocType', 'submittedByUserId', 'submittedByName'
       ])
-        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
       allow update: if createdAtUnchanged()
@@ -244,7 +363,7 @@ service cloud.firestore {
         'locationId', 'eocType', 'label', 'status', 'reportedByUserId'
       ])
         && request.resource.data.status == 'open'
-        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
       allow update: if request.resource.data.status in ['open', 'in_progress', 'resolved']
@@ -270,7 +389,7 @@ service cloud.firestore {
         'type', 'message', 'read'
       ])
         && request.resource.data.read is bool
-        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
       allow update: if createdAtUnchanged()
@@ -303,7 +422,7 @@ service cloud.firestore {
         'action', 'collectionPath', 'documentId',
         'performedByUserId', 'performedByName', 'reason'
       ])
-        && authRoleAllowed(['tech', 'supervisor', 'admin'])
+        && authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
         && request.resource.data.reason is string
         && request.resource.data.reason.size() > 0
         && validVersionField(request.resource.data);
@@ -359,15 +478,15 @@ service cloud.firestore {
         'site', 'createdByUserId', 'createdByName', 'status', 'departedAt', 'createdAt'
       ])
         && request.resource.data.status in ['open', 'arrived', 'returned', 'closed']
-        && request.resource.data.site in ['PHP', 'RTC']
-        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.site)
+        && request.resource.data.site in ['OTC', 'RES']
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.site)
         && validVersionField(request.resource.data);
 
       allow update: if request.resource.data.keys().hasAll([
         'site', 'createdByUserId', 'createdByName', 'status', 'departedAt', 'updatedAt'
       ])
         && request.resource.data.status in ['open', 'arrived', 'returned', 'closed']
-        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.site)
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.site)
         && validVersionField(request.resource.data)
         && request.resource.data.createdByUserId == resource.data.createdByUserId
         && request.resource.data.createdByName == resource.data.createdByName

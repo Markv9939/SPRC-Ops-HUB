@@ -5,7 +5,9 @@ import {
   doc, addDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp
 } from 'firebase/firestore'
 import { notifySuccess } from '../utils/toast'
+import { showConfirmDialog } from '../utils/dialogs'
 import { getStatus } from '../utils/complianceStatus'
+import { MAIN_LOCATIONS, normalizeMainLocation } from '../utils/orgModel'
 
 const COMPLIANCE_CATEGORIES = {
   fpcc: { label: 'FPCC', icon: '\u{1FAAA}' },
@@ -102,7 +104,7 @@ function statusBadge(status) {
 
 // ─── SUB-TAB: EMPLOYEES ────────────────────────────────────────────────────────
 function EmployeesTab({ employees, complianceItems, siteOptions }) {
-  const defaultSite = siteOptions[0] || 'RTC'
+  const defaultSite = siteOptions[0] || 'OTC'
   const [search, setSearch] = useState('')
   const [siteFilter, setSiteFilter] = useState('All')
   const [expandedId, setExpandedId] = useState(null)
@@ -183,7 +185,7 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
           style={{ ...inputStyle, flex: 1, minWidth: '200px' }}
         />
         <select value={siteFilter} onChange={e => setSiteFilter(e.target.value)} style={{ ...inputStyle, width: 'auto', minWidth: '100px' }}>
-          <option value="All">All Sites</option>
+          <option value="All">All Locations</option>
           {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
         </select>
         <button onClick={() => setAdding(!adding)} style={btnPrimary}>+ Add Employee</button>
@@ -199,7 +201,7 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
               <input style={inputStyle} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Full Name" />
             </div>
             <div>
-              <label style={labelStyle}>Site</label>
+              <label style={labelStyle}>Location</label>
               <select style={inputStyle} value={form.site} onChange={e => setForm({ ...form, site: e.target.value })}>
                 {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
               </select>
@@ -234,7 +236,7 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
                       <input style={inputStyle} value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
                     </div>
                     <div>
-                      <label style={labelStyle}>Site</label>
+                      <label style={labelStyle}>Location</label>
                       <select style={inputStyle} value={editForm.site} onChange={e => setEditForm({ ...editForm, site: e.target.value })}>
                         {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
                       </select>
@@ -372,7 +374,11 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
   }
 
   const handleDelete = async (itemId) => {
-    if (!confirm('Delete this compliance item?')) return
+    if (!(await showConfirmDialog('Delete this compliance item?', {
+      title: 'Delete Compliance Item',
+      tone: 'danger',
+      confirmText: 'Delete'
+    }))) return
     await deleteDoc(doc(db, 'complianceItems', itemId))
     notifySuccess('Compliance item deleted')
   }
@@ -393,7 +399,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
           {CATEGORY_KEYS.map(k => <option key={k} value={k}>{COMPLIANCE_CATEGORIES[k].icon} {COMPLIANCE_CATEGORIES[k].label}</option>)}
         </select>
         <select style={{ ...inputStyle, width: 'auto', minWidth: '100px' }} value={siteFilter} onChange={e => setSiteFilter(e.target.value)}>
-          <option value="all">All Sites</option>
+          <option value="all">All Locations</option>
           {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
         </select>
         <select style={{ ...inputStyle, width: 'auto', minWidth: '130px' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
@@ -562,7 +568,11 @@ function CintasTab({ cintasServices }) {
   }
 
   const handleDelete = async (id) => {
-    if (!confirm('Delete this service?')) return
+    if (!(await showConfirmDialog('Delete this service?', {
+      title: 'Delete Cintas Service',
+      tone: 'danger',
+      confirmText: 'Delete'
+    }))) return
     await deleteDoc(doc(db, 'cintasServices', id))
     notifySuccess('Cintas service deleted')
   }
@@ -661,10 +671,10 @@ function CompliancePanel({ user, scopeSites = null }) {
   const isAdmin = user?.role === 'admin'
   const normalizedScopeSites = useMemo(() => {
     if (!Array.isArray(scopeSites)) return []
-    return [...new Set(scopeSites.map(s => String(s || '').trim().toUpperCase()).filter(Boolean))]
+    return [...new Set(scopeSites.map(s => normalizeMainLocation(s)).filter(Boolean))]
   }, [scopeSites])
   const scopeSiteSet = useMemo(() => new Set(normalizedScopeSites), [normalizedScopeSites])
-  const siteOptions = normalizedScopeSites.length > 0 ? normalizedScopeSites : ['RTC', 'OTC']
+  const siteOptions = normalizedScopeSites.length > 0 ? normalizedScopeSites : MAIN_LOCATIONS
   const hasComplianceScope = isAdmin || normalizedScopeSites.length > 0
 
   // Real-time listeners
@@ -674,8 +684,15 @@ function CompliancePanel({ user, scopeSites = null }) {
     const unsub1 = onSnapshot(
       query(collection(db, 'complianceEmployees'), orderBy('name', 'asc')),
       snap => {
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        setEmployees(rows.filter(e => isAdmin || scopeSiteSet.has(String(e.site || '').trim().toUpperCase())))
+        const rows = snap.docs.map(d => {
+          const data = d.data()
+          return {
+            id: d.id,
+            ...data,
+            site: normalizeMainLocation(data.site) || String(data.site || '').trim().toUpperCase()
+          }
+        })
+        setEmployees(rows.filter(e => isAdmin || scopeSiteSet.has(normalizeMainLocation(e.site))))
       }
     )
     const unsub2 = onSnapshot(
@@ -718,7 +735,7 @@ function CompliancePanel({ user, scopeSites = null }) {
           color: '#FF9800',
           fontSize: '13px'
         }}>
-          No compliance site scope is configured for this account.
+          No compliance location scope is configured for this account.
         </div>
       )}
 

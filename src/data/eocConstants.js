@@ -1,9 +1,9 @@
 /* === EOC Constants — Locations, Vans, Shifts, Checklist Template === */
 
 export const LOCATIONS = [
+  { id: 'mesquite', label: 'Mesquite House' },
   { id: 'lone_mountain', label: 'Lone Mountain' },
-  { id: 'res', label: 'RES' },
-  { id: 'mesquite', label: 'Mesquite' }
+  { id: 'res', label: 'RES' }
 ]
 
 export const VANS = [
@@ -19,9 +19,9 @@ export const SHIFTS = [
 ]
 
 export const VAN_BY_LOCATION = {
-  lone_mountain: 'van_2',
+  lone_mountain: 'van_1',
   res: 'van_3',
-  mesquite: 'van_4'
+  mesquite: 'van_2'
 }
 
 export const EOC_VAN_TEMPLATE = [

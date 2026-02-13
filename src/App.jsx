@@ -10,14 +10,24 @@ import CloseChecklist from './components/CloseChecklist'
 import EocChecklist from './components/EocChecklist'
 import SupervisorDashboard from './components/SupervisorDashboard'
 import ToastHost from './components/ToastHost'
+import DialogHost from './components/DialogHost'
 import { syncEocTasksForUserScope } from './services/eocTaskEngine'
 import { refreshScopedSessionUser } from './services/accessGrantService'
 import { getAuthPolicy } from './services/authPolicyService'
 import { requireOnline } from './utils/networkGuard'
-import { installAlertToastBridge, notifySuccess } from './utils/toast'
+import { notifySuccess } from './utils/toast'
+import { installAlertDialogBridge, showPromptDialog } from './utils/dialogs'
+import {
+  MAIN_LOCATIONS,
+  getAvailableMainLocationsForUser,
+  isAdminRole,
+  isBhtRole,
+  isSupervisorRole,
+  normalizeTransportSite
+} from './utils/orgModel'
 
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
-const TRANSPORT_SITES = new Set(['PHP', 'RTC'])
+const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
 const ACTIVE_TRANSPORT_STATUSES = new Set(['open', 'arrived', 'returned'])
 
 function getLastTransportSiteKey(userId) {
@@ -26,30 +36,31 @@ function getLastTransportSiteKey(userId) {
 
 function getScopedTransportSites(user) {
   if (!user) return []
-  if (user.role === 'admin') return Array.from(TRANSPORT_SITES)
-
-  const raw = []
-  if (user.site) raw.push(user.site)
-  if (Array.isArray(user.authorizedLocations)) raw.push(...user.authorizedLocations)
-
-  const normalized = [...new Set(raw.map(v => String(v || '').trim().toUpperCase()))]
-  return normalized.filter(v => TRANSPORT_SITES.has(v))
+  if (isAdminRole(user.role)) return Array.from(TRANSPORT_SITES)
+  return getAvailableMainLocationsForUser(user).filter(v => TRANSPORT_SITES.has(v))
 }
 
-function promptForTransportSite(sites, defaultSite) {
+async function promptForTransportSite(sites, defaultSite) {
   const suggestion = defaultSite && sites.includes(defaultSite) ? defaultSite : sites[0]
   const promptText = [
-    'Select transport site:',
+    'Select transport location:',
     sites.map(site => `- ${site}`).join('\n'),
     '',
-    'Type site code exactly (e.g. PHP).'
+    'Type location code exactly (e.g. OTC).'
   ].join('\n')
 
-  const input = window.prompt(promptText, suggestion)
+  const input = await showPromptDialog(promptText, {
+    title: 'New Transport',
+    tone: 'info',
+    confirmText: 'Continue',
+    cancelText: 'Cancel',
+    placeholder: 'Location code (example: OTC)',
+    defaultValue: suggestion
+  })
   if (input === null) return null
   const normalized = String(input || '').trim().toUpperCase()
   if (!sites.includes(normalized)) {
-    alert(`Invalid site. Allowed: ${sites.join(', ')}`)
+    alert(`Invalid location. Allowed: ${sites.join(', ')}`)
     return null
   }
   return normalized
@@ -108,12 +119,12 @@ function App() {
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
 
   useEffect(() => {
-    const restoreAlerts = installAlertToastBridge()
+    const restoreAlerts = installAlertDialogBridge()
     return () => restoreAlerts()
   }, [])
 
   const getActiveTransport = useCallback(() => {
-    if (!user || user.role !== 'tech') return null
+    if (!user || !isBhtRole(user.role)) return null
     return transports.find(t => ACTIVE_TRANSPORT_STATUSES.has(String(t.status || '').toLowerCase())) || null
   }, [transports, user])
 
@@ -130,7 +141,7 @@ function App() {
   function handleLogin(userData) {
     sessionStorage.setItem('bhtUser', JSON.stringify(userData))
     setUser(userData)
-    if (userData?.role !== 'tech') {
+    if (!isBhtRole(userData?.role)) {
       setIssueUpdates([])
     }
     setPage('home')
@@ -280,11 +291,11 @@ function App() {
     const transportsRef = collection(db, 'transports')
     let q
 
-    if (user.role === 'supervisor' || user.role === 'admin') {
+    if (isSupervisorRole(user.role) || isAdminRole(user.role)) {
       // Supervisor and admin see all transports
       q = query(transportsRef, orderBy('departedAt', 'desc'))
     } else {
-      // Tech sees only their own transports
+      // BHT sees only their own transports
       q = query(
         transportsRef,
         where('createdByUserId', '==', user.id),
@@ -298,11 +309,11 @@ function App() {
         ...doc.data()
       }))
 
-      if (user.role === 'supervisor') {
+      if (isSupervisorRole(user.role)) {
         const scopedSites = getScopedTransportSites(user)
         if (scopedSites.length > 0) {
           const siteSet = new Set(scopedSites)
-          transportData = transportData.filter(t => siteSet.has(String(t.site || '').trim().toUpperCase()))
+          transportData = transportData.filter(t => siteSet.has(normalizeTransportSite(t.site)))
         }
       }
 
@@ -335,7 +346,7 @@ function App() {
 
   // Supervisor/admin alert count listener
   useEffect(() => {
-    if (!user || (user.role !== 'supervisor' && user.role !== 'admin')) return
+    if (!user || (!isSupervisorRole(user.role) && !isAdminRole(user.role))) return
 
     const q = query(
       collection(db, 'alerts'),
@@ -353,7 +364,7 @@ function App() {
   }, [user])
 
   useEffect(() => {
-    if (!user || user.role !== 'tech') return
+    if (!user || !isBhtRole(user.role)) return
 
     const q = query(
       collection(db, 'alerts'),
@@ -407,20 +418,20 @@ function App() {
       const scopedSites = getScopedTransportSites(user)
       const allowedSites = scopedSites.filter(site => TRANSPORT_SITES.has(site))
       if (allowedSites.length === 0) {
-        alert('No valid transport site is configured for your account.')
+        alert('No valid transport location is configured for your account.')
         return
       }
 
       const lastSiteKey = getLastTransportSiteKey(user?.id)
       const lastUsedSite = String(localStorage.getItem(lastSiteKey) || '').trim().toUpperCase()
-      const profileSite = String(user?.site || '').trim().toUpperCase()
+      const profileSite = normalizeTransportSite(user?.site)
 
       let transportSite = ''
       if (allowedSites.length === 1) {
         transportSite = allowedSites[0]
       } else {
         const preferredSite = [lastUsedSite, profileSite].find(site => allowedSites.includes(site)) || allowedSites[0]
-        transportSite = promptForTransportSite(allowedSites, preferredSite) || ''
+        transportSite = (await promptForTransportSite(allowedSites, preferredSite)) || ''
       }
 
       if (!TRANSPORT_SITES.has(transportSite)) return
@@ -494,6 +505,7 @@ function App() {
     return (
       <>
         <PinLogin onLogin={handleLogin} />
+        <DialogHost />
         <ToastHost />
       </>
     )
@@ -510,6 +522,7 @@ function App() {
           onReturn={handleReturn}
           onClose={handleCloseTransportCard}
         />
+        <DialogHost />
         <ToastHost />
       </div>
     )
@@ -526,6 +539,7 @@ function App() {
           onClose={handleCloseChecklistBack}
           onComplete={handleCloseChecklistComplete}
         />
+        <DialogHost />
         <ToastHost />
       </div>
     )
@@ -542,13 +556,14 @@ function App() {
           onComplete={handleEocComplete}
           onBack={handleEocBack}
         />
+        <DialogHost />
         <ToastHost />
       </div>
     )
   }
 
   // Show supervisor dashboard for supervisor or admin role
-  if (user.role === 'supervisor' || user.role === 'admin') {
+  if (isSupervisorRole(user.role) || isAdminRole(user.role)) {
     return (
       <div className="app-bg">
         <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
@@ -559,12 +574,13 @@ function App() {
           onLogout={handleLogout}
           userName={user.name}
         />
+        <DialogHost />
         <ToastHost />
       </div>
     )
   }
 
-  // Regular tech view — BHT Hub
+  // Regular BHT view - BHT Hub
   return (
     <div style={{
       minHeight: '100vh',
@@ -579,6 +595,7 @@ function App() {
         onContinueTransport={handleContinueTransport}
         onStartEoc={handleStartEoc}
       />
+      <DialogHost />
       <ToastHost />
     </div>
   )

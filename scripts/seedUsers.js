@@ -112,50 +112,72 @@ async function seedUsers() {
       name: 'Admin Owner',
       pin: '1111',
       role: 'admin',
-      site: 'PHP',
+      site: 'GLOBAL',
+      location: 'GLOBAL',
       active: true,
-      authorizedLocations: ['PHP', 'RTC', 'OTC']
+      authorizedLocations: ['OTC', 'RES']
     },
     {
       id: 'supervisor_php',
-      name: 'Supervisor PHP',
+      name: 'Supervisor OTC',
       pin: '2222',
       role: 'supervisor',
-      site: 'PHP',
+      site: 'OTC',
+      location: 'OTC',
       active: true,
-      authorizedLocations: ['PHP']
+      authorizedLocations: ['OTC']
     },
     {
       id: 'tech_mesquite_a',
-      name: 'Tech Mesquite A',
+      name: 'BHT Mesquite A',
       pin: '3333',
-      role: 'tech',
-      site: 'PHP',
-      active: true
+      role: 'bht',
+      site: 'OTC',
+      location: 'OTC',
+      house: 'MESQUITE',
+      locationId: 'mesquite',
+      vanId: 'van_1',
+      active: true,
+      authorizedLocations: ['OTC', 'MESQUITE']
     },
     {
       id: 'tech_mesquite_b',
-      name: 'Tech Mesquite B',
+      name: 'BHT Mesquite B',
       pin: '4444',
-      role: 'tech',
-      site: 'PHP',
-      active: true
+      role: 'bht',
+      site: 'OTC',
+      location: 'OTC',
+      house: 'MESQUITE',
+      locationId: 'mesquite',
+      vanId: 'van_2',
+      active: true,
+      authorizedLocations: ['OTC', 'MESQUITE']
     },
     {
       id: 'tech_lm_multi',
-      name: 'Tech Lone Mountain',
+      name: 'BHT Lone Mountain',
       pin: '5555',
-      role: 'tech',
-      site: 'RTC',
-      active: true
+      role: 'bht',
+      site: 'OTC',
+      location: 'OTC',
+      house: 'LONE_MOUNTAIN',
+      locationId: 'lone_mountain',
+      vanId: 'van_4',
+      active: true,
+      authorizedLocations: ['OTC', 'LONE_MOUNTAIN']
     },
     {
       id: 'tech_unassigned',
-      name: 'Tech Unassigned',
+      name: 'BHT RES',
       pin: '6666',
-      role: 'tech',
-      site: 'PHP',
-      active: true
+      role: 'bht',
+      site: 'RES',
+      location: 'RES',
+      house: null,
+      locationId: 'res',
+      vanId: 'van_3',
+      active: true,
+      authorizedLocations: ['RES']
     }
   ]
 
@@ -182,7 +204,7 @@ async function seedAssignments() {
     {
       id: 'asg_mesquite_shift1_a',
       bhtUserId: 'tech_mesquite_a',
-      bhtUserName: 'Tech Mesquite A',
+      bhtUserName: 'BHT Mesquite A',
       locationId: 'mesquite',
       shiftId: 'shift_1',
       vanIds: ['van_1'],
@@ -192,7 +214,7 @@ async function seedAssignments() {
     {
       id: 'asg_mesquite_shift1_b',
       bhtUserId: 'tech_mesquite_b',
-      bhtUserName: 'Tech Mesquite B',
+      bhtUserName: 'BHT Mesquite B',
       locationId: 'mesquite',
       shiftId: 'shift_1',
       vanIds: ['van_2'],
@@ -202,10 +224,20 @@ async function seedAssignments() {
     {
       id: 'asg_lm_shift2_multi',
       bhtUserId: 'tech_lm_multi',
-      bhtUserName: 'Tech Lone Mountain',
+      bhtUserName: 'BHT Lone Mountain',
       locationId: 'lone_mountain',
       shiftId: 'shift_2',
-      vanIds: ['van_2', 'van_3'],
+      vanIds: ['van_2', 'van_4'],
+      isHousePrimary: true,
+      active: true
+    },
+    {
+      id: 'asg_res_shift1',
+      bhtUserId: 'tech_unassigned',
+      bhtUserName: 'BHT RES',
+      locationId: 'res',
+      shiftId: 'shift_1',
+      vanIds: ['van_3'],
       isHousePrimary: true,
       active: true
     }
@@ -242,8 +274,8 @@ async function seedAccessGrants() {
     {
       id: 'grant_supervisor_php_rtc_active',
       userId: 'supervisor_php',
-      userName: 'Supervisor PHP',
-      locationId: 'RTC',
+      userName: 'Supervisor OTC',
+      locationId: 'RES',
       startsOn: toPhoenixDateStr(-1),
       expiresOn: toPhoenixDateStr(2),
       reason: 'Seeded temporary backup coverage'
@@ -251,7 +283,7 @@ async function seedAccessGrants() {
     {
       id: 'grant_tech_lm_otc_upcoming',
       userId: 'tech_lm_multi',
-      userName: 'Tech Lone Mountain',
+      userName: 'BHT Lone Mountain',
       locationId: 'OTC',
       startsOn: toPhoenixDateStr(1),
       expiresOn: toPhoenixDateStr(5),
@@ -303,7 +335,7 @@ async function seedEocTasks() {
       locationId: 'mesquite',
       shiftId: 'shift_1',
       assigneeUserId: 'tech_mesquite_a',
-      assigneeUserName: 'Tech Mesquite A',
+      assigneeUserName: 'BHT Mesquite A',
       dueDate: today,
       status: 'pending',
       active: true
@@ -314,7 +346,7 @@ async function seedEocTasks() {
       shiftId: 'shift_1',
       vanId: 'van_1',
       assigneeUserId: 'tech_mesquite_a',
-      assigneeUserName: 'Tech Mesquite A',
+      assigneeUserName: 'BHT Mesquite A',
       dueDate: today,
       status: 'pending',
       active: true
@@ -325,7 +357,7 @@ async function seedEocTasks() {
       shiftId: 'shift_1',
       vanId: 'van_2',
       assigneeUserId: 'tech_mesquite_b',
-      assigneeUserName: 'Tech Mesquite B',
+      assigneeUserName: 'BHT Mesquite B',
       dueDate: today,
       status: 'pending',
       active: true
@@ -335,9 +367,20 @@ async function seedEocTasks() {
       locationId: 'lone_mountain',
       shiftId: 'shift_2',
       assigneeUserId: 'tech_lm_multi',
-      assigneeUserName: 'Tech Lone Mountain',
+      assigneeUserName: 'BHT Lone Mountain',
       dueDate: yesterday,
       status: 'overdue',
+      active: true
+    },
+    {
+      taskType: 'van',
+      locationId: 'res',
+      shiftId: 'shift_1',
+      vanId: 'van_3',
+      assigneeUserId: 'tech_unassigned',
+      assigneeUserName: 'BHT RES',
+      dueDate: today,
+      status: 'pending',
       active: true
     }
   ]
@@ -402,7 +445,7 @@ async function seedIssueAndAlert() {
       status: 'open',
       version: 1,
       reportedByUserId: 'tech_mesquite_a',
-      reportedByName: 'Tech Mesquite A',
+      reportedByName: 'BHT Mesquite A',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     })
@@ -426,7 +469,7 @@ async function seedIssueAndAlert() {
       version: 1,
       createdAt: serverTimestamp(),
       createdByUserId: 'tech_mesquite_a',
-      createdByName: 'Tech Mesquite A'
+      createdByName: 'BHT Mesquite A'
     })
     seededCount += 1
   } catch (error) {
@@ -515,11 +558,11 @@ async function main() {
   console.log('UAT reset complete.')
   console.log('Test logins:')
   console.log('- Admin: PIN 1111')
-  console.log('- Supervisor (PHP scope): PIN 2222')
-  console.log('- Tech Mesquite A: PIN 3333')
-  console.log('- Tech Mesquite B: PIN 4444')
-  console.log('- Tech Lone Mountain (multi-van): PIN 5555')
-  console.log('- Tech Unassigned: PIN 6666')
+  console.log('- Supervisor (OTC scope): PIN 2222')
+  console.log('- BHT Mesquite A: PIN 3333')
+  console.log('- BHT Mesquite B: PIN 4444')
+  console.log('- BHT Lone Mountain (multi-van): PIN 5555')
+  console.log('- BHT RES: PIN 6666')
 
   process.exit(0)
 }

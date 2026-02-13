@@ -12,6 +12,14 @@ import {
   Timestamp,
   increment
 } from 'firebase/firestore'
+import {
+  GLOBAL_SCOPE,
+  isAdminRole,
+  normalizeMainLocation,
+  normalizeRole,
+  normalizeScopeValue,
+  normalizeScopeValues
+} from '../utils/orgModel'
 
 export const ACCESS_GRANT_STATES = Object.freeze({
   ACTIVE: 'active',
@@ -21,7 +29,8 @@ export const ACCESS_GRANT_STATES = Object.freeze({
 })
 
 function normalizeLocationId(value) {
-  return String(value || '').trim().toUpperCase()
+  const normalized = normalizeScopeValue(value)
+  return normalized || String(value || '').trim().toUpperCase()
 }
 
 function toDate(value) {
@@ -49,7 +58,7 @@ function normalizeBaseScopes(userData) {
   const raw = []
   if (userData?.site) raw.push(userData.site)
   if (Array.isArray(userData?.authorizedLocations)) raw.push(...userData.authorizedLocations)
-  return [...new Set(raw.map(normalizeLocationId).filter(Boolean))]
+  return normalizeScopeValues(raw)
 }
 
 export function deriveAccessGrantState(grant, now = new Date()) {
@@ -104,6 +113,7 @@ export async function loadAccessGrantsForUser(userId) {
 }
 
 export async function getScopedSessionUser(userId, userData) {
+  const normalizedRole = normalizeRole(userData?.role)
   const baseScopes = normalizeBaseScopes(userData)
   const grants = await loadAccessGrantsForUser(userId)
   const activeGrantLocations = grants
@@ -111,12 +121,15 @@ export async function getScopedSessionUser(userId, userData) {
     .map(grant => grant.locationId)
   const mergedScopes = [...new Set([...baseScopes, ...activeGrantLocations])]
   const activeBackupGrants = grants.filter(grant => grant.state === ACCESS_GRANT_STATES.ACTIVE)
+  const normalizedSite = isAdminRole(normalizedRole)
+    ? GLOBAL_SCOPE
+    : (normalizeMainLocation(userData?.site) || normalizeMainLocation(baseScopes[0]) || '')
 
   return {
     id: userId,
     name: userData.name,
-    role: userData.role,
-    site: userData.site,
+    role: normalizedRole,
+    site: normalizedSite,
     locationId: userData.locationId || null,
     shiftId: userData.shiftId || null,
     vanId: userData.vanId || null,

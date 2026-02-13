@@ -24,6 +24,30 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'confirm',
+          message: 'Use showConfirmDialog(...) from src/utils/dialogs.js'
+        },
+        {
+          name: 'prompt',
+          message: 'Use showPromptDialog(...) from src/utils/dialogs.js'
+        }
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'window',
+          property: 'confirm',
+          message: 'Use showConfirmDialog(...) from src/utils/dialogs.js'
+        },
+        {
+          object: 'window',
+          property: 'prompt',
+          message: 'Use showPromptDialog(...) from src/utils/dialogs.js'
+        }
+      ]
     },
   },
 ])

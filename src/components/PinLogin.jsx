@@ -6,6 +6,13 @@ import { hashPin } from '../utils/pinHash'
 import { getScopedSessionUser } from '../services/accessGrantService'
 import { getAuthPolicy } from '../services/authPolicyService'
 import { isOfflineMode } from '../utils/networkGuard'
+import {
+  GLOBAL_SCOPE,
+  isAdminRole,
+  normalizeMainLocation,
+  normalizeRole,
+  normalizeScopeValues
+} from '../utils/orgModel'
 
 const MAX_FAILED_ATTEMPTS = 5
 const LOCKOUT_DURATION_MS = 5 * 60 * 1000 // 5 minutes
@@ -53,11 +60,6 @@ function PinLogin({ onLogin }) {
     }
   }, [lockoutUntil])
 
-  const normalizeScopeValues = (values) => {
-    if (!Array.isArray(values)) return []
-    return [...new Set(values.map(value => String(value || '').trim().toUpperCase()).filter(Boolean))]
-  }
-
   const expectedUserScopes = (userData) => normalizeScopeValues([
     ...(userData?.site ? [userData.site] : []),
     ...(Array.isArray(userData?.authorizedLocations) ? userData.authorizedLocations : [])
@@ -66,9 +68,9 @@ function PinLogin({ onLogin }) {
   const claimsMatchPinUser = (authSession, userData) => {
     if (!authSession?.authClaimsReady) return true
 
-    const expectedRole = String(userData?.role || '').trim()
+    const expectedRole = normalizeRole(userData?.role)
     const expectedScopes = expectedUserScopes(userData)
-    const actualRole = String(authSession.authClaimRole || '').trim()
+    const actualRole = normalizeRole(authSession.authClaimRole)
     const actualScopes = normalizeScopeValues(authSession.authClaimLocations)
 
     const roleMatches = expectedRole === actualRole
@@ -200,16 +202,20 @@ function PinLogin({ onLogin }) {
             ...(userData.site ? [userData.site] : []),
             ...(Array.isArray(userData.authorizedLocations) ? userData.authorizedLocations : [])
           ])]
+          const normalizedRole = normalizeRole(userData.role)
+          const normalizedSite = isAdminRole(normalizedRole)
+            ? GLOBAL_SCOPE
+            : (normalizeMainLocation(userData.site) || normalizeMainLocation(baseScopes[0]) || '')
           scopedSessionUser = {
             id: userDoc.id,
             name: userData.name,
-            role: userData.role,
-            site: userData.site,
+            role: normalizedRole,
+            site: normalizedSite,
             locationId: userData.locationId || null,
             shiftId: userData.shiftId || null,
             vanId: userData.vanId || null,
-            authorizedLocations: baseScopes,
-            primaryScopes: baseScopes,
+            authorizedLocations: normalizeScopeValues(baseScopes),
+            primaryScopes: normalizeScopeValues(baseScopes),
             activeBackupGrants: [],
             scopeRefreshedAt: new Date().toISOString(),
             authScopeEnforced: authPolicy.authScopeEnforced,

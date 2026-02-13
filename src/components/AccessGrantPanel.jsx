@@ -2,14 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { db } from '../firebase'
 import { collection, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore'
 import { notifySuccess } from '../utils/toast'
+import { showPromptDialog } from '../utils/dialogs'
 import {
   ACCESS_GRANT_STATES,
   deriveAccessGrantState,
   grantBackupAccess,
   revokeBackupAccess
 } from '../services/accessGrantService'
+import { MAIN_LOCATIONS } from '../utils/orgModel'
 
-const LOCATION_OPTIONS = ['PHP', 'RTC', 'OTC']
+const LOCATION_OPTIONS = MAIN_LOCATIONS
 
 function toDate(value) {
   if (!value) return null
@@ -58,7 +60,7 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState({
     userId: '',
-    locationId: 'PHP',
+    locationId: LOCATION_OPTIONS[0],
     startsOn: toDateInputValue(new Date()),
     expiresOn: toDateInputValue(plusDays(7)),
     reason: ''
@@ -197,7 +199,16 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
       return
     }
 
-    const reason = window.prompt(`Enter revoke reason for ${grant.userName} (${grant.locationId}):`)
+    const reason = await showPromptDialog(
+      `Enter revoke reason for ${grant.userName} (${grant.locationId}):`,
+      {
+        title: 'Revoke Backup Access',
+        tone: 'warning',
+        confirmText: 'Revoke',
+        cancelText: 'Cancel',
+        placeholder: 'Reason required'
+      }
+    )
     if (reason === null) return
     if (!reason.trim()) {
       alert('Revoke reason is required.')

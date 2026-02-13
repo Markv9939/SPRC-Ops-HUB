@@ -14,6 +14,7 @@
     "reset:uat": "node scripts/seedUsers.js --confirm",
     "claims:provision": "node scripts/provisionAuthClaims.js",
     "claims:verify": "node scripts/verifyAuthClaims.js",
+    "migrate:org-model": "node scripts/migrateOrgModel.js",
     "migrate-clients": "node scripts/migrateExistingClients.js",
     "cleanup-clients": "node scripts/deactivateStaleClients.js"
   },

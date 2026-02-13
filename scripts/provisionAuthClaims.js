@@ -9,6 +9,23 @@ const __dirname = dirname(__filename)
 
 const PROJECT_ID = 'sprc-tx-l'
 
+function normalizeRole(role) {
+  const normalized = String(role || '').trim().toLowerCase()
+  if (normalized === 'tech') return 'bht'
+  return normalized
+}
+
+function normalizeLocation(value) {
+  const normalized = String(value || '').trim().toUpperCase()
+  if (!normalized) return ''
+  if (normalized === 'OTC' || normalized === 'PHP' || normalized === 'RTC' || normalized === 'MESQUITE' || normalized === 'LONE_MOUNTAIN') {
+    return 'OTC'
+  }
+  if (normalized === 'RES') return 'RES'
+  if (normalized === 'GLOBAL') return 'GLOBAL'
+  return normalized
+}
+
 function parseArgs(argv) {
   const flags = new Set(argv)
   const userFlagIndex = argv.findIndex(arg => arg === '--user')
@@ -21,7 +38,10 @@ function parseArgs(argv) {
   }
 }
 
-function normalizeLocations(userData) {
+function normalizeLocations(userData, role) {
+  const normalizedRole = normalizeRole(role)
+  if (normalizedRole === 'admin') return ['OTC', 'RES']
+
   const values = [
     ...(userData?.site ? [userData.site] : []),
     ...(Array.isArray(userData?.authorizedLocations) ? userData.authorizedLocations : [])
@@ -29,7 +49,7 @@ function normalizeLocations(userData) {
 
   return [...new Set(
     values
-      .map(v => String(v || '').trim().toUpperCase())
+      .map(v => normalizeLocation(v))
       .filter(Boolean)
   )]
 }
@@ -125,14 +145,14 @@ async function provisionClaims({ dryRun, enforce, selectedUserId }) {
   for (const userDoc of usersSnapshot.docs) {
     const userId = userDoc.id
     const userData = userDoc.data() || {}
-    const role = String(userData.role || '').trim()
+    const role = normalizeRole(userData.role)
 
     if (!role) {
       console.log(`- ${userId}: skipped (missing role)`)
       continue
     }
 
-    const locations = normalizeLocations(userData)
+    const locations = normalizeLocations(userData, role)
     const identity = getDesiredAuthIdentity(userId, userData)
 
     const desiredClaims = {
