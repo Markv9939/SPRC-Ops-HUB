@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 
-const STATUS_PRIORITY = { overdue: 0, pending: 1, completed: 2 }
+const STATUS_PRIORITY = { overdue: 0, pending: 1, completed: 2, ignored: 3 }
 
 function sortTasks(items) {
   return [...items].sort((a, b) => {

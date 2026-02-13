@@ -26,6 +26,14 @@ const TAB_KEYS = Object.keys(TAB_LABELS)
 const TRANSPORT_SITES = new Set(['PHP', 'RTC'])
 const COMPLIANCE_SITES = new Set(['RTC', 'OTC'])
 
+function locationScopeAlias(locationId) {
+  const normalized = String(locationId || '').trim().toUpperCase()
+  if (!normalized) return ''
+  if (normalized === 'MESQUITE' || normalized === 'RES') return 'PHP'
+  if (normalized === 'LONE_MOUNTAIN') return 'RTC'
+  return normalized
+}
+
 function SupervisorDashboard({ user, isOffline = false }) {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
@@ -63,6 +71,11 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const [queueView, setQueueView] = useState('issues')
   const [queueLocationFilter, setQueueLocationFilter] = useState('all')
   const [eocIssueActionNotes, setEocIssueActionNotes] = useState({})
+  const [overdueTaskActionId, setOverdueTaskActionId] = useState(null)
+  const [overdueTaskActionMode, setOverdueTaskActionMode] = useState(null)
+  const [overdueTaskAssigneeUserId, setOverdueTaskAssigneeUserId] = useState('')
+  const [overdueTaskActionReason, setOverdueTaskActionReason] = useState('')
+  const [overdueTaskActionSubmitting, setOverdueTaskActionSubmitting] = useState(false)
 
   // Compliance dashboard summary
   const [complianceItems, setComplianceItems] = useState([])
@@ -122,6 +135,16 @@ function SupervisorDashboard({ user, isOffline = false }) {
     (site) => isAdmin || allowedComplianceSites.includes(String(site || '').trim().toUpperCase()),
     [allowedComplianceSites, isAdmin]
   )
+  const inEocScope = useCallback(
+    (locationId) => {
+      if (isAdmin) return true
+      const normalizedLocation = String(locationId || '').trim().toUpperCase()
+      if (!normalizedLocation) return false
+      const aliasedLocation = locationScopeAlias(normalizedLocation)
+      return normalizedScopes.includes(normalizedLocation) || normalizedScopes.includes(aliasedLocation)
+    },
+    [isAdmin, normalizedScopes]
+  )
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 600px)')
@@ -149,16 +172,32 @@ function SupervisorDashboard({ user, isOffline = false }) {
     }
   }, [activeTab, isAdmin])
 
+  useEffect(() => {
+    if (queueView === 'overdue') return
+    setOverdueTaskActionId(null)
+    setOverdueTaskActionMode(null)
+    setOverdueTaskAssigneeUserId('')
+    setOverdueTaskActionReason('')
+    setOverdueTaskActionSubmitting(false)
+  }, [queueView])
+
   // Real-time EOC issues + overdue tasks for dashboard summary
   useEffect(() => {
     const unsubIssues = onSnapshot(
       query(collection(db, 'eocIssues'), where('status', 'in', ['open', 'in_progress']), orderBy('createdAt', 'desc')),
-      (snap) => setEocIssues(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      (snap) => {
+        const rows = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(issue => inEocScope(issue.locationId))
+        setEocIssues(rows)
+      }
     )
     const unsubOverdueTasks = onSnapshot(
       query(collection(db, 'eocTasks'), where('status', '==', 'overdue')),
       (snap) => {
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        const rows = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(task => inEocScope(task.locationId))
         rows.sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''))
         setEocOverdueTasks(rows)
       }
@@ -169,6 +208,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         const rows = snap.docs
           .map(d => ({ id: d.id, ...d.data() }))
           .filter(alertItem => alertItem.type === 'eoc_issue')
+          .filter(alertItem => inEocScope(alertItem.locationId))
         rows.sort((a, b) => {
           const aMs = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0
           const bMs = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0
@@ -182,7 +222,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
       (snap) => setComplianceItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     )
     return () => { unsubIssues(); unsubOverdueTasks(); unsubAlerts(); unsubCompliance() }
-  }, [])
+  }, [inEocScope])
 
   // Load BHT Assignments
   useEffect(() => {
@@ -1097,6 +1137,200 @@ function SupervisorDashboard({ user, isOffline = false }) {
         ? prev.vanIds.filter(v => v !== vanId)
         : [...prev.vanIds, vanId]
     }))
+  }
+
+  const getAssignableTechUsersForTask = (task) => {
+    const normalizedLocation = String(task?.locationId || '').trim().toUpperCase()
+    const scopedLocation = locationScopeAlias(normalizedLocation)
+
+    return techUsers.filter((techUser) => {
+      const techScopes = [...new Set([
+        ...(techUser?.site ? [techUser.site] : []),
+        ...(Array.isArray(techUser?.authorizedLocations) ? techUser.authorizedLocations : [])
+      ].map(value => String(value || '').trim().toUpperCase()).filter(Boolean))]
+
+      if (techScopes.length === 0) return true
+      return techScopes.includes(normalizedLocation) || techScopes.includes(scopedLocation)
+    })
+  }
+
+  const resetOverdueTaskActionState = () => {
+    setOverdueTaskActionId(null)
+    setOverdueTaskActionMode(null)
+    setOverdueTaskAssigneeUserId('')
+    setOverdueTaskActionReason('')
+    setOverdueTaskActionSubmitting(false)
+  }
+
+  const openOverdueTaskReassign = (task) => {
+    const candidates = getAssignableTechUsersForTask(task)
+    const preferredAssignee = candidates.find(candidate => candidate.id === task.assigneeUserId) || candidates[0] || null
+    setOverdueTaskActionId(task.id)
+    setOverdueTaskActionMode('reassign')
+    setOverdueTaskAssigneeUserId(preferredAssignee?.id || '')
+    setOverdueTaskActionReason('')
+    setOverdueTaskActionSubmitting(false)
+  }
+
+  const openOverdueTaskIgnore = (task) => {
+    setOverdueTaskActionId(task.id)
+    setOverdueTaskActionMode('ignore')
+    setOverdueTaskAssigneeUserId(task.assigneeUserId || '')
+    setOverdueTaskActionReason('')
+    setOverdueTaskActionSubmitting(false)
+  }
+
+  const handleOverdueTaskReassign = async (task) => {
+    if (blockIfOffline('reassigning overdue tasks')) return
+    if (!task?.id) return
+
+    const reason = String(overdueTaskActionReason || '').trim()
+    if (!reason) {
+      alert('Reassignment reason is required.')
+      return
+    }
+
+    const candidateUsers = getAssignableTechUsersForTask(task)
+    const selectedAssignee = candidateUsers.find(candidate => candidate.id === overdueTaskAssigneeUserId)
+    if (!selectedAssignee) {
+      alert('Select a valid assignee for this task.')
+      return
+    }
+
+    if (selectedAssignee.id === task.assigneeUserId) {
+      alert('Select a different assignee to reassign this task.')
+      return
+    }
+
+    setOverdueTaskActionSubmitting(true)
+    try {
+      const expectedVersion = getVersionNumber(task)
+      await runTransaction(db, async (transaction) => {
+        const taskRef = doc(db, 'eocTasks', task.id)
+        const taskSnap = await transaction.get(taskRef)
+        if (!taskSnap.exists()) {
+          throw new Error('Task no longer exists.')
+        }
+
+        const latestTask = taskSnap.data()
+        if (latestTask.status !== 'overdue') {
+          throw new Error('Task is no longer overdue.')
+        }
+
+        const { nextVersion } = assertExpectedVersion({
+          expectedVersion,
+          currentVersion: getVersionNumber(latestTask),
+          documentId: task.id,
+          recordLabel: 'EOC Task'
+        })
+
+        transaction.update(taskRef, {
+          assigneeUserId: selectedAssignee.id,
+          assigneeUserName: selectedAssignee.name || selectedAssignee.id,
+          reassignedAt: serverTimestamp(),
+          reassignedByUserId: user?.id || null,
+          reassignedByName: user?.name || null,
+          reassignedReason: reason,
+          version: nextVersion,
+          updatedAt: serverTimestamp()
+        })
+      })
+
+      await writeAuditLog({
+        action: 'eoc_task_reassign',
+        collectionPath: 'eocTasks',
+        documentId: task.id,
+        reason,
+        extra: {
+          locationId: task.locationId || '',
+          shiftId: task.shiftId || '',
+          dueDate: task.dueDate || '',
+          previousAssigneeUserId: task.assigneeUserId || null,
+          previousAssigneeUserName: task.assigneeUserName || null,
+          nextAssigneeUserId: selectedAssignee.id,
+          nextAssigneeUserName: selectedAssignee.name || selectedAssignee.id
+        }
+      })
+
+      notifySuccess('Overdue task reassigned')
+      resetOverdueTaskActionState()
+    } catch (error) {
+      console.error('Failed to reassign overdue task:', error)
+      alertVersionConflict(error, error?.message || 'Failed to reassign overdue task')
+      setOverdueTaskActionSubmitting(false)
+      return
+    }
+
+    setOverdueTaskActionSubmitting(false)
+  }
+
+  const handleOverdueTaskIgnore = async (task) => {
+    if (blockIfOffline('ignoring overdue tasks')) return
+    if (!task?.id) return
+
+    const reason = String(overdueTaskActionReason || '').trim()
+    if (!reason) {
+      alert('Ignore reason is required for audit history.')
+      return
+    }
+
+    setOverdueTaskActionSubmitting(true)
+    try {
+      const expectedVersion = getVersionNumber(task)
+      await runTransaction(db, async (transaction) => {
+        const taskRef = doc(db, 'eocTasks', task.id)
+        const taskSnap = await transaction.get(taskRef)
+        if (!taskSnap.exists()) {
+          throw new Error('Task no longer exists.')
+        }
+
+        const latestTask = taskSnap.data()
+        if (latestTask.status !== 'overdue') {
+          throw new Error('Task is no longer overdue.')
+        }
+
+        const { nextVersion } = assertExpectedVersion({
+          expectedVersion,
+          currentVersion: getVersionNumber(latestTask),
+          documentId: task.id,
+          recordLabel: 'EOC Task'
+        })
+
+        transaction.update(taskRef, {
+          status: 'ignored',
+          ignoredAt: serverTimestamp(),
+          ignoredByUserId: user?.id || null,
+          ignoredByName: user?.name || null,
+          ignoredReason: reason,
+          version: nextVersion,
+          updatedAt: serverTimestamp()
+        })
+      })
+
+      await writeAuditLog({
+        action: 'eoc_task_ignore',
+        collectionPath: 'eocTasks',
+        documentId: task.id,
+        reason,
+        extra: {
+          locationId: task.locationId || '',
+          shiftId: task.shiftId || '',
+          dueDate: task.dueDate || '',
+          assigneeUserId: task.assigneeUserId || null,
+          assigneeUserName: task.assigneeUserName || null
+        }
+      })
+
+      notifySuccess('Overdue task ignored')
+      resetOverdueTaskActionState()
+    } catch (error) {
+      console.error('Failed to ignore overdue task:', error)
+      alertVersionConflict(error, error?.message || 'Failed to ignore overdue task')
+      setOverdueTaskActionSubmitting(false)
+      return
+    }
+
+    setOverdueTaskActionSubmitting(false)
   }
 
   const handleQueueReassign = (task) => {
@@ -2387,21 +2621,184 @@ function SupervisorDashboard({ user, isOffline = false }) {
                       {' '} &bull; Due {task.dueDate}
                       {' '} &bull; Assigned {task.assigneeUserName || task.assigneeUserId || 'Unassigned'}
                     </div>
-                    <button
-                      onClick={() => handleQueueReassign(task)}
-                      style={{
-                        padding: '6px 14px',
-                        backgroundColor: 'rgba(255,255,255,0.06)',
-                        color: '#e8e8e8',
-                        border: 'none',
-                        borderRadius: '6px',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Open Reassign Flow
-                    </button>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => openOverdueTaskReassign(task)}
+                        style={{
+                          padding: '6px 14px',
+                          backgroundColor: 'rgba(255,255,255,0.06)',
+                          color: '#e8e8e8',
+                          border: 'none',
+                          borderRadius: '6px',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Reassign Task
+                      </button>
+                      <button
+                        onClick={() => openOverdueTaskIgnore(task)}
+                        style={{
+                          padding: '6px 14px',
+                          backgroundColor: 'rgba(255,152,0,0.16)',
+                          color: '#FFB74D',
+                          border: '1px solid rgba(255,152,0,0.35)',
+                          borderRadius: '6px',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Ignore Task
+                      </button>
+                      <button
+                        onClick={() => handleQueueReassign(task)}
+                        style={{
+                          padding: '6px 14px',
+                          backgroundColor: 'rgba(33,150,243,0.15)',
+                          color: '#90CAF9',
+                          border: '1px solid rgba(33,150,243,0.35)',
+                          borderRadius: '6px',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Assignment Panel
+                      </button>
+                    </div>
+
+                    {overdueTaskActionId === task.id && overdueTaskActionMode === 'reassign' && (
+                      <div style={{
+                        marginTop: '10px',
+                        padding: '10px',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(33,150,243,0.35)',
+                        backgroundColor: 'rgba(33,150,243,0.08)'
+                      }}>
+                        <div style={{ fontSize: '12px', color: '#90CAF9', marginBottom: '8px', fontWeight: 700 }}>
+                          Reassign overdue task
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 240px) 1fr', gap: '8px' }}>
+                          <select
+                            value={overdueTaskAssigneeUserId}
+                            onChange={(event) => setOverdueTaskAssigneeUserId(event.target.value)}
+                            style={selectStyle}
+                          >
+                            <option value="">Select assignee...</option>
+                            {getAssignableTechUsersForTask(task).map(candidate => (
+                              <option key={candidate.id} value={candidate.id}>
+                                {candidate.name} ({candidate.id})
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            className="input"
+                            value={overdueTaskActionReason}
+                            onChange={(event) => setOverdueTaskActionReason(event.target.value)}
+                            placeholder="Reason for reassignment (required)"
+                            style={{ padding: '8px 10px', fontSize: '13px' }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => handleOverdueTaskReassign(task)}
+                            disabled={overdueTaskActionSubmitting}
+                            style={{
+                              padding: '6px 14px',
+                              backgroundColor: overdueTaskActionSubmitting ? 'rgba(255,255,255,0.08)' : '#4CAF50',
+                              color: overdueTaskActionSubmitting ? '#8899aa' : 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              fontWeight: 600,
+                              cursor: overdueTaskActionSubmitting ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            Save Reassign
+                          </button>
+                          <button
+                            onClick={resetOverdueTaskActionState}
+                            disabled={overdueTaskActionSubmitting}
+                            style={{
+                              padding: '6px 14px',
+                              backgroundColor: 'rgba(255,255,255,0.06)',
+                              color: '#8899aa',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              cursor: overdueTaskActionSubmitting ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {overdueTaskActionId === task.id && overdueTaskActionMode === 'ignore' && (
+                      <div style={{
+                        marginTop: '10px',
+                        padding: '10px',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(255,152,0,0.35)',
+                        backgroundColor: 'rgba(255,152,0,0.08)'
+                      }}>
+                        <div style={{ fontSize: '12px', color: '#FFB74D', marginBottom: '8px', fontWeight: 700 }}>
+                          Ignore overdue task (audit reason required)
+                        </div>
+                        <textarea
+                          value={overdueTaskActionReason}
+                          onChange={(event) => setOverdueTaskActionReason(event.target.value)}
+                          placeholder="Reason for ignoring this overdue task"
+                          rows={2}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            border: '2px solid rgba(255,255,255,0.1)',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            boxSizing: 'border-box',
+                            backgroundColor: 'rgba(255,255,255,0.06)',
+                            color: '#e8e8e8'
+                          }}
+                        />
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => handleOverdueTaskIgnore(task)}
+                            disabled={overdueTaskActionSubmitting}
+                            style={{
+                              padding: '6px 14px',
+                              backgroundColor: overdueTaskActionSubmitting ? 'rgba(255,255,255,0.08)' : '#FF9800',
+                              color: overdueTaskActionSubmitting ? '#8899aa' : '#1f2933',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              fontWeight: 700,
+                              cursor: overdueTaskActionSubmitting ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            Confirm Ignore
+                          </button>
+                          <button
+                            onClick={resetOverdueTaskActionState}
+                            disabled={overdueTaskActionSubmitting}
+                            style={{
+                              padding: '6px 14px',
+                              backgroundColor: 'rgba(255,255,255,0.06)',
+                              color: '#8899aa',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              cursor: overdueTaskActionSubmitting ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
 

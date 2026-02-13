@@ -121,6 +121,19 @@ service cloud.firestore {
       return !('version' in data) || data.version is int;
     }
 
+    function validEocTaskStatus(status) {
+      return status in ['pending', 'overdue', 'completed', 'ignored'];
+    }
+
+    function validIgnoredTaskPayload(data) {
+      return data.status != 'ignored'
+        || (
+          data.keys().hasAny(['ignoredReason'])
+          && data.ignoredReason is string
+          && data.ignoredReason.size() > 0
+        );
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if true;
@@ -179,11 +192,13 @@ service cloud.firestore {
         'dueDate', 'status', 'cycleKey'
       ])
         && request.resource.data.taskType in ['house', 'van']
-        && request.resource.data.status in ['pending', 'overdue', 'completed']
+        && validEocTaskStatus(request.resource.data.status)
+        && validIgnoredTaskPayload(request.resource.data)
         && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
-      allow update: if request.resource.data.status in ['pending', 'overdue', 'completed']
+      allow update: if validEocTaskStatus(request.resource.data.status)
+        && validIgnoredTaskPayload(request.resource.data)
         && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();

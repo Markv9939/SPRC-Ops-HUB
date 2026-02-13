@@ -17,7 +17,7 @@ function buildTaskDocId({ locationId, shiftId, taskType, dueDate, vanId }) {
 }
 
 function getDesiredStatus(dueDate, currentStatus, todayStr) {
-  if (currentStatus === 'completed') return 'completed'
+  if (currentStatus === 'completed' || currentStatus === 'ignored') return currentStatus
   return dueDate < todayStr ? 'overdue' : 'pending'
 }
 
