@@ -24,7 +24,18 @@ const TAB_LABELS = {
 }
 const TAB_KEYS = Object.keys(TAB_LABELS)
 const TRANSPORT_SITES = new Set(['PHP', 'RTC'])
-const COMPLIANCE_SITES = new Set(['RTC', 'OTC'])
+const COMPLIANCE_SITES = new Set(['PHP', 'RTC', 'OTC'])
+const COMPLIANCE_CATEGORY_LABELS = {
+  fpcc: 'FPCC',
+  tb_test: 'TB Test',
+  cpr_first_aid: 'CPR & First Aid',
+  food_handlers: 'Food Handlers',
+  drivers_license: "Driver's License",
+  annual_orientation: 'Annual Orientation',
+  performance_evaluation: 'Performance Evaluation',
+  education: 'Education Verification',
+  resume: 'Resume'
+}
 
 function locationScopeAlias(locationId) {
   const normalized = String(locationId || '').trim().toUpperCase()
@@ -32,6 +43,43 @@ function locationScopeAlias(locationId) {
   if (normalized === 'MESQUITE' || normalized === 'RES') return 'PHP'
   if (normalized === 'LONE_MOUNTAIN') return 'RTC'
   return normalized
+}
+
+function normalizeComplianceSite(siteId) {
+  return locationScopeAlias(siteId)
+}
+
+function formatComplianceCategory(category) {
+  const normalized = String(category || '').trim().toLowerCase()
+  if (!normalized) return 'Compliance item'
+  if (COMPLIANCE_CATEGORY_LABELS[normalized]) {
+    return COMPLIANCE_CATEGORY_LABELS[normalized]
+  }
+  return normalized
+    .split('_')
+    .filter(Boolean)
+    .map(token => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ')
+}
+
+function formatComplianceSiteLabel(siteId) {
+  const normalized = normalizeComplianceSite(siteId)
+  if (!normalized) return 'Unknown Site'
+  if (normalized === 'PHP') return 'PHP (RES / Mesquite)'
+  if (normalized === 'RTC') return 'RTC (Lone Mountain)'
+  return normalized
+}
+
+function getComplianceItemSite(item) {
+  return normalizeComplianceSite(item?.employeeSite || item?.site || item?.locationId)
+}
+
+function getComplianceItemDueMs(item) {
+  const dueValue = item?.dueDate
+  if (!dueValue) return Number.POSITIVE_INFINITY
+  const dueDate = dueValue.toDate ? dueValue.toDate() : new Date(dueValue)
+  const ms = dueDate.getTime()
+  return Number.isFinite(ms) ? ms : Number.POSITIVE_INFINITY
 }
 
 function SupervisorDashboard({ user, isOffline = false }) {
@@ -124,7 +172,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
     [isAdmin, normalizedScopes]
   )
   const allowedComplianceSites = useMemo(
-    () => (isAdmin ? [] : normalizedScopes.filter(v => COMPLIANCE_SITES.has(v))),
+    () => (isAdmin
+      ? []
+      : [...new Set(
+          normalizedScopes
+            .map(scope => normalizeComplianceSite(scope))
+            .filter(scope => COMPLIANCE_SITES.has(scope))
+        )]),
     [isAdmin, normalizedScopes]
   )
   const inTransportScope = useCallback(
@@ -132,7 +186,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
     [allowedTransportSites, isAdmin]
   )
   const inComplianceScope = useCallback(
-    (site) => isAdmin || allowedComplianceSites.includes(String(site || '').trim().toUpperCase()),
+    (site) => isAdmin || allowedComplianceSites.includes(normalizeComplianceSite(site)),
     [allowedComplianceSites, isAdmin]
   )
   const inEocScope = useCallback(
@@ -1535,23 +1589,23 @@ function SupervisorDashboard({ user, isOffline = false }) {
     }
   }, [dashTransports])
 
+  const scopedComplianceItems = useMemo(
+    () => complianceItems.filter(item => inComplianceScope(getComplianceItemSite(item))),
+    [complianceItems, inComplianceScope]
+  )
+
   const complianceSummary = useMemo(() => {
     const summary = { overdue: 0, upcoming: 0, current: 0, none: 0, total: 0 }
-    const scoped = complianceItems.filter(item => {
-      if (isAdmin) return true
-      if (!item.employeeSite) return false
-      return inComplianceScope(item.employeeSite)
-    })
-    scoped.forEach(item => {
+    scopedComplianceItems.forEach(item => {
       const status = getStatus(item.dueDate)
       if (status === 'overdue') summary.overdue += 1
       else if (status === 'upcoming') summary.upcoming += 1
       else if (status === 'current') summary.current += 1
       else summary.none += 1
     })
-    summary.total = scoped.length
+    summary.total = scopedComplianceItems.length
     return summary
-  }, [complianceItems, inComplianceScope, isAdmin])
+  }, [scopedComplianceItems])
 
   const isOverdue = (transport) => {
     if (transport.status === 'closed' || transport.status === 'returned') {
@@ -1598,20 +1652,97 @@ function SupervisorDashboard({ user, isOffline = false }) {
     })
   }
 
-  const locationMatchesQueueFilter = (locationId) => {
+  const locationMatchesQueueFilter = useCallback((locationId) => {
     if (queueLocationFilter === 'all') return true
-    return locationId === queueLocationFilter
-  }
+    const normalizedFilter = String(queueLocationFilter || '').trim().toUpperCase()
+    if (!normalizedFilter) return true
 
-  const filteredIssueQueue = eocIssues.filter(issue => locationMatchesQueueFilter(issue.locationId))
-  const filteredOverdueTaskQueue = eocOverdueTasks.filter(task => locationMatchesQueueFilter(task.locationId))
-  const filteredAlertQueue = eocAlerts.filter(alert => locationMatchesQueueFilter(alert.locationId))
+    const normalizedLocation = String(locationId || '').trim().toUpperCase()
+    if (!normalizedLocation) return false
+    const aliasedLocation = locationScopeAlias(normalizedLocation)
+
+    return normalizedLocation === normalizedFilter || aliasedLocation === normalizedFilter
+  }, [queueLocationFilter])
+
+  const complianceMatchesQueueFilter = useCallback((item) => {
+    if (queueLocationFilter === 'all') return true
+    const normalizedFilter = String(queueLocationFilter || '').trim().toUpperCase()
+    if (!normalizedFilter) return true
+
+    const complianceSite = getComplianceItemSite(item)
+    if (!complianceSite) return false
+    if (complianceSite === normalizedFilter) return true
+
+    const mappedFilterSite = normalizeComplianceSite(queueLocationFilter)
+    return complianceSite === mappedFilterSite
+  }, [queueLocationFilter])
+
+  const filteredIssueQueue = useMemo(
+    () => eocIssues.filter(issue => locationMatchesQueueFilter(issue.locationId)),
+    [eocIssues, locationMatchesQueueFilter]
+  )
+  const filteredOverdueTaskQueue = useMemo(
+    () => eocOverdueTasks.filter(task => locationMatchesQueueFilter(task.locationId)),
+    [eocOverdueTasks, locationMatchesQueueFilter]
+  )
+  const filteredAlertQueue = useMemo(
+    () => eocAlerts.filter(alert => locationMatchesQueueFilter(alert.locationId)),
+    [eocAlerts, locationMatchesQueueFilter]
+  )
+  const filteredComplianceOverdueQueue = useMemo(() => (
+    scopedComplianceItems
+      .filter(item => getStatus(item.dueDate) === 'overdue')
+      .filter(item => complianceMatchesQueueFilter(item))
+      .sort((a, b) => getComplianceItemDueMs(a) - getComplianceItemDueMs(b))
+  ), [complianceMatchesQueueFilter, scopedComplianceItems])
+  const filteredComplianceUpcomingQueue = useMemo(() => (
+    scopedComplianceItems
+      .filter(item => getStatus(item.dueDate) === 'upcoming')
+      .filter(item => complianceMatchesQueueFilter(item))
+      .sort((a, b) => getComplianceItemDueMs(a) - getComplianceItemDueMs(b))
+  ), [complianceMatchesQueueFilter, scopedComplianceItems])
 
   const queueCounts = {
     issues: filteredIssueQueue.length,
-    overdue: filteredOverdueTaskQueue.length,
+    overdue: filteredOverdueTaskQueue.length + filteredComplianceOverdueQueue.length,
+    upcomingCompliance: filteredComplianceUpcomingQueue.length,
     alerts: filteredAlertQueue.length
   }
+
+  const hasQueueData = (
+    eocIssues.length > 0 ||
+    eocOverdueTasks.length > 0 ||
+    eocAlerts.length > 0 ||
+    complianceSummary.overdue > 0 ||
+    complianceSummary.upcoming > 0
+  )
+
+  const queueLocationOptions = useMemo(() => {
+    const options = LOCATIONS.map(loc => ({ value: loc.id, label: loc.label }))
+    const seenValues = new Set(options.map(option => String(option.value || '').trim().toUpperCase()))
+    const discoveredSites = new Set()
+
+    const addMappedSite = (locationId) => {
+      const mapped = locationScopeAlias(locationId)
+      if (mapped) discoveredSites.add(mapped)
+    }
+
+    eocIssues.forEach(issue => addMappedSite(issue.locationId))
+    eocOverdueTasks.forEach(task => addMappedSite(task.locationId))
+    eocAlerts.forEach(alertItem => addMappedSite(alertItem.locationId))
+    scopedComplianceItems.forEach(item => {
+      const site = getComplianceItemSite(item)
+      if (site) discoveredSites.add(site)
+    })
+
+    ;[...discoveredSites].sort().forEach(site => {
+      if (seenValues.has(site)) return
+      options.push({ value: site, label: `Site: ${site}` })
+      seenValues.add(site)
+    })
+
+    return options
+  }, [eocAlerts, eocIssues, eocOverdueTasks, scopedComplianceItems])
 
   const transportReasonOptions = useMemo(() => {
     const reasonSet = new Set()
@@ -2421,7 +2552,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
       {activeTab === 'dashboard' && (
         <div>
           {/* EOC Summary */}
-            {(eocIssues.length > 0 || eocOverdueTasks.length > 0 || eocAlerts.length > 0) && (
+            {hasQueueData && (
               <div style={{
                 backgroundColor: 'rgba(255,255,255,0.05)',
               borderRadius: '12px',
@@ -2430,7 +2561,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
               border: '1px solid rgba(229,57,53,0.2)',
               backdropFilter: 'blur(12px)'
             }}>
-              <h3 style={{ margin: '0 0 14px 0', fontSize: '16px', color: '#e8e8e8' }}>EOC Status</h3>
+              <h3 style={{ margin: '0 0 14px 0', fontSize: '16px', color: '#e8e8e8' }}>EOC + Compliance Status</h3>
 
               {/* Clickable KPI cards */}
               <div style={{ display: 'flex', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
@@ -2462,7 +2593,24 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   }}
                 >
                   <div style={{ fontSize: '12px', color: '#FF9800' }}>Overdue Tasks</div>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF9800' }}>{eocOverdueTasks.length}</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF9800' }}>
+                    {eocOverdueTasks.length + complianceSummary.overdue}
+                  </div>
+                </button>
+                <button
+                  onClick={() => setQueueView('compliance_upcoming')}
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: 'rgba(76,175,80,0.15)',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    border: queueView === 'compliance_upcoming' ? '2px solid #4CAF50' : '1px solid rgba(76,175,80,0.3)',
+                    cursor: 'pointer',
+                    color: 'inherit'
+                  }}
+                >
+                  <div style={{ fontSize: '12px', color: '#4CAF50' }}>Upcoming Compliance</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>{complianceSummary.upcoming}</div>
                 </button>
                 <button
                   onClick={() => setQueueView('alerts')}
@@ -2499,6 +2647,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   >
                     <option value="issues">Active Issues ({queueCounts.issues})</option>
                     <option value="overdue">Overdue Tasks ({queueCounts.overdue})</option>
+                    <option value="compliance_upcoming">Upcoming Compliance ({queueCounts.upcomingCompliance})</option>
                     <option value="alerts">Unread Alerts ({queueCounts.alerts})</option>
                   </select>
                 </div>
@@ -2512,8 +2661,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     style={selectStyle}
                   >
                     <option value="all">All Locations</option>
-                    {LOCATIONS.map(loc => (
-                      <option key={loc.id} value={loc.id}>{loc.label}</option>
+                    {queueLocationOptions.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
                 </div>
@@ -2600,8 +2749,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   </div>
                 ))}
 
-                {queueView === 'overdue' && filteredOverdueTaskQueue.length === 0 && (
-                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No overdue tasks for this filter.</div>
+                {queueView === 'overdue' && filteredOverdueTaskQueue.length === 0 && filteredComplianceOverdueQueue.length === 0 && (
+                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No overdue EOC or compliance tasks for this filter.</div>
                 )}
                 {queueView === 'overdue' && filteredOverdueTaskQueue.map(task => (
                   <div key={task.id} style={{
@@ -2802,6 +2951,105 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   </div>
                 ))}
 
+                {queueView === 'overdue' && filteredComplianceOverdueQueue.map(item => (
+                  <div key={`compliance-overdue-${item.id}`} style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(244,67,54,0.35)',
+                    backgroundColor: 'rgba(244,67,54,0.08)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '14px' }}>
+                        Compliance: {formatComplianceCategory(item.category)}
+                      </span>
+                      <span className="chip" style={{
+                        fontSize: '11px',
+                        color: '#f44336',
+                        border: '1px solid rgba(244,67,54,0.45)',
+                        backgroundColor: 'rgba(244,67,54,0.08)'
+                      }}>
+                        OVERDUE
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
+                      {item.employeeName || 'Unknown employee'}
+                      {' '} &bull; {formatComplianceSiteLabel(getComplianceItemSite(item))}
+                      {' '} &bull; Due {formatDate(item.dueDate)}
+                    </div>
+                    {item.notes && (
+                      <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                        Notes: {item.notes}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => setActiveTab('compliance')}
+                      style={{
+                        padding: '6px 14px',
+                        backgroundColor: 'rgba(244,67,54,0.16)',
+                        color: '#ffcdd2',
+                        border: '1px solid rgba(244,67,54,0.35)',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Open Compliance Tab
+                    </button>
+                  </div>
+                ))}
+
+                {queueView === 'compliance_upcoming' && filteredComplianceUpcomingQueue.length === 0 && (
+                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No upcoming compliance tasks for this filter.</div>
+                )}
+                {queueView === 'compliance_upcoming' && filteredComplianceUpcomingQueue.map(item => (
+                  <div key={`compliance-upcoming-${item.id}`} style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(76,175,80,0.35)',
+                    backgroundColor: 'rgba(76,175,80,0.08)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '14px' }}>
+                        Compliance: {formatComplianceCategory(item.category)}
+                      </span>
+                      <span className="chip" style={{
+                        fontSize: '11px',
+                        color: '#81C784',
+                        border: '1px solid rgba(76,175,80,0.45)',
+                        backgroundColor: 'rgba(76,175,80,0.08)'
+                      }}>
+                        DUE SOON
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
+                      {item.employeeName || 'Unknown employee'}
+                      {' '} &bull; {formatComplianceSiteLabel(getComplianceItemSite(item))}
+                      {' '} &bull; Due {formatDate(item.dueDate)}
+                    </div>
+                    {item.notes && (
+                      <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                        Notes: {item.notes}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => setActiveTab('compliance')}
+                      style={{
+                        padding: '6px 14px',
+                        backgroundColor: 'rgba(76,175,80,0.16)',
+                        color: '#c8e6c9',
+                        border: '1px solid rgba(76,175,80,0.35)',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Open Compliance Tab
+                    </button>
+                  </div>
+                ))}
+
                 {queueView === 'alerts' && filteredAlertQueue.length === 0 && (
                   <div style={{ color: '#8899aa', fontSize: '13px' }}>No unread alerts for this filter.</div>
                 )}
@@ -2841,64 +3089,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   </div>
                 ))}
               </div>
-              </div>
-            )}
-
-            {/* Compliance Summary */}
-            {complianceSummary.total > 0 && (
-              <div style={{
-                backgroundColor: 'rgba(255,255,255,0.05)',
-                borderRadius: '12px',
-                padding: '20px',
-                marginBottom: '20px',
-                border: '1px solid rgba(229,57,53,0.2)',
-                backdropFilter: 'blur(12px)'
-              }}>
-                <h3 style={{ margin: '0 0 14px 0', fontSize: '16px', color: '#e8e8e8' }}>Compliance Status</h3>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-                  <div style={{
-                    padding: '10px 20px',
-                    backgroundColor: 'rgba(244,67,54,0.15)',
-                    borderRadius: '8px',
-                    textAlign: 'center',
-                    border: '1px solid rgba(244,67,54,0.3)'
-                  }}>
-                    <div style={{ fontSize: '12px', color: '#f44336' }}>Overdue</div>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#f44336' }}>{complianceSummary.overdue}</div>
-                  </div>
-                  <div style={{
-                    padding: '10px 20px',
-                    backgroundColor: 'rgba(255,152,0,0.15)',
-                    borderRadius: '8px',
-                    textAlign: 'center',
-                    border: '1px solid rgba(255,152,0,0.3)'
-                  }}>
-                    <div style={{ fontSize: '12px', color: '#FF9800' }}>Due Soon</div>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF9800' }}>{complianceSummary.upcoming}</div>
-                  </div>
-                  <div style={{
-                    padding: '10px 20px',
-                    backgroundColor: 'rgba(76,175,80,0.15)',
-                    borderRadius: '8px',
-                    textAlign: 'center',
-                    border: '1px solid rgba(76,175,80,0.3)'
-                  }}>
-                    <div style={{ fontSize: '12px', color: '#4CAF50' }}>Current</div>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>{complianceSummary.current}</div>
-                  </div>
-                  {complianceSummary.none > 0 && (
-                    <div style={{
-                      padding: '10px 20px',
-                      backgroundColor: 'rgba(255,255,255,0.04)',
-                      borderRadius: '8px',
-                      textAlign: 'center',
-                      border: '1px solid rgba(255,255,255,0.1)'
-                    }}>
-                      <div style={{ fontSize: '12px', color: '#8899aa' }}>No Due Date</div>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#e8e8e8' }}>{complianceSummary.none}</div>
-                    </div>
-                  )}
-                </div>
               </div>
             )}
 
