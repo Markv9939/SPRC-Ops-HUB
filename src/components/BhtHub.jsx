@@ -107,7 +107,19 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
     return `${shift} - Due ${task.dueDate}`
   }
 
-  const openTransports = transports.filter(t => t.status !== 'closed')
+  const currentTransport = transports.find(t => {
+    const status = String(t?.status || '').trim().toLowerCase()
+    return status === 'open' || status === 'arrived'
+  }) || null
+  const hasCurrentTransport = !!currentTransport
+
+  const handlePrimaryTransportAction = () => {
+    if (hasCurrentTransport) {
+      onContinueTransport(currentTransport.id)
+      return
+    }
+    onNewTransport()
+  }
   const shiftConfig = hasAssignment ? SHIFTS.find(s => s.id === assignment.shiftId) : null
   const currentCycleDueDate = shiftConfig ? getCurrentCycleDueDate(shiftConfig) : null
   const currentCycleTasks = hasAssignment
@@ -170,13 +182,13 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
 
       {renderIssueUpdatesCard()}
 
-      {/* Transport button - always available */}
+      {/* Transport button */}
       <button
         className="btn btn-primary hub-action-btn"
-        onClick={onNewTransport}
+        onClick={handlePrimaryTransportAction}
         style={{ width: '100%', fontSize: '18px', marginBottom: '10px', borderRadius: 'var(--radius)' }}
       >
-        + New Transport
+        {hasCurrentTransport ? 'Continue Current Transport' : '+ New Transport'}
       </button>
 
       {/* Assignment-driven EOC tasks */}
@@ -335,12 +347,6 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
           <div className="section-label" style={{ marginBottom: '6px' }}>Due EOCs</div>
           <span style={{ fontSize: '22px', fontWeight: 700, color: actionableTasks.length > 0 ? '#FF9800' : '#556677' }}>
             {actionableTasks.length}
-          </span>
-        </div>
-        <div className="glass-card" style={{ padding: '14px' }}>
-          <div className="section-label" style={{ marginBottom: '6px' }}>Active Transports</div>
-          <span style={{ fontSize: '22px', fontWeight: 700, color: openTransports.length > 0 ? '#E53935' : '#556677' }}>
-            {openTransports.length}
           </span>
         </div>
       </div>
