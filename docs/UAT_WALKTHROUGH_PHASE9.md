@@ -22,7 +22,7 @@ Goal: Execute a single guided walkthrough and capture signoff evidence for Phase
    - 1 overdue EOC task from prior day
 5. Start app:
    - `npm run dev`
-6. Validate claims provisioning before strict-mode tests:
+6. Validate claims provisioning:
    - `npm run claims:verify`
 
 ## Environment Note (2026-02-12)
@@ -60,10 +60,10 @@ For each test case below, capture:
 5. RS-5 Custom-claim provisioning verification
    - Run `npm run claims:verify`.
    - Expected: all active rollout users pass with no claim mismatches.
-6. RS-6 Strict auth mode toggle
-   - As Admin, switch `Auth Scope Enforcement` to strict mode from Users tab.
+6. RS-6 Strict auth enforcement validation
    - Attempt login with a session lacking custom claims.
-   - Expected: login blocked with strict-mode message until claim-enabled account is used.
+   - Attempt login with a matching claim-enabled account for the same PIN user.
+   - Expected: missing-claim login is blocked and claim-enabled login succeeds.
 
 ### B. Assignment + EOC Generation
 

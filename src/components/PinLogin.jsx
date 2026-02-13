@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react'
 import { db, auth } from '../firebase'
 import { collection, query, where, getDocs } from 'firebase/firestore'
-import { signInAnonymously, signOut } from 'firebase/auth'
+import { signInAnonymously } from 'firebase/auth'
 import { hashPin } from '../utils/pinHash'
 import { getScopedSessionUser } from '../services/accessGrantService'
-import { getAuthPolicy } from '../services/authPolicyService'
 import { isOfflineMode } from '../utils/networkGuard'
 import {
   GLOBAL_SCOPE,
@@ -103,7 +102,7 @@ function PinLogin({ onLogin }) {
         authClaimLocations
       }
     } catch (authError) {
-      console.warn('Anonymous auth bootstrap failed; continuing in legacy PIN mode:', authError)
+      console.warn('Anonymous auth bootstrap failed:', authError)
       return {
         authUid: null,
         authClaimsReady: false,
@@ -111,17 +110,6 @@ function PinLogin({ onLogin }) {
         authClaimLocations: []
       }
     }
-  }
-
-  const resetToAnonymousAuthSession = async () => {
-    try {
-      if (auth.currentUser) {
-        await signOut(auth)
-      }
-    } catch (signOutError) {
-      console.warn('Auth signOut before anonymous reset failed:', signOutError)
-    }
-    return ensureAuthSession({ forceAnonymous: true })
   }
 
   const handleSubmit = async () => {
@@ -174,20 +162,16 @@ function PinLogin({ onLogin }) {
         localStorage.removeItem('lockoutUntil')
         setFailedAttempts(0)
 
-        const authPolicy = await getAuthPolicy()
-        let authSession = await ensureAuthSession()
+        const authSession = await ensureAuthSession()
 
         // Prevent stale claim sessions (from prior logins) from constraining this PIN identity.
         if (!claimsMatchPinUser(authSession, userData)) {
-          if (authPolicy.authScopeEnforced) {
-            setError('Access blocked: auth claims do not match this PIN account. Use the matching claim-enabled account.')
-            setPin('')
-            return
-          }
-          authSession = await resetToAnonymousAuthSession()
+          setError('Access blocked: auth claims do not match this PIN account. Use the matching claim-enabled account.')
+          setPin('')
+          return
         }
 
-        if (authPolicy.authScopeEnforced && !authSession.authClaimsReady) {
+        if (!authSession.authClaimsReady) {
           setError('Access blocked: auth claims are required for this environment. Contact admin.')
           setPin('')
           return
@@ -218,14 +202,14 @@ function PinLogin({ onLogin }) {
             primaryScopes: normalizeScopeValues(baseScopes),
             activeBackupGrants: [],
             scopeRefreshedAt: new Date().toISOString(),
-            authScopeEnforced: authPolicy.authScopeEnforced,
+            authScopeEnforced: true,
             ...authSession
           }
         }
 
         onLogin({
           ...scopedSessionUser,
-          authScopeEnforced: authPolicy.authScopeEnforced,
+          authScopeEnforced: true,
           ...authSession
         })
       }

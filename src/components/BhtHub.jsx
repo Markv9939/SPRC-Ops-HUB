@@ -191,27 +191,14 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
       {/* Assignment-driven EOC tasks */}
       {hasAssignment && (
         <div className="glass-card" style={{ marginBottom: '20px', padding: '16px' }}>
-          <div className="section-label" style={{ marginBottom: '10px' }}>Due EOCs</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+          <div className="section-label" style={{ marginBottom: '8px' }}>Due EOCs</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
             <button className="chip chip-unselected" disabled>Not Due ({notDueCount})</button>
             <button className="chip chip-unselected" disabled>Due ({dueCount})</button>
             <button className="chip chip-attention" disabled>Overdue ({overdueCount})</button>
             <button className="chip chip-ok" disabled>Completed ({completedCount})</button>
           </div>
-          <div style={{ marginBottom: '10px' }}>
-            <button
-              className="btn btn-eoc"
-              onClick={() => actionableTasks.length > 0 && onStartEoc(actionableTasks[0].id)}
-              disabled={actionableTasks.length === 0}
-              style={{ width: '100%', fontSize: '14px', borderRadius: '8px', opacity: actionableTasks.length > 0 ? 1 : 0.7 }}
-            >
-              Mark All OK
-            </button>
-            <div style={{ marginTop: '6px', fontSize: '11px', color: '#8899aa' }}>
-              Opens the next due checklist with one-tap "Mark All OK" support.
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: actionableTasks.length > 0 ? '12px' : '0' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: actionableTasks.length > 0 ? '8px' : '0' }}>
             {houseTask && (
               <button
                 className="btn btn-eoc hub-action-btn"
@@ -287,7 +274,7 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
               No pending or overdue EOC tasks.
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {Object.entries(actionableByLocation).map(([locationId, locationTasks]) => (
                 <div key={locationId}>
                   <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '6px' }}>

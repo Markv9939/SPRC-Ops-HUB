@@ -13,7 +13,6 @@ import ToastHost from './components/ToastHost'
 import DialogHost from './components/DialogHost'
 import { syncEocTasksForUserScope } from './services/eocTaskEngine'
 import { refreshScopedSessionUser } from './services/accessGrantService'
-import { getAuthPolicy } from './services/authPolicyService'
 import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
 import { installAlertDialogBridge, showPromptDialog } from './utils/dialogs'
@@ -227,7 +226,6 @@ function App() {
     const refreshSessionScope = async () => {
       try {
         const refreshedUser = await refreshScopedSessionUser(user.id)
-        const authPolicy = await getAuthPolicy()
         if (cancelled) return
 
         if (!refreshedUser) {
@@ -250,10 +248,10 @@ function App() {
             authClaimsReady: prev.authClaimsReady || false,
             authClaimRole: prev.authClaimRole || null,
             authClaimLocations: Array.isArray(prev.authClaimLocations) ? prev.authClaimLocations : [],
-            authScopeEnforced: authPolicy.authScopeEnforced
+            authScopeEnforced: true
           }
 
-          if (mergedUser.authScopeEnforced && !mergedUser.authClaimsReady) {
+          if (!mergedUser.authClaimsReady) {
             alert('Access policy changed: auth claims are now required. Please re-login with a claim-enabled account.')
             sessionStorage.removeItem('bhtUser')
             localStorage.removeItem('lastActivity')

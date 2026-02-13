@@ -4,12 +4,10 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ============================================================================
-    // CLAIM-SCOPE STAGED AUTH MODEL (FREE-TIER V1)
+    // CLAIM-SCOPE STRICT AUTH MODEL (FREE-TIER V1)
     // ============================================================================
-    // Current login remains PIN-based, with optional Firebase Auth session bootstrap.
-    // In hybrid mode, auth claim checks are enforced when scope claims are present
-    // (`role`, `locations`) on the Firebase Auth token.
-    // Strict mode is controlled by appSettings/security.authScopeEnforced.
+    // Current login remains PIN-based with Firebase Auth session bootstrap.
+    // Role/location claims (`role`, `locations`) are required for scoped access.
     // PIN storage is hash-only (`pinHash`) and plaintext PIN fallback is retired.
     // ============================================================================
 
@@ -119,11 +117,6 @@ service cloud.firestore {
         && userLocationValue(data) == 'GLOBAL';
     }
 
-    function authScopeEnforced() {
-      return exists(/databases/$(database)/documents/appSettings/security)
-        && get(/databases/$(database)/documents/appSettings/security).data.authScopeEnforced == true;
-    }
-
     function hasAuthScopeClaims() {
       return request.auth != null
         && request.auth.token.role is string
@@ -139,9 +132,7 @@ service cloud.firestore {
     }
 
     function authRoleAllowed(roles) {
-      return authScopeEnforced()
-        ? (hasAuthScopeClaims() && authRole() in roles)
-        : (!hasAuthScopeClaims() || authRole() in roles);
+      return hasAuthScopeClaims() && authRole() in roles;
     }
 
     // Map house location IDs to supervisor site scopes used in auth claims.
@@ -169,19 +160,13 @@ service cloud.firestore {
         (normalizedLocation == 'OTC' && ('PHP' in authLocations() || 'RTC' in authLocations()))
         || (normalizedLocation == 'RES' && ('PHP' in authLocations()))
       );
-      return authScopeEnforced()
-        ? (hasAuthScopeClaims()
-            && (
-              authRole() == 'admin'
-              || locationId in authLocations()
-              || normalizedLocation in authLocations()
-              || legacyLocationAllowed
-            ))
-        : (!hasAuthScopeClaims()
-            || authRole() == 'admin'
-            || locationId in authLocations()
-            || normalizedLocation in authLocations()
-            || legacyLocationAllowed);
+      return hasAuthScopeClaims()
+        && (
+          authRole() == 'admin'
+          || locationId in authLocations()
+          || normalizedLocation in authLocations()
+          || legacyLocationAllowed
+        );
     }
 
     function authRoleAndLocationAllowed(roles, locationId) {

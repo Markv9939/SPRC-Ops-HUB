@@ -33,7 +33,6 @@ function parseArgs(argv) {
 
   return {
     dryRun: flags.has('--dry-run'),
-    enforce: flags.has('--enforce'),
     selectedUserId: selectedUserId || null
   }
 }
@@ -119,7 +118,7 @@ async function resolveOrCreateAuthUser(auth, identity, profile, dryRun) {
   return { userRecord: created, created: true }
 }
 
-async function provisionClaims({ dryRun, enforce, selectedUserId }) {
+async function provisionClaims({ dryRun, selectedUserId }) {
   initAdmin()
 
   const db = admin.firestore()
@@ -204,18 +203,6 @@ async function provisionClaims({ dryRun, enforce, selectedUserId }) {
     console.log(`- ${userId}: uid=${userRecord.uid} role=${role} locations=[${locations.join(', ')}]${created ? ' (auth user created)' : ''}`)
   }
 
-  if (!dryRun && enforce) {
-    await db.collection('appSettings').doc('security').set({
-      authScopeEnforced: true,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedByName: 'claims-provision-script',
-      updateReason: 'Custom claims provisioned and strict auth enabled via script.'
-    }, { merge: true })
-    console.log('Enabled strict auth scope enforcement at appSettings/security.')
-  } else if (dryRun && enforce) {
-    console.log('Would enable strict auth scope enforcement at appSettings/security (--enforce).')
-  }
-
   console.log('')
   console.log('Provision summary')
   console.log(`- Processed users: ${total}`)
@@ -229,7 +216,6 @@ function printUsage() {
   console.log('  npm run claims:provision')
   console.log('  npm run claims:provision -- --dry-run')
   console.log('  npm run claims:provision -- --user <userId>')
-  console.log('  npm run claims:provision -- --enforce')
 }
 
 const options = parseArgs(process.argv.slice(2))

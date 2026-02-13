@@ -9,7 +9,6 @@ import AccessGrantPanel from './AccessGrantPanel'
 import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 import { hashPin } from '../utils/pinHash'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
-import { getAuthPolicy, setAuthScopeEnforced } from '../services/authPolicyService'
 import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../services/assignmentService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
@@ -163,8 +162,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
     vanId: '',
     active: true
   })
-  const [authScopeEnforced, setAuthScopeEnforcedState] = useState(false)
-  const [authPolicyLoading, setAuthPolicyLoading] = useState(false)
 
   const isAdmin = isAdminRole(user?.role)
   const availableTabKeys = isAdmin ? TAB_KEYS : TAB_KEYS.filter(k => k !== 'audit')
@@ -529,20 +526,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
     )))
   }, [isAdmin, managedMainLocations])
 
-  const loadAuthPolicyState = useCallback(async () => {
-    if (!isAdmin) return
-    setAuthPolicyLoading(true)
-    try {
-      const policy = await getAuthPolicy()
-      setAuthScopeEnforcedState(policy.authScopeEnforced === true)
-    } catch (error) {
-      console.error('Failed to load auth policy:', error)
-      setAuthScopeEnforcedState(false)
-    } finally {
-      setAuthPolicyLoading(false)
-    }
-  }, [isAdmin])
-
   useEffect(() => {
     // Set default to current month
     const now = new Date()
@@ -554,8 +537,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
     // Load users
     loadUsers()
-    loadAuthPolicyState()
-  }, [loadAuthPolicyState, loadUsers])
+  }, [loadUsers])
 
   useEffect(() => {
     if (!isAdmin) {
@@ -945,56 +927,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
     } catch (error) {
       console.error('Error hard deleting user:', error)
       alert('Error hard deleting user: ' + error.message)
-    }
-  }
-
-  const handleSetAuthScopeEnforced = async (enabled) => {
-    if (blockIfOffline('updating auth scope policy')) return
-    if (!isAdmin) {
-      alert('Only admin can change auth scope policy.')
-      return
-    }
-
-    if (enabled === true && !(user?.authClaimsReady && user?.authClaimRole === 'admin')) {
-      alert('Cannot enable strict auth mode from this session. Log in with admin custom claims first.')
-      return
-    }
-
-    if (authScopeEnforced === enabled) return
-    const reason = await showPromptDialog(
-      `Enter reason for ${enabled ? 'enabling' : 'disabling'} strict auth scope enforcement:`,
-      {
-        title: enabled ? 'Enable Strict Auth Scope' : 'Disable Strict Auth Scope',
-        tone: 'warning',
-        confirmText: 'Apply',
-        cancelText: 'Cancel',
-        placeholder: 'Reason required'
-      }
-    )
-    if (reason === null) return
-    if (!reason.trim()) {
-      alert('Reason is required.')
-      return
-    }
-
-    try {
-      await setAuthScopeEnforced({
-        enabled,
-        actorUserId: user?.id || null,
-        actorName: user?.name || null,
-        reason
-      })
-      await writeAuditLog({
-        action: enabled ? 'auth_scope_enforcement_enable' : 'auth_scope_enforcement_disable',
-        collectionPath: 'appSettings',
-        documentId: 'security',
-        reason: reason.trim()
-      })
-      setAuthScopeEnforcedState(enabled)
-      notifySuccess(`Strict auth mode ${enabled ? 'enabled' : 'disabled'}`)
-    } catch (error) {
-      console.error('Failed to update auth scope policy:', error)
-      alert('Failed to update auth scope policy.')
     }
   }
 
@@ -1980,57 +1912,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
             border: '1px solid rgba(229,57,53,0.2)',
             backdropFilter: 'blur(12px)'
           }}>
-            {isAdmin && (
-              <div style={{
-                marginBottom: '14px',
-                padding: '12px',
-                borderRadius: '8px',
-                border: '1px solid rgba(255,255,255,0.08)',
-                backgroundColor: 'rgba(255,255,255,0.03)'
-              }}>
-                <div style={{ fontSize: '13px', color: '#e8e8e8', fontWeight: 'bold', marginBottom: '6px' }}>
-                  Auth Scope Enforcement
-                </div>
-                <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
-                  Status: {authPolicyLoading ? 'loading...' : (authScopeEnforced ? 'ENFORCED (claims required)' : 'HYBRID (claims optional)')}
-                </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <button
-                    onClick={() => handleSetAuthScopeEnforced(true)}
-                    disabled={isOffline || authPolicyLoading || authScopeEnforced}
-                    style={{
-                      padding: '8px 14px',
-                      backgroundColor: (isOffline || authPolicyLoading || authScopeEnforced) ? 'rgba(255,255,255,0.08)' : '#E53935',
-                      color: (isOffline || authPolicyLoading || authScopeEnforced) ? '#8899aa' : 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      cursor: (isOffline || authPolicyLoading || authScopeEnforced) ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    Enable Strict Mode
-                  </button>
-                  <button
-                    onClick={() => handleSetAuthScopeEnforced(false)}
-                    disabled={isOffline || authPolicyLoading || !authScopeEnforced}
-                    style={{
-                      padding: '8px 14px',
-                      backgroundColor: (isOffline || authPolicyLoading || !authScopeEnforced) ? 'rgba(255,255,255,0.08)' : '#4CAF50',
-                      color: (isOffline || authPolicyLoading || !authScopeEnforced) ? '#8899aa' : 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      cursor: (isOffline || authPolicyLoading || !authScopeEnforced) ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    Disable Strict Mode
-                  </button>
-                </div>
-              </div>
-            )}
-
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ margin: 0, fontSize: '16px', color: '#e8e8e8' }}>Users ({users.length})</h3>
               <button

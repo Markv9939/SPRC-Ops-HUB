@@ -18,8 +18,8 @@ Execute a clean cutover into the current assignment/task model without Cloud Fun
    - Verify claims alignment: `npm run claims:verify`
    - Optional dry run: `npm run claims:provision -- --dry-run`
 4. Admin confirms destructive reset window.
-5. Optional strict-mode cutover gate:
-   - In Users tab, set `Auth Scope Enforcement` to strict mode only after claims provisioning and verification pass.
+5. Strict auth baseline validation:
+   - Confirm `npm run claims:verify` passes before cutover login testing.
 
 ## Cutover Steps
 
