@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 import useEocAssignments from '../hooks/useEocAssignments'
 import useEocTasks from '../hooks/useEocTasks'
 import { getCurrentCycleDueDate } from '../utils/eocSchedule'
 
-function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStartEoc }) {
+function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinueTransport, onStartEoc }) {
   const { assignment, loading: assignmentLoading } = useEocAssignments(user)
   const { tasks, loading: tasksLoading } = useEocTasks(user)
   const [selectedVanTaskId, setSelectedVanTaskId] = useState('')
@@ -21,7 +21,10 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
     : []
   const houseTask = actionableTasks.find(t => t.taskType === 'house') || null
   const vanTasks = actionableTasks.filter(t => t.taskType === 'van')
-  const selectedVanTask = vanTasks.find(t => t.id === selectedVanTaskId) || null
+  const effectiveSelectedVanTaskId = vanTasks.some(t => t.id === selectedVanTaskId)
+    ? selectedVanTaskId
+    : (vanTasks[0]?.id || '')
+  const selectedVanTask = vanTasks.find(t => t.id === effectiveSelectedVanTaskId) || null
 
   const actionableByLocation = actionableTasks.reduce((acc, task) => {
     const key = task.locationId || 'unknown'
@@ -35,6 +38,43 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   }
+
+  const formatDateTime = (timestamp) => {
+    if (!timestamp) return 'Unknown time'
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
+    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  }
+
+  const renderIssueUpdatesCard = () => issueUpdates.length > 0 && (
+    <div className="glass-card" style={{ marginBottom: '16px', padding: '14px 16px' }}>
+      <div style={{ fontSize: '14px', fontWeight: 700, color: '#e8e8e8', marginBottom: '10px' }}>
+        Issue Updates
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {issueUpdates.map(update => (
+          <div key={update.id} style={{
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '8px',
+            padding: '10px',
+            backgroundColor: 'rgba(255,255,255,0.03)'
+          }}>
+            <div style={{ fontSize: '12px', color: '#cfd8dc', marginBottom: '4px', textTransform: 'uppercase' }}>
+              {update.status === 'resolved' ? 'Resolved' : 'In Progress'}
+            </div>
+            <div style={{ fontSize: '13px', color: '#e8e8e8', marginBottom: '4px' }}>
+              {update.message || 'Issue status updated.'}
+            </div>
+            <div style={{ fontSize: '12px', color: '#8899aa' }}>
+              Note: {update.statusNote || 'No note provided.'}
+            </div>
+            <div style={{ fontSize: '11px', color: '#556677', marginTop: '4px' }}>
+              {formatDateTime(update.createdAt)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 
   const getClientDisplay = (t) => {
     if (!t.clients || t.clients.length === 0) return 'No client entered'
@@ -84,22 +124,6 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
     : 0
   const notDueCount = Math.max(0, expectedTaskCount - (dueCount + overdueCount + completedCount))
 
-  useEffect(() => {
-    if (!hasAssignment) {
-      if (selectedVanTaskId) setSelectedVanTaskId('')
-      return
-    }
-
-    if (vanTasks.length === 0) {
-      if (selectedVanTaskId) setSelectedVanTaskId('')
-      return
-    }
-
-    if (!vanTasks.some(t => t.id === selectedVanTaskId)) {
-      setSelectedVanTaskId(vanTasks[0].id)
-    }
-  }, [hasAssignment, selectedVanTaskId, vanTasks, tasks])
-
   if (assignmentLoading || tasksLoading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: '#556677' }}>
@@ -108,29 +132,11 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
     )
   }
 
-  return (
-    <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
+  if (!hasAssignment) {
+    return (
+      <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
+        {renderIssueUpdatesCard()}
 
-      {/* Context bar */}
-      <div className="glass-card" style={{ marginBottom: '16px', padding: '14px 18px' }}>
-        <div style={{ fontSize: '15px', fontWeight: 700, color: '#e8e8e8', marginBottom: '4px' }}>
-          {user.name}
-        </div>
-        {hasAssignment ? (
-          <div style={{ fontSize: '13px', color: '#8899aa' }}>
-            {locationLabel} - {shiftLabel}
-            {vanLabels.length > 0 ? ` - ${vanLabels.join(', ')}` : ''}
-            {assignment.isHousePrimary && <span style={{ color: '#4CAF50', marginLeft: '8px' }}>House Primary</span>}
-          </div>
-        ) : (
-          <div style={{ fontSize: '13px', color: '#FF9800' }}>
-            No active assignment - contact a supervisor
-          </div>
-        )}
-      </div>
-
-      {/* No Assignment Blocked Screen */}
-      {!hasAssignment && (
         <div className="glass-card no-assignment-card" style={{
           textAlign: 'center',
           padding: '40px 20px',
@@ -143,7 +149,26 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
             You don't have an active assignment. Contact your supervisor to get assigned to a location, shift, and van(s).
           </p>
         </div>
-      )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
+
+      {/* Context bar */}
+      <div className="glass-card" style={{ marginBottom: '16px', padding: '14px 18px' }}>
+        <div style={{ fontSize: '15px', fontWeight: 700, color: '#e8e8e8', marginBottom: '4px' }}>
+          {user.name}
+        </div>
+        <div style={{ fontSize: '13px', color: '#8899aa' }}>
+          {locationLabel} - {shiftLabel}
+          {vanLabels.length > 0 ? ` - ${vanLabels.join(', ')}` : ''}
+          {assignment.isHousePrimary && <span style={{ color: '#4CAF50', marginLeft: '8px' }}>House Primary</span>}
+        </div>
+      </div>
+
+      {renderIssueUpdatesCard()}
 
       {/* Transport button - always available */}
       <button
@@ -208,7 +233,7 @@ function BhtHub({ user, transports, onNewTransport, onContinueTransport, onStart
                 padding: '10px'
               }}>
                 <select
-                  value={selectedVanTaskId}
+                  value={effectiveSelectedVanTaskId}
                   onChange={(e) => setSelectedVanTaskId(e.target.value)}
                   style={{
                     width: '100%',

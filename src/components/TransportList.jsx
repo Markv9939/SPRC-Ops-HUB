@@ -1,4 +1,15 @@
+import { useEffect, useState } from 'react'
+
 function TransportList({ transports, onNewTransport, onContinueTransport }) {
+  const [nowMs, setNowMs] = useState(() => Date.now())
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setNowMs(Date.now())
+    }, 60000)
+    return () => clearInterval(intervalId)
+  }, [])
+
   const formatTime = (timestamp) => {
     if (!timestamp) return '--:--'
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
@@ -25,7 +36,7 @@ function TransportList({ transports, onNewTransport, onContinueTransport }) {
     if (t.status === 'closed' || t.status === 'returned') return false
     if (!t.departedAt) return false
     const dep = t.departedAt.toDate ? t.departedAt.toDate() : new Date(t.departedAt)
-    return (Date.now() - dep.getTime()) / (1000 * 60 * 60) > 8
+    return (nowMs - dep.getTime()) / (1000 * 60 * 60) > 8
   }
 
   const badgeClass = (status) => {

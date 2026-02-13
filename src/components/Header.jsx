@@ -1,4 +1,4 @@
-function Header({ userName, onLogout, alertCount = 0 }) {
+function Header({ userName, onLogout, alertCount = 0, isOffline = false }) {
   return (
     <div className="header">
       <div className="header-brand">
@@ -9,6 +9,18 @@ function Header({ userName, onLogout, alertCount = 0 }) {
       <div className="header-right">
         {alertCount > 0 && (
           <span className="alert-dot">{alertCount}</span>
+        )}
+        {isOffline && (
+          <span style={{
+            fontSize: '11px',
+            color: '#FF9800',
+            border: '1px solid rgba(255,152,0,0.4)',
+            borderRadius: '999px',
+            padding: '2px 8px',
+            backgroundColor: 'rgba(255,152,0,0.14)'
+          }}>
+            Offline: read-only
+          </span>
         )}
         <span className="header-user">{userName}</span>
         <button className="btn-lock" onClick={onLogout}>

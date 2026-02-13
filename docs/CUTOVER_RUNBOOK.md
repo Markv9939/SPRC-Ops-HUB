@@ -1,6 +1,6 @@
 # SPRC Cutover Runbook (Free-Tier v1)
 
-Last updated: 2026-02-12
+Last updated: 2026-02-13
 Owner: Admin/Owner + Supervisor
 
 ## Goal
@@ -13,7 +13,13 @@ Execute a clean cutover into the current assignment/task model without Cloud Fun
    - `npm run smoke:phase9`
 2. Firestore rules are deployed:
    - `firebase deploy --only firestore:rules --project sprc-tx-l`
-3. Admin confirms destructive reset window.
+3. Firebase Auth custom-claims provisioning:
+   - Provision/update claims for active users: `npm run claims:provision`
+   - Verify claims alignment: `npm run claims:verify`
+   - Optional dry run: `npm run claims:provision -- --dry-run`
+4. Admin confirms destructive reset window.
+5. Optional strict-mode cutover gate:
+   - In Users tab, set `Auth Scope Enforcement` to strict mode only after claims provisioning and verification pass.
 
 ## Cutover Steps
 
@@ -25,9 +31,10 @@ Execute a clean cutover into the current assignment/task model without Cloud Fun
    - Tech `3333`, `4444`, `5555`, `6666`
 3. Confirm data baseline:
    - `users` seeded
-   - `bhtAssignments` seeded
+   - `shiftAssignments` seeded
+   - `accessGrants` seeded (active + upcoming lifecycle examples)
    - `eocTasks` seeded
-   - `eocIssues` + `supervisorAlerts` seeded
+   - `eocIssues` + `alerts` seeded
 4. Execute UAT walkthrough:
    - `docs/UAT_WALKTHROUGH_PHASE9.md`
 5. Record UAT evidence + signoff:
@@ -53,3 +60,4 @@ Execute a clean cutover into the current assignment/task model without Cloud Fun
 |---|---|---|---|---|
 | Admin/Owner |  |  | PENDING | |
 | Supervisor |  |  | PENDING | |
+

@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, setDoc, orderBy, limit } from 'firebase/firestore'
+import { doc, getDoc, updateDoc, serverTimestamp, setDoc, increment } from 'firebase/firestore'
 import DCPaperworkModal from './DCCheckModal'
 import ClientAutocomplete from './ClientAutocomplete'
 import DestinationAutocomplete from './DestinationAutocomplete'
+import { requireOnline } from '../utils/networkGuard'
+import { notifySuccess } from '../utils/toast'
 
-function TransportCard({ transportId, user, onReturn, onClose }) {
+function TransportCard({ transportId, onReturn, onClose, isOffline = false }) {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('open')
   const [departedAt, setDepartedAt] = useState(null)
@@ -19,6 +21,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
   const [dcPaperworkStatus, setDcPaperworkStatus] = useState(null)
   const [dcPaperworkOtherNote, setDcPaperworkOtherNote] = useState('')
   const submitLocked = status === 'returned' || status === 'closed'
+  const writeLocked = submitLocked || isOffline
 
   const reasonOptions = [
     'Medical X appointment',
@@ -64,13 +67,22 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
 
   const save = async (updates) => {
     if (!transportId) return
-    if (submitLocked) return
+    if (writeLocked) return
     try {
-      await updateDoc(doc(db, 'transports', transportId), { ...updates, notes, updatedAt: serverTimestamp() })
+      await updateDoc(doc(db, 'transports', transportId), {
+        ...updates,
+        notes,
+        version: increment(1),
+        updatedAt: serverTimestamp()
+      })
     } catch (err) { console.error('Save error:', err) }
   }
 
   const blockIfLocked = () => {
+    if (isOffline) {
+      requireOnline('editing transport records')
+      return true
+    }
     if (!submitLocked) return false
     alert('This transport has been submitted and is locked from further edits.')
     return true
@@ -172,7 +184,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
   }
 
   const handleDCPaperworkComplete = async (result) => {
-    if (submitLocked) return
+    if (writeLocked) return
     setShowDCPaperwork(false)
     setDcPaperworkStatus(result.status)
     setDcPaperworkOtherNote(result.otherNote || '')
@@ -183,6 +195,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
       dcPaperworkStatus: result.status,
       dcPaperworkOtherNote: result.otherNote || ''
     })
+    notifySuccess('Transport submitted for close')
     onReturn()
   }
 
@@ -219,12 +232,18 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
       <button
         className={`btn btn-arrive pulse`}
         onClick={handleArrive}
-        disabled={submitLocked}
+        disabled={writeLocked}
         style={{ width: '100%', fontSize: '18px', marginBottom: '6px', borderRadius: 'var(--radius)' }}
       >
         ARRIVE{stops.length > 0 ? ` (${stops.length} logged)` : ''}
       </button>
       <p style={{ textAlign: 'center', fontSize: '11px', color: '#556677', marginBottom: '16px' }}>Tap to log an arrival time</p>
+
+      {isOffline && (
+        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#FF9800', textAlign: 'center' }}>
+          Offline mode is active. Transport writes are disabled until connection is restored.
+        </div>
+      )}
 
       {submitLocked && (
         <div style={{ marginBottom: '16px', fontSize: '12px', color: '#FF9800', textAlign: 'center' }}>
@@ -274,19 +293,21 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
             </div>
             <button
               onClick={() => removeDest(i)}
-              disabled={submitLocked}
+              disabled={writeLocked}
               style={{ background: 'none', border: 'none', color: '#C94A3F', cursor: 'pointer', fontSize: '18px', padding: '0 4px', lineHeight: 1 }}
             >×</button>
           </div>
         ))}
 
-        {!submitLocked ? (
+        {!writeLocked ? (
           <DestinationAutocomplete
             onAddDestination={handleAddDestination}
             existingDestinations={destinations}
           />
         ) : (
-          <div style={{ fontSize: '12px', color: '#8899aa' }}>Destination editing is locked after submit.</div>
+          <div style={{ fontSize: '12px', color: '#8899aa' }}>
+            {isOffline ? 'Destination editing is disabled while offline.' : 'Destination editing is locked after submit.'}
+          </div>
         )}
       </div>
 
@@ -297,18 +318,20 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
           {clients.map((c, i) => (
             <div key={i} className="chip chip-client">
               <span>{c}</span>
-              <button onClick={() => removeClient(i)} disabled={submitLocked} style={{ background: 'none', border: 'none', color: '#2E7D32', cursor: 'pointer', fontSize: '16px', padding: 0, lineHeight: 1 }}>×</button>
+              <button onClick={() => removeClient(i)} disabled={writeLocked} style={{ background: 'none', border: 'none', color: '#2E7D32', cursor: 'pointer', fontSize: '16px', padding: 0, lineHeight: 1 }}>×</button>
             </div>
           ))}
         </div>
-        {!submitLocked ? (
+        {!writeLocked ? (
           <ClientAutocomplete
             onAddClient={handleAddClient}
             existingClients={clients}
             transportId={transportId}
           />
         ) : (
-          <div style={{ fontSize: '12px', color: '#8899aa' }}>Client editing is locked after submit.</div>
+          <div style={{ fontSize: '12px', color: '#8899aa' }}>
+            {isOffline ? 'Client editing is disabled while offline.' : 'Client editing is locked after submit.'}
+          </div>
         )}
       </div>
 
@@ -317,7 +340,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
         <div className="section-label">Reason(s)</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
           {reasonOptions.map((r) => (
-            <button key={r} className={`chip ${reasons.includes(r) ? 'chip-selected' : 'chip-unselected'}`} onClick={() => toggleReason(r)} disabled={submitLocked}>
+            <button key={r} className={`chip ${reasons.includes(r) ? 'chip-selected' : 'chip-unselected'}`} onClick={() => toggleReason(r)} disabled={writeLocked}>
               {r}
             </button>
           ))}
@@ -331,8 +354,8 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
           className="input"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          onBlur={() => { if (!submitLocked) save({ notes }) }}
-          readOnly={submitLocked}
+          onBlur={() => { if (!writeLocked) save({ notes }) }}
+          readOnly={writeLocked}
           placeholder="Any additional notes..."
           rows={3}
           style={{ resize: 'vertical', fontFamily: 'inherit' }}
@@ -343,7 +366,7 @@ function TransportCard({ transportId, user, onReturn, onClose }) {
       <button
         className={`btn ${canFinish ? 'btn-finish' : 'btn-disabled'}`}
         onClick={handleFinish}
-        disabled={!canFinish || submitLocked}
+        disabled={!canFinish || writeLocked}
         style={{ width: '100%', fontSize: '18px', padding: '16px', borderRadius: 'var(--radius)' }}
       >
         Finish TX

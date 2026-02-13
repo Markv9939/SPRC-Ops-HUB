@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react'
-import { db } from '../firebase'
-import { collection, query, where, getDocs, updateDoc, doc, deleteField, serverTimestamp } from 'firebase/firestore'
+import { db, auth } from '../firebase'
+import { collection, query, where, getDocs } from 'firebase/firestore'
+import { signInAnonymously, signOut } from 'firebase/auth'
 import { hashPin } from '../utils/pinHash'
+import { getScopedSessionUser } from '../services/accessGrantService'
+import { getAuthPolicy } from '../services/authPolicyService'
+import { isOfflineMode } from '../utils/networkGuard'
 
 const MAX_FAILED_ATTEMPTS = 5
 const LOCKOUT_DURATION_MS = 5 * 60 * 1000 // 5 minutes
@@ -49,6 +53,75 @@ function PinLogin({ onLogin }) {
     }
   }, [lockoutUntil])
 
+  const normalizeScopeValues = (values) => {
+    if (!Array.isArray(values)) return []
+    return [...new Set(values.map(value => String(value || '').trim().toUpperCase()).filter(Boolean))]
+  }
+
+  const expectedUserScopes = (userData) => normalizeScopeValues([
+    ...(userData?.site ? [userData.site] : []),
+    ...(Array.isArray(userData?.authorizedLocations) ? userData.authorizedLocations : [])
+  ])
+
+  const claimsMatchPinUser = (authSession, userData) => {
+    if (!authSession?.authClaimsReady) return true
+
+    const expectedRole = String(userData?.role || '').trim()
+    const expectedScopes = expectedUserScopes(userData)
+    const actualRole = String(authSession.authClaimRole || '').trim()
+    const actualScopes = normalizeScopeValues(authSession.authClaimLocations)
+
+    const roleMatches = expectedRole === actualRole
+    const scopesMatch = expectedScopes.every(scope => actualScopes.includes(scope))
+    return roleMatches && scopesMatch
+  }
+
+  const ensureAuthSession = async ({ forceAnonymous = false } = {}) => {
+    try {
+      const credential = (!forceAnonymous && auth.currentUser)
+        ? { user: auth.currentUser }
+        : await signInAnonymously(auth)
+      let authClaimsReady = false
+      let authClaimRole = null
+      let authClaimLocations = []
+
+      try {
+        const token = await credential.user.getIdTokenResult()
+        authClaimRole = typeof token?.claims?.role === 'string' ? token.claims.role : null
+        authClaimLocations = Array.isArray(token?.claims?.locations) ? token.claims.locations : []
+        authClaimsReady = Boolean(authClaimRole)
+      } catch (tokenError) {
+        console.warn('Auth token claims lookup failed:', tokenError)
+      }
+
+      return {
+        authUid: credential.user.uid,
+        authClaimsReady,
+        authClaimRole,
+        authClaimLocations
+      }
+    } catch (authError) {
+      console.warn('Anonymous auth bootstrap failed; continuing in legacy PIN mode:', authError)
+      return {
+        authUid: null,
+        authClaimsReady: false,
+        authClaimRole: null,
+        authClaimLocations: []
+      }
+    }
+  }
+
+  const resetToAnonymousAuthSession = async () => {
+    try {
+      if (auth.currentUser) {
+        await signOut(auth)
+      }
+    } catch (signOutError) {
+      console.warn('Auth signOut before anonymous reset failed:', signOutError)
+    }
+    return ensureAuthSession({ forceAnonymous: true })
+  }
+
   const handleSubmit = async () => {
     if (lockoutUntil && Date.now() < lockoutUntil) {
       const remainingMinutes = Math.ceil((lockoutUntil - Date.now()) / 60000)
@@ -65,25 +138,16 @@ function PinLogin({ onLogin }) {
     setError('')
 
     try {
+      if (isOfflineMode()) {
+        setError('Offline mode detected. Reconnect to sign in.')
+        setIsLoading(false)
+        return
+      }
+
       const pinHash = await hashPin(pin)
       const usersRef = collection(db, 'users')
       const hashQuery = query(usersRef, where('pinHash', '==', pinHash), where('active', '==', true))
-      let querySnapshot = await getDocs(hashQuery)
-
-      // Staged migration support: fallback to legacy plaintext PIN docs, then upgrade in place.
-      if (querySnapshot.empty) {
-        const legacyQuery = query(usersRef, where('pin', '==', pin), where('active', '==', true))
-        querySnapshot = await getDocs(legacyQuery)
-        if (!querySnapshot.empty) {
-          const legacyDoc = querySnapshot.docs[0]
-          await updateDoc(doc(db, 'users', legacyDoc.id), {
-            pinHash,
-            pin: deleteField(),
-            pinMigratedAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          })
-        }
-      }
+      const querySnapshot = await getDocs(hashQuery)
 
       if (querySnapshot.empty) {
         const newFailedAttempts = failedAttempts + 1
@@ -108,15 +172,55 @@ function PinLogin({ onLogin }) {
         localStorage.removeItem('lockoutUntil')
         setFailedAttempts(0)
 
+        const authPolicy = await getAuthPolicy()
+        let authSession = await ensureAuthSession()
+
+        // Prevent stale claim sessions (from prior logins) from constraining this PIN identity.
+        if (!claimsMatchPinUser(authSession, userData)) {
+          if (authPolicy.authScopeEnforced) {
+            setError('Access blocked: auth claims do not match this PIN account. Use the matching claim-enabled account.')
+            setPin('')
+            return
+          }
+          authSession = await resetToAnonymousAuthSession()
+        }
+
+        if (authPolicy.authScopeEnforced && !authSession.authClaimsReady) {
+          setError('Access blocked: auth claims are required for this environment. Contact admin.')
+          setPin('')
+          return
+        }
+
+        let scopedSessionUser
+        try {
+          scopedSessionUser = await getScopedSessionUser(userDoc.id, userData)
+        } catch (scopeError) {
+          console.warn('Access-grant scope lookup failed. Falling back to base scope:', scopeError)
+          const baseScopes = [...new Set([
+            ...(userData.site ? [userData.site] : []),
+            ...(Array.isArray(userData.authorizedLocations) ? userData.authorizedLocations : [])
+          ])]
+          scopedSessionUser = {
+            id: userDoc.id,
+            name: userData.name,
+            role: userData.role,
+            site: userData.site,
+            locationId: userData.locationId || null,
+            shiftId: userData.shiftId || null,
+            vanId: userData.vanId || null,
+            authorizedLocations: baseScopes,
+            primaryScopes: baseScopes,
+            activeBackupGrants: [],
+            scopeRefreshedAt: new Date().toISOString(),
+            authScopeEnforced: authPolicy.authScopeEnforced,
+            ...authSession
+          }
+        }
+
         onLogin({
-          id: userDoc.id,
-          name: userData.name,
-          role: userData.role,
-          site: userData.site,
-          locationId: userData.locationId || null,
-          shiftId: userData.shiftId || null,
-          vanId: userData.vanId || null,
-          authorizedLocations: userData.authorizedLocations || null
+          ...scopedSessionUser,
+          authScopeEnforced: authPolicy.authScopeEnforced,
+          ...authSession
         })
       }
     } catch (err) {
@@ -184,7 +288,7 @@ function PinLogin({ onLogin }) {
             setError('')
           }}
           onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          placeholder="• • • •"
+          placeholder="* * * *"
           style={{
             width: '100%',
             padding: '14px',

@@ -4,11 +4,13 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ============================================================================
-    // PIN-BASED AUTHENTICATION MODEL (FREE-TIER V1)
+    // CLAIM-SCOPE STAGED AUTH MODEL (FREE-TIER V1)
     // ============================================================================
-    // This app currently uses custom PIN login without Firebase Auth tokens.
-    // Rules focus on data integrity constraints and immutable/audit protections.
-    // PIN storage is hash-only (`pinHash`) with legacy plaintext fallback removed over time.
+    // Current login remains PIN-based, with optional Firebase Auth session bootstrap.
+    // In hybrid mode, auth claim checks are enforced when scope claims are present
+    // (`role`, `locations`) on the Firebase Auth token.
+    // Strict mode is controlled by appSettings/security.authScopeEnforced.
+    // PIN storage is hash-only (`pinHash`) and plaintext PIN fallback is retired.
     // ============================================================================
 
     // Helper: prevent createdAt from being changed after creation
@@ -19,6 +21,64 @@ service cloud.firestore {
 
     function validRole(role) {
       return role in ['tech', 'supervisor', 'admin'];
+    }
+
+    function authScopeEnforced() {
+      return exists(/databases/$(database)/documents/appSettings/security)
+        && get(/databases/$(database)/documents/appSettings/security).data.authScopeEnforced == true;
+    }
+
+    function hasAuthScopeClaims() {
+      return request.auth != null
+        && request.auth.token.role is string
+        && request.auth.token.locations is list;
+    }
+
+    function authRole() {
+      return hasAuthScopeClaims() ? request.auth.token.role : '';
+    }
+
+    function authLocations() {
+      return hasAuthScopeClaims() ? request.auth.token.locations : [];
+    }
+
+    function authRoleAllowed(roles) {
+      return authScopeEnforced()
+        ? (hasAuthScopeClaims() && authRole() in roles)
+        : (!hasAuthScopeClaims() || authRole() in roles);
+    }
+
+    // Map house location IDs to supervisor site scopes used in auth claims.
+    function locationScopeAlias(locationId) {
+      return locationId == 'mesquite' || locationId == 'MESQUITE'
+        ? 'PHP'
+        : (
+            locationId == 'res' || locationId == 'RES'
+              ? 'PHP'
+              : (
+                  locationId == 'lone_mountain' || locationId == 'LONE_MOUNTAIN'
+                    ? 'RTC'
+                    : locationId
+                )
+          );
+    }
+
+    function authLocationAllowed(locationId) {
+      return authScopeEnforced()
+        ? (hasAuthScopeClaims()
+            && (
+              authRole() == 'admin'
+              || locationId in authLocations()
+              || locationScopeAlias(locationId) in authLocations()
+            ))
+        : (!hasAuthScopeClaims()
+            || authRole() == 'admin'
+            || locationId in authLocations()
+            || locationScopeAlias(locationId) in authLocations());
+    }
+
+    function authRoleAndLocationAllowed(roles, locationId) {
+      return authRoleAllowed(roles) && authLocationAllowed(locationId);
     }
 
     function validUserWriteData(data) {
@@ -33,16 +93,48 @@ service cloud.firestore {
         && (!('pin' in data) || data.pin is string);
     }
 
+    function validAccessGrantWriteData(data) {
+      return data.keys().hasAll([
+        'userId', 'userName', 'locationId', 'startsAt', 'expiresAt',
+        'reason', 'revoked', 'revokedAt', 'revokedReason',
+        'createdByUserId', 'createdByName'
+      ])
+        && data.userId is string
+        && data.userName is string
+        && data.locationId is string
+        && data.startsAt is timestamp
+        && data.expiresAt is timestamp
+        && data.reason is string
+        && data.reason.size() > 0
+        && data.revoked is bool
+        && (data.revokedAt == null || data.revokedAt is timestamp)
+        && (data.revokedReason == null || data.revokedReason is string)
+        && data.createdByUserId is string
+        && data.createdByName is string
+        && (
+          data.revoked != true
+          || (data.revokedReason is string && data.revokedReason.size() > 0)
+        );
+    }
+
+    function validVersionField(data) {
+      return !('version' in data) || data.version is int;
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if true;
 
-      allow create: if validUserWriteData(request.resource.data);
+      allow create: if validUserWriteData(request.resource.data)
+        && authRoleAllowed(['admin'])
+        && validVersionField(request.resource.data);
 
       allow update: if validUserWriteData(request.resource.data)
+        && authRoleAllowed(['admin'])
+        && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
-      allow delete: if true;
+      allow delete: if authRoleAllowed(['admin']);
     }
 
     // Clients collection (autocomplete suggestions)
@@ -56,7 +148,7 @@ service cloud.firestore {
     }
 
     // BHT Assignments collection
-    match /bhtAssignments/{docId} {
+    match /shiftAssignments/{docId} {
       allow read: if true;
 
       allow create: if request.resource.data.keys().hasAll([
@@ -68,10 +160,14 @@ service cloud.firestore {
         && request.resource.data.shiftId is string
         && request.resource.data.vanIds is list
         && request.resource.data.isHousePrimary is bool
-        && request.resource.data.active is bool;
+        && request.resource.data.active is bool
+        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data);
 
-      allow update: if createdAtUnchanged();
-      allow delete: if true;
+      allow update: if createdAtUnchanged()
+        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data);
+      allow delete: if authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.locationId);
     }
 
     // EOC Tasks collection
@@ -83,12 +179,16 @@ service cloud.firestore {
         'dueDate', 'status', 'cycleKey'
       ])
         && request.resource.data.taskType in ['house', 'van']
-        && request.resource.data.status in ['pending', 'overdue', 'completed'];
+        && request.resource.data.status in ['pending', 'overdue', 'completed']
+        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data);
 
       allow update: if request.resource.data.status in ['pending', 'overdue', 'completed']
+        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
-      allow delete: if true;
+      allow delete: if authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.locationId);
     }
 
     // EOC Assignments (legacy — kept for historical data)
@@ -97,10 +197,12 @@ service cloud.firestore {
 
       allow create: if request.resource.data.keys().hasAll([
         'locationId', 'shiftId', 'dueDate', 'assignedTechId', 'eocType', 'status'
-      ]);
+      ])
+        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId);
 
-      allow update: if createdAtUnchanged();
-      allow delete: if true;
+      allow update: if createdAtUnchanged()
+        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId);
+      allow delete: if authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.locationId);
     }
 
     // EOC Submissions
@@ -109,10 +211,14 @@ service cloud.firestore {
 
       allow create: if request.resource.data.keys().hasAll([
         'locationId', 'shiftId', 'eocType', 'submittedByUserId', 'submittedByName'
-      ]);
+      ])
+        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data);
 
-      allow update: if createdAtUnchanged();
-      allow delete: if true;
+      allow update: if createdAtUnchanged()
+        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data);
+      allow delete: if authRoleAndLocationAllowed(['admin'], resource.data.locationId);
     }
 
     // EOC Issues
@@ -122,9 +228,13 @@ service cloud.firestore {
       allow create: if request.resource.data.keys().hasAll([
         'locationId', 'eocType', 'label', 'status', 'reportedByUserId'
       ])
-        && request.resource.data.status == 'open';
+        && request.resource.data.status == 'open'
+        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data);
 
       allow update: if request.resource.data.status in ['open', 'in_progress', 'resolved']
+        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data)
         && (
           request.resource.data.status != 'resolved'
           || (
@@ -134,20 +244,40 @@ service cloud.firestore {
           )
         )
         && createdAtUnchanged();
-      allow delete: if true;
+      allow delete: if authRoleAndLocationAllowed(['admin'], resource.data.locationId);
     }
 
     // Supervisor Alerts
-    match /supervisorAlerts/{docId} {
+    match /alerts/{docId} {
       allow read: if true;
 
       allow create: if request.resource.data.keys().hasAll([
         'type', 'message', 'read'
       ])
-        && request.resource.data.read is bool;
+        && request.resource.data.read is bool
+        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data);
 
-      allow update: if createdAtUnchanged();
-      allow delete: if true;
+      allow update: if createdAtUnchanged()
+        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data);
+      allow delete: if authRoleAndLocationAllowed(['admin'], resource.data.locationId);
+    }
+
+    // Access Grants (temporary backup location access lifecycle)
+    match /accessGrants/{docId} {
+      allow read: if true;
+
+      allow create: if validAccessGrantWriteData(request.resource.data)
+        && authRoleAllowed(['admin'])
+        && validVersionField(request.resource.data);
+
+      allow update: if validAccessGrantWriteData(request.resource.data)
+        && authRoleAllowed(['admin'])
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+
+      allow delete: if false;
     }
 
     // Audit Logs
@@ -158,8 +288,10 @@ service cloud.firestore {
         'action', 'collectionPath', 'documentId',
         'performedByUserId', 'performedByName', 'reason'
       ])
+        && authRoleAllowed(['tech', 'supervisor', 'admin'])
         && request.resource.data.reason is string
-        && request.resource.data.reason.size() > 0;
+        && request.resource.data.reason.size() > 0
+        && validVersionField(request.resource.data);
 
       allow update: if false;
       allow delete: if false;
@@ -167,23 +299,41 @@ service cloud.firestore {
 
     // EOC Checklist Template
     match /eocChecklistTemplate/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if authRoleAllowed(['admin']);
+    }
+
+    // EOC Template Drafts (Draft -> Diff -> Publish workflow)
+    match /eocTemplateDrafts/{docId} {
+      allow read: if true;
+      allow write: if authRoleAllowed(['admin']);
+    }
+
+    // EOC Template Version History
+    match /eocTemplateVersions/{docId} {
+      allow read: if true;
+      allow write: if authRoleAllowed(['admin']);
     }
 
     // EOC Vehicles
     match /eocVehicles/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if authRoleAllowed(['admin']);
     }
 
     // Compliance collections
     match /complianceEmployees/{employeeId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if authRoleAllowed(['supervisor', 'admin']);
     }
     match /complianceItems/{itemId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.employeeSite);
+      allow delete: if authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.employeeSite);
     }
     match /cintasServices/{serviceId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if authRoleAllowed(['supervisor', 'admin']);
     }
 
     // Transports collection
@@ -194,12 +344,16 @@ service cloud.firestore {
         'site', 'createdByUserId', 'createdByName', 'status', 'departedAt', 'createdAt'
       ])
         && request.resource.data.status in ['open', 'arrived', 'returned', 'closed']
-        && request.resource.data.site in ['PHP', 'RTC'];
+        && request.resource.data.site in ['PHP', 'RTC']
+        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.site)
+        && validVersionField(request.resource.data);
 
       allow update: if request.resource.data.keys().hasAll([
         'site', 'createdByUserId', 'createdByName', 'status', 'departedAt', 'updatedAt'
       ])
         && request.resource.data.status in ['open', 'arrived', 'returned', 'closed']
+        && authRoleAndLocationAllowed(['tech', 'supervisor', 'admin'], request.resource.data.site)
+        && validVersionField(request.resource.data)
         && request.resource.data.createdByUserId == resource.data.createdByUserId
         && request.resource.data.createdByName == resource.data.createdByName
         && request.resource.data.site == resource.data.site
@@ -218,13 +372,13 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if true;
+      allow delete: if authRoleAllowed(['admin']);
     }
 
     // App settings
     match /appSettings/{docId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if authRoleAllowed(['admin']);
     }
 
     // Deny all other paths
@@ -233,3 +387,4 @@ service cloud.firestore {
     }
   }
 }
+

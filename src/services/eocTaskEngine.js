@@ -2,6 +2,7 @@ import { db } from '../firebase'
 import { SHIFTS } from '../data/eocConstants'
 import { getCurrentCycleDueDate, phoenixNow } from '../utils/eocSchedule'
 import { collection, query, where, getDocs, doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore'
+import { getVersionNumber } from './versioning'
 
 function toPhoenixDateStr() {
   const now = phoenixNow()
@@ -76,7 +77,7 @@ export async function syncEocTasksForUserScope(user) {
   const isElevated = user.role === 'supervisor' || user.role === 'admin'
 
   const assignmentsSnap = await getDocs(
-    query(collection(db, 'bhtAssignments'), where('active', '==', true))
+    query(collection(db, 'shiftAssignments'), where('active', '==', true))
   )
 
   const scopedAssignments = assignmentsSnap.docs
@@ -99,6 +100,7 @@ export async function syncEocTasksForUserScope(user) {
       batch.set(taskRef, {
         ...task,
         status: initialStatus,
+        version: 1,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       })
@@ -112,6 +114,7 @@ export async function syncEocTasksForUserScope(user) {
     if (nextStatus !== existing.status) {
       batch.update(taskRef, {
         status: nextStatus,
+        version: getVersionNumber(existing) + 1,
         updatedAt: serverTimestamp()
       })
       touched.add(taskRef.id)
@@ -128,6 +131,7 @@ export async function syncEocTasksForUserScope(user) {
 
     batch.update(taskDoc.ref, {
       status: 'overdue',
+      version: getVersionNumber(data) + 1,
       updatedAt: serverTimestamp()
     })
     touched.add(taskDoc.id)
@@ -144,3 +148,4 @@ export async function syncEocTasksForUserScope(user) {
     scanned: desiredTasks.length
   }
 }
+

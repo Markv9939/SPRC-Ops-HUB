@@ -1,6 +1,6 @@
 # Phase 9 Regression + UAT Checklist
 
-Last updated: 2026-02-12
+Last updated: 2026-02-13
 Owner: Claude Code (engineering run) + Admin/Supervisor (business signoff)
 
 ## Automated Smoke Checks
@@ -34,7 +34,7 @@ This includes ESLint. As of 2026-02-12, lint has existing baseline issues across
 |---|---|---|
 | `npm run smoke:phase9` | PASS | `vite build` completed successfully |
 | `npm run smoke:phase9:full` | FAIL | Build passed; lint baseline currently reports 40 errors and 8 warnings |
-| `npm run reset:uat` | PARTIAL | Users + issue/alert seeded, but `bhtAssignments` and `eocTasks` writes are denied by currently deployed Firestore rules |
+| `npm run reset:uat` | PARTIAL | Users + issue/alert seeded, but `shiftAssignments` and `eocTasks` writes are denied by currently deployed Firestore rules |
 | `firebase deploy --only firestore:rules --project sprc-tx-l` | PASS | Local `firestore.rules` deployed successfully on 2026-02-12 |
 | `npm run reset:uat` (post-rules deploy) | PASS | Full reset complete; users/assignments/tasks seeded without permission errors |
 
@@ -55,6 +55,9 @@ Walkthrough script:
 | RS-1 | Role/Scope | Supervisor tries to assign outside authorized location | Write is blocked | PENDING | Requires logged-in supervisor/account setup |
 | RS-2 | Role/Scope | BHT tries to view non-assigned location records | Records are not visible | PENDING | Requires scoped seed data |
 | RS-3 | Role/Scope | Admin views all locations | All locations visible | PENDING | Admin walkthrough |
+| RS-4 | Role/Scope | Backup access grant create/revoke lifecycle | Scope banner reflects grant; revoke requires reason; state transitions to revoked | PENDING | Admin walkthrough in Users tab |
+| RS-5 | Role/Scope | Custom-claim provisioning verification | `claims:verify` reports all targeted users aligned with Firestore role/location scope | PENDING | `npm run claims:verify` output |
+| RS-6 | Role/Scope | Strict auth mode toggle | Strict mode blocks non-claim sessions; claim-enabled admin session can toggle policy with reason | PENDING | Users tab auth policy control |
 | AE-1 | Assignment/EOC | Single BHT in location+shift | House EOC auto-owner assigned | PENDING | Supervisor walkthrough |
 | AE-2 | Assignment/EOC | Multiple BHTs in location+shift without primary | Save blocked with validation | PENDING | Supervisor walkthrough |
 | AE-3 | Assignment/EOC | Multi-van BHT flow | Van picker shown; independent completion per van | PENDING | BHT walkthrough |
@@ -68,6 +71,7 @@ Walkthrough script:
 | DI-2 | Data Integrity | Supervisor/admin correction action | Audit trail written | PENDING | Audit tab verification |
 | DI-3 | Data Integrity | Soft delete action | Item hidden from default views | PENDING | Supervisor/admin verification |
 | DI-4 | Data Integrity | Admin hard delete without reason | Blocked | PENDING | Admin workflow check |
+| DI-5 | Data Integrity | Offline mode write attempt | Writes are blocked with explicit offline feedback | PENDING | Network-off scenario |
 | SC-1 | Scheduler | Sync run with configured due rules | Correct tasks created for assignment scope | PENDING | Requires seeded scenario |
 | SC-2 | Scheduler | Re-run same cycle | No duplicate cycle task creation | PENDING | Determinism check |
 
@@ -77,3 +81,4 @@ Walkthrough script:
 |---|---|---|---|---|
 | Admin/Owner |  |  | PENDING | Final product signoff required for Phase 9 completion |
 | Supervisor |  |  | PENDING | Queue/assignment behavior signoff required |
+

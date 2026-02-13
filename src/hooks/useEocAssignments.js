@@ -4,7 +4,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore'
 
 /**
  * Hook to load active BHT assignment for a user.
- * Reads from `bhtAssignments` collection (persistent assignment model).
+ * Reads from `shiftAssignments` collection (persistent assignment model).
  * Returns the assignment data or null if no active assignment exists.
  */
 export default function useEocAssignments(user) {
@@ -20,7 +20,7 @@ export default function useEocAssignments(user) {
     async function loadAssignment() {
       try {
         const q = query(
-          collection(db, 'bhtAssignments'),
+          collection(db, 'shiftAssignments'),
           where('bhtUserId', '==', user.id),
           where('active', '==', true)
         )
@@ -45,3 +45,4 @@ export default function useEocAssignments(user) {
 
   return { assignment, loading }
 }
+

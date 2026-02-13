@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import { db } from '../firebase'
 import {
-  collection, query, where, orderBy, onSnapshot, getDocs,
-  doc, setDoc, addDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp, writeBatch
+  collection, query, orderBy, onSnapshot,
+  doc, addDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp, writeBatch
 } from 'firebase/firestore'
 import * as XLSX from 'xlsx'
+import { notifySuccess } from '../utils/toast'
+import { getStatus } from '../utils/complianceStatus'
 
 const COMPLIANCE_CATEGORIES = {
   fpcc: { label: 'FPCC', icon: '\u{1FAAA}' },
@@ -93,18 +95,6 @@ function formatDateShort(ts) {
   return d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
 }
 
-function getStatus(dueDate) {
-  if (!dueDate) return 'none'
-  const d = dueDate.toDate ? dueDate.toDate() : new Date(dueDate)
-  if (isNaN(d)) return 'none'
-  const now = new Date()
-  const diff = d.getTime() - now.getTime()
-  const days = diff / (1000 * 60 * 60 * 24)
-  if (days < 0) return 'overdue'
-  if (days <= 30) return 'upcoming'
-  return 'current'
-}
-
 function statusBadge(status) {
   const colors = { overdue: '#f44336', upcoming: '#FF9800', current: '#4CAF50', none: '#556677' }
   const labels = { overdue: 'OVERDUE', upcoming: 'DUE SOON', current: 'CURRENT', none: 'N/A' }
@@ -168,6 +158,7 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
     })
     setForm({ name: '', site: defaultSite })
     setAdding(false)
+    notifySuccess('Employee added')
   }
 
   const handleEdit = async () => {
@@ -178,6 +169,7 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
       active: editForm.active
     })
     setEditingId(null)
+    notifySuccess('Employee updated')
   }
 
   const getEmployeeStats = (empId) => {
@@ -367,6 +359,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
     updates.notes = editForm.notes || ''
     await updateDoc(doc(db, 'complianceItems', editingId), updates)
     setEditingId(null)
+    notifySuccess('Compliance item updated')
   }
 
   const handleAdd = async () => {
@@ -387,11 +380,13 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
     })
     setAddForm({ employeeId: '', category: 'fpcc', subtype: '', lastCompleted: '', dueDate: '', notes: '' })
     setAdding(false)
+    notifySuccess('Compliance item added')
   }
 
   const handleDelete = async (itemId) => {
     if (!confirm('Delete this compliance item?')) return
     await deleteDoc(doc(db, 'complianceItems', itemId))
+    notifySuccess('Compliance item deleted')
   }
 
   const tsToInputDate = (ts) => {
@@ -558,6 +553,7 @@ function CintasTab({ cintasServices }) {
       updatedAt: serverTimestamp()
     })
     setEditingId(null)
+    notifySuccess('Service date saved')
   }
 
   const handleAdd = async () => {
@@ -574,11 +570,13 @@ function CintasTab({ cintasServices }) {
     })
     setAddForm({ siteAddress: '', serviceType: '', monthDue: '', fiveYearNote: '' })
     setAdding(false)
+    notifySuccess('Cintas service added')
   }
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this service?')) return
     await deleteDoc(doc(db, 'cintasServices', id))
+    notifySuccess('Cintas service deleted')
   }
 
   const tsToInputDate = (ts) => {
@@ -667,8 +665,6 @@ function CintasTab({ cintasServices }) {
 
 // ─── SUB-TAB: IMPORT ───────────────────────────────────────────────────────────
 function ImportTab() {
-  const [complianceFile, setComplianceFile] = useState(null)
-  const [cintasFile, setCintasFile] = useState(null)
   const [compliancePreview, setCompliancePreview] = useState(null)
   const [cintasPreview, setCintasPreview] = useState(null)
   const [importing, setImporting] = useState(false)
@@ -792,7 +788,7 @@ function ImportTab() {
         })
 
         // Annual Orientation
-        parseSheet('Annual Orientation', 'annual_orientation', (row, headers) => {
+        parseSheet('Annual Orientation', 'annual_orientation', (row) => {
           const results = []
           const subtypes = ['initial', '1st_annual', '2nd_annual']
           let subtypeIdx = 0
@@ -919,7 +915,6 @@ function ImportTab() {
   const handleComplianceFileChange = (e) => {
     const file = e.target.files[0]
     if (!file) return
-    setComplianceFile(file)
     setCompliancePreview(null)
     parseComplianceFile(file)
   }
@@ -927,7 +922,6 @@ function ImportTab() {
   const handleCintasFileChange = (e) => {
     const file = e.target.files[0]
     if (!file) return
-    setCintasFile(file)
     setCintasPreview(null)
     parseCintasFile(file)
   }
@@ -986,7 +980,6 @@ function ImportTab() {
 
       setStatus(`Done! ${compliancePreview.employees.length} employees, ${allItems.length} items imported.`)
       setCompliancePreview(null)
-      setComplianceFile(null)
     } catch (err) {
       console.error('Import error:', err)
       setStatus('Error: ' + err.message)
@@ -1025,7 +1018,6 @@ function ImportTab() {
 
       setStatus(`Done! ${allServices.length} Cintas services imported.`)
       setCintasPreview(null)
-      setCintasFile(null)
     } catch (err) {
       console.error('Cintas import error:', err)
       setStatus('Error: ' + err.message)
@@ -1185,33 +1177,25 @@ function CompliancePanel({ user, scopeSites = null }) {
     if (!Array.isArray(scopeSites)) return []
     return [...new Set(scopeSites.map(s => String(s || '').trim().toUpperCase()).filter(Boolean))]
   }, [scopeSites])
+  const scopeSiteSet = useMemo(() => new Set(normalizedScopeSites), [normalizedScopeSites])
   const siteOptions = normalizedScopeSites.length > 0 ? normalizedScopeSites : ['RTC', 'OTC']
   const hasComplianceScope = isAdmin || normalizedScopeSites.length > 0
-  const inComplianceScope = (site) => (
-    isAdmin || normalizedScopeSites.includes(String(site || '').trim().toUpperCase())
-  )
 
   // Real-time listeners
   useEffect(() => {
-    if (!hasComplianceScope) {
-      setEmployees([])
-      setComplianceItems([])
-      setCintasServices([])
-      return () => {}
-    }
+    if (!hasComplianceScope) return () => {}
 
     const unsub1 = onSnapshot(
       query(collection(db, 'complianceEmployees'), orderBy('name', 'asc')),
       snap => {
         const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        setEmployees(rows.filter(e => inComplianceScope(e.site)))
+        setEmployees(rows.filter(e => isAdmin || scopeSiteSet.has(String(e.site || '').trim().toUpperCase())))
       }
     )
     const unsub2 = onSnapshot(
       query(collection(db, 'complianceItems'), orderBy('employeeName', 'asc')),
       snap => setComplianceItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     )
-    if (!isAdmin) setCintasServices([])
     const unsub3 = isAdmin
       ? onSnapshot(
           query(collection(db, 'cintasServices'), orderBy('siteAddress', 'asc')),
@@ -1219,9 +1203,9 @@ function CompliancePanel({ user, scopeSites = null }) {
         )
       : () => {}
     return () => { unsub1(); unsub2(); unsub3() }
-  }, [hasComplianceScope, isAdmin, normalizedScopeSites])
+  }, [hasComplianceScope, isAdmin, scopeSiteSet])
 
-  const SUB_TABS = isAdmin
+  const subTabs = useMemo(() => (isAdmin
     ? {
         employees: 'Employees',
         items: 'Items',
@@ -1232,12 +1216,11 @@ function CompliancePanel({ user, scopeSites = null }) {
         employees: 'Employees',
         items: 'Items'
       }
-
-  useEffect(() => {
-    if (!Object.prototype.hasOwnProperty.call(SUB_TABS, subTab)) {
-      setSubTab('employees')
-    }
-  }, [SUB_TABS, subTab])
+  ), [isAdmin])
+  const activeSubTab = Object.prototype.hasOwnProperty.call(subTabs, subTab) ? subTab : 'employees'
+  const scopedEmployees = hasComplianceScope ? employees : []
+  const scopedComplianceItems = hasComplianceScope ? complianceItems : []
+  const scopedCintasServices = hasComplianceScope && isAdmin ? cintasServices : []
 
   return (
     <div>
@@ -1258,14 +1241,14 @@ function CompliancePanel({ user, scopeSites = null }) {
         <>
       {/* Sub-tab navigation */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '20px', flexWrap: 'wrap' }}>
-        {Object.entries(SUB_TABS).map(([key, label]) => (
+        {Object.entries(subTabs).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setSubTab(key)}
             style={{
               padding: '8px 18px',
-              backgroundColor: subTab === key ? '#E53935' : 'rgba(255,255,255,0.06)',
-              color: subTab === key ? 'white' : '#8899aa',
+              backgroundColor: activeSubTab === key ? '#E53935' : 'rgba(255,255,255,0.06)',
+              color: activeSubTab === key ? 'white' : '#8899aa',
               border: 'none',
               borderRadius: '6px',
               fontSize: '13px',
@@ -1278,10 +1261,10 @@ function CompliancePanel({ user, scopeSites = null }) {
         ))}
       </div>
 
-      {subTab === 'employees' && <EmployeesTab employees={employees} complianceItems={complianceItems} siteOptions={siteOptions} />}
-      {subTab === 'items' && <ItemsTab employees={employees} complianceItems={complianceItems} siteOptions={siteOptions} />}
-      {subTab === 'cintas' && <CintasTab cintasServices={cintasServices} />}
-      {subTab === 'import' && <ImportTab />}
+      {activeSubTab === 'employees' && <EmployeesTab employees={scopedEmployees} complianceItems={scopedComplianceItems} siteOptions={siteOptions} />}
+      {activeSubTab === 'items' && <ItemsTab employees={scopedEmployees} complianceItems={scopedComplianceItems} siteOptions={siteOptions} />}
+      {activeSubTab === 'cintas' && <CintasTab cintasServices={scopedCintasServices} />}
+      {activeSubTab === 'import' && <ImportTab />}
         </>
       )}
     </div>
@@ -1289,5 +1272,4 @@ function CompliancePanel({ user, scopeSites = null }) {
 }
 
 export default CompliancePanel
-export { COMPLIANCE_CATEGORIES, getStatus }
 

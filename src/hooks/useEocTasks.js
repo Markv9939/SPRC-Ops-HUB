@@ -19,15 +19,12 @@ function sortTasks(items) {
 }
 
 export default function useEocTasks(user) {
+  const hasUserId = Boolean(user?.id)
   const [tasks, setTasks] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loadedUserId, setLoadedUserId] = useState(null)
 
   useEffect(() => {
-    if (!user?.id) {
-      setTasks([])
-      setLoading(false)
-      return
-    }
+    if (!hasUserId) return
 
     const q = query(collection(db, 'eocTasks'), where('assigneeUserId', '==', user.id))
     const unsubscribe = onSnapshot(
@@ -35,17 +32,20 @@ export default function useEocTasks(user) {
       (snapshot) => {
         const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
         setTasks(sortTasks(all))
-        setLoading(false)
+        setLoadedUserId(user.id)
       },
       (err) => {
         console.error('Error loading EOC tasks:', err)
         setTasks([])
-        setLoading(false)
+        setLoadedUserId(user.id)
       }
     )
 
     return () => unsubscribe()
-  }, [user?.id])
+  }, [hasUserId, user?.id])
 
-  return { tasks, loading }
+  return {
+    tasks: hasUserId && loadedUserId === user.id ? tasks : [],
+    loading: hasUserId ? loadedUserId !== user.id : false
+  }
 }

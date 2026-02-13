@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, collection, serverTimestamp, writeBatch, query, orderBy, onSnapshot, where, getDocs } from 'firebase/firestore'
+import { doc, getDoc, collection, serverTimestamp, query, orderBy, onSnapshot, where, getDocs, runTransaction } from 'firebase/firestore'
 import { EOC_VAN_TEMPLATE, EOC_HOUSE_TEMPLATE, VANS, LOCATIONS } from '../data/eocConstants'
+import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
+import { requireOnline } from '../utils/networkGuard'
 
-function EocChecklist({ taskId, user, onComplete, onBack }) {
+function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   const [task, setTask] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -53,7 +55,7 @@ function EocChecklist({ taskId, user, onComplete, onBack }) {
         }
 
         setStaffCompleting(user?.name || '')
-        setTask({ id: snap.id, ...data })
+        setTask({ id: snap.id, ...data, version: getVersionNumber(data) })
       } catch (err) {
         console.error('Error loading task:', err)
         setError('Failed to load task')
@@ -173,6 +175,11 @@ function EocChecklist({ taskId, user, onComplete, onBack }) {
   }
 
   const handleSubmit = async () => {
+    if (isOffline) {
+      requireOnline('submitting EOC')
+      return
+    }
+
     const validationError = validate()
     if (validationError) {
       setError(validationError)
@@ -188,8 +195,6 @@ function EocChecklist({ taskId, user, onComplete, onBack }) {
     setError('')
 
     try {
-      const batch = writeBatch(db)
-
       const answersData = activeTemplate.map(item => ({
         itemId: item.id,
         label: item.label,
@@ -202,75 +207,104 @@ function EocChecklist({ taskId, user, onComplete, onBack }) {
 
       const issueItems = answersData.filter(a => a.status === 'repair')
 
-      const submissionRef = doc(collection(db, 'eocSubmissions'))
-      batch.set(submissionRef, {
-        taskId: task.id,
-        locationId: task.locationId,
-        shiftId: task.shiftId,
-        vanId: task.vanId || null,
-        dueDate: task.dueDate,
-        staffCompleting: staffCompleting.trim(),
-        eocType,
-        vehicleId: vehicleId || null,
-        vehicleName: vehicleName.trim(),
-        vinNumber: vinNumber.trim(),
-        odometerReading: eocType === 'van' ? odometerReading.trim() : '',
-        answers: answersData,
-        issueCount: issueItems.length,
-        submittedByUserId: user.id,
-        submittedByName: user.name,
-        submittedAt: serverTimestamp(),
-        createdAt: serverTimestamp()
-      })
+      await runTransaction(db, async (transaction) => {
+        const taskRef = doc(db, 'eocTasks', task.id)
+        const taskSnap = await transaction.get(taskRef)
+        if (!taskSnap.exists()) {
+          throw new Error('Task no longer exists.')
+        }
 
-      const taskRef = doc(db, 'eocTasks', task.id)
-      batch.update(taskRef, {
-        status: 'completed',
-        submissionId: submissionRef.id,
-        completedAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      })
+        const latestTask = taskSnap.data()
+        if (latestTask.status !== 'pending' && latestTask.status !== 'overdue') {
+          throw new Error(`This EOC task is already ${latestTask.status}.`)
+        }
 
-      for (const issue of issueItems) {
-        const issueRef = doc(collection(db, 'eocIssues'))
-        batch.set(issueRef, {
+        const { nextVersion } = assertExpectedVersion({
+          expectedVersion: getVersionNumber(task),
+          currentVersion: getVersionNumber(latestTask),
+          documentId: task.id,
+          recordLabel: 'EOC Task'
+        })
+
+        const submissionRef = doc(collection(db, 'eocSubmissions'))
+        transaction.set(submissionRef, {
           taskId: task.id,
-          submissionId: submissionRef.id,
           locationId: task.locationId,
           shiftId: task.shiftId,
           vanId: task.vanId || null,
+          dueDate: task.dueDate,
+          staffCompleting: staffCompleting.trim(),
           eocType,
-          itemId: issue.itemId,
-          label: issue.label,
-          category: issue.category,
-          description: issue.description,
-          severity: 'medium',
-          status: 'open',
-          reportedByUserId: user.id,
-          reportedByName: user.name,
-          createdAt: serverTimestamp()
+          vehicleId: vehicleId || null,
+          vehicleName: vehicleName.trim(),
+          vinNumber: vinNumber.trim(),
+          odometerReading: eocType === 'van' ? odometerReading.trim() : '',
+          answers: answersData,
+          issueCount: issueItems.length,
+          submittedByUserId: user.id,
+          submittedByName: user.name,
+          version: 1,
+          submittedAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
         })
 
-        const alertRef = doc(collection(db, 'supervisorAlerts'))
-        batch.set(alertRef, {
-          type: 'eoc_issue',
-          issueId: issueRef.id,
-          taskId: task.id,
-          locationId: task.locationId,
-          eocType,
-          severity: 'medium',
-          message: `EOC issue: ${issue.label} - ${issue.description}`,
-          techName: user.name,
-          read: false,
-          createdAt: serverTimestamp()
+        transaction.update(taskRef, {
+          status: 'completed',
+          submissionId: submissionRef.id,
+          completedAt: serverTimestamp(),
+          version: nextVersion,
+          updatedAt: serverTimestamp()
         })
-      }
 
-      await batch.commit()
+        for (const issue of issueItems) {
+          const issueRef = doc(collection(db, 'eocIssues'))
+          transaction.set(issueRef, {
+            taskId: task.id,
+            submissionId: submissionRef.id,
+            locationId: task.locationId,
+            shiftId: task.shiftId,
+            vanId: task.vanId || null,
+            eocType,
+            itemId: issue.itemId,
+            label: issue.label,
+            category: issue.category,
+            description: issue.description,
+            severity: 'medium',
+            status: 'open',
+            reportedByUserId: user.id,
+            reportedByName: user.name,
+            version: 1,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          })
+
+          const alertRef = doc(collection(db, 'alerts'))
+          transaction.set(alertRef, {
+            type: 'eoc_issue',
+            issueId: issueRef.id,
+            taskId: task.id,
+            locationId: task.locationId,
+            eocType,
+            severity: 'medium',
+            message: `EOC issue: ${issue.label} - ${issue.description}`,
+            techName: user.name,
+            read: false,
+            version: 1,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          })
+        }
+      })
+
       onComplete()
     } catch (err) {
       console.error('Error submitting EOC:', err)
-      setError('Failed to submit. Please try again.')
+      if (err?.code === 'version-conflict') {
+        setError(formatVersionConflictMessage(err))
+      } else {
+        setError(err?.message || 'Failed to submit. Please try again.')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -441,11 +475,16 @@ function EocChecklist({ taskId, user, onComplete, onBack }) {
           {error}
         </div>
       )}
+      {isOffline && (
+        <div style={{ color: '#FF9800', fontSize: '12px', marginBottom: '12px', textAlign: 'center' }}>
+          Offline mode is active. EOC submission is disabled until connection is restored.
+        </div>
+      )}
 
       <button
         className={`btn ${allAnswered ? 'btn-finish' : 'btn-disabled'}`}
         onClick={handleSubmit}
-        disabled={submitting || !allAnswered}
+        disabled={submitting || !allAnswered || isOffline}
         style={{ width: '100%', fontSize: '18px', borderRadius: 'var(--radius)' }}
       >
         {submitting ? 'Submitting...' : 'Submit EOC'}
@@ -455,3 +494,4 @@ function EocChecklist({ taskId, user, onComplete, onBack }) {
 }
 
 export default EocChecklist
+

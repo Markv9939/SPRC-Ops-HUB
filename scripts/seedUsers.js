@@ -1,3 +1,4 @@
+/* global process */
 import { initializeApp } from 'firebase/app'
 import {
   getFirestore,
@@ -6,7 +7,8 @@ import {
   writeBatch,
   doc,
   setDoc,
-  serverTimestamp
+  serverTimestamp,
+  Timestamp
 } from 'firebase/firestore'
 import { createHash } from 'crypto'
 
@@ -22,11 +24,14 @@ const firebaseConfig = {
 
 const BASE_COLLECTIONS_TO_CLEAR = [
   'users',
-  'bhtAssignments',
+  'shiftAssignments',
   'eocTasks',
   'eocSubmissions',
   'eocIssues',
-  'supervisorAlerts',
+  'alerts',
+  'eocTemplateDrafts',
+  'eocTemplateVersions',
+  'accessGrants',
   'transports',
   'eocAssignments',
   'complianceEmployees',
@@ -64,6 +69,14 @@ function toPhoenixDateStr(dayOffset = 0) {
   const m = String(base.getUTCMonth() + 1).padStart(2, '0')
   const d = String(base.getUTCDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
+}
+
+function startOfDay(dateStr) {
+  return new Date(`${String(dateStr)}T00:00:00.000`)
+}
+
+function endOfDay(dateStr) {
+  return new Date(`${String(dateStr)}T23:59:59.999`)
 }
 
 function buildTaskDocId({ locationId, shiftId, taskType, dueDate, vanId }) {
@@ -153,6 +166,7 @@ async function seedUsers() {
       ...rest,
       pinHash: hashPin(pin),
       pinVersion: 'v1_sha256',
+      version: 1,
       pinUpdatedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -202,8 +216,9 @@ async function seedAssignments() {
 
   for (const assignment of assignments) {
     try {
-      await setDoc(doc(db, 'bhtAssignments', assignment.id), {
+      await setDoc(doc(db, 'shiftAssignments', assignment.id), {
         ...assignment,
+        version: 1,
         effectiveFrom: serverTimestamp(),
         effectiveTo: null,
         createdAt: serverTimestamp(),
@@ -220,6 +235,62 @@ async function seedAssignments() {
   }
 
   return { assignments, seededCount, skippedForPermissions }
+}
+
+async function seedAccessGrants() {
+  const grants = [
+    {
+      id: 'grant_supervisor_php_rtc_active',
+      userId: 'supervisor_php',
+      userName: 'Supervisor PHP',
+      locationId: 'RTC',
+      startsOn: toPhoenixDateStr(-1),
+      expiresOn: toPhoenixDateStr(2),
+      reason: 'Seeded temporary backup coverage'
+    },
+    {
+      id: 'grant_tech_lm_otc_upcoming',
+      userId: 'tech_lm_multi',
+      userName: 'Tech Lone Mountain',
+      locationId: 'OTC',
+      startsOn: toPhoenixDateStr(1),
+      expiresOn: toPhoenixDateStr(5),
+      reason: 'Seeded upcoming backup assignment'
+    }
+  ]
+
+  let seededCount = 0
+  let skippedForPermissions = 0
+
+  for (const grant of grants) {
+    try {
+      await setDoc(doc(db, 'accessGrants', grant.id), {
+        userId: grant.userId,
+        userName: grant.userName,
+        locationId: grant.locationId,
+        startsAt: Timestamp.fromDate(startOfDay(grant.startsOn)),
+        expiresAt: Timestamp.fromDate(endOfDay(grant.expiresOn)),
+        reason: grant.reason,
+        revoked: false,
+        revokedAt: null,
+        revokedReason: null,
+        createdByUserId: 'admin_owner',
+        createdByName: 'Admin Owner',
+        version: 1,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      })
+      seededCount += 1
+    } catch (error) {
+      if (error?.code === 'permission-denied') {
+        skippedForPermissions += 1
+        continue
+      }
+      throw error
+    }
+  }
+
+  return { grants, seededCount, skippedForPermissions }
 }
 
 async function seedEocTasks() {
@@ -288,6 +359,7 @@ async function seedEocTasks() {
         ...task,
         shiftLabel: task.shiftId === 'shift_1' ? '1st Shift' : '2nd Shift',
         cycleKey,
+        version: 1,
         generatedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -328,6 +400,7 @@ async function seedIssueAndAlert() {
       issueType: 'repair',
       note: 'Seeded for supervisor queue UAT',
       status: 'open',
+      version: 1,
       reportedByUserId: 'tech_mesquite_a',
       reportedByName: 'Tech Mesquite A',
       createdAt: serverTimestamp(),
@@ -343,13 +416,14 @@ async function seedIssueAndAlert() {
   }
 
   try {
-    await setDoc(doc(db, 'supervisorAlerts', alertId), {
+    await setDoc(doc(db, 'alerts', alertId), {
       type: 'eoc_issue',
       module: 'eoc',
       locationId: 'mesquite',
       issueId,
       message: 'Seeded issue requires supervisor review',
       read: false,
+      version: 1,
       createdAt: serverTimestamp(),
       createdByUserId: 'tech_mesquite_a',
       createdByName: 'Tech Mesquite A'
@@ -419,6 +493,12 @@ async function main() {
     console.log(`Skipped assignments (permission denied): ${assignmentResult.skippedForPermissions}`)
   }
 
+  const accessGrantResult = await seedAccessGrants()
+  console.log(`Seeded accessGrants: ${accessGrantResult.seededCount}`)
+  if (accessGrantResult.skippedForPermissions > 0) {
+    console.log(`Skipped accessGrants (permission denied): ${accessGrantResult.skippedForPermissions}`)
+  }
+
   const taskResult = await seedEocTasks()
   console.log(`Seeded eocTasks: ${taskResult.seededCount}`)
   if (taskResult.skippedForPermissions > 0) {
@@ -448,3 +528,4 @@ main().catch((error) => {
   console.error('UAT reset failed:', error)
   process.exit(1)
 })
+

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
-import { db } from './firebase'
+import { useState, useEffect, useCallback } from 'react'
+import { db, auth } from './firebase'
 import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, getDocs } from 'firebase/firestore'
+import { signOut } from 'firebase/auth'
 import PinLogin from './components/PinLogin'
 import Header from './components/Header'
 import BhtHub from './components/BhtHub'
@@ -8,7 +9,12 @@ import TransportCard from './components/TransportCard'
 import CloseChecklist from './components/CloseChecklist'
 import EocChecklist from './components/EocChecklist'
 import SupervisorDashboard from './components/SupervisorDashboard'
+import ToastHost from './components/ToastHost'
 import { syncEocTasksForUserScope } from './services/eocTaskEngine'
+import { refreshScopedSessionUser } from './services/accessGrantService'
+import { getAuthPolicy } from './services/authPolicyService'
+import { requireOnline } from './utils/networkGuard'
+import { installAlertToastBridge, notifySuccess } from './utils/toast'
 
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
 const TRANSPORT_SITES = new Set(['PHP', 'RTC'])
@@ -49,6 +55,33 @@ function promptForTransportSite(sites, defaultSite) {
   return normalized
 }
 
+function normalizeList(values) {
+  if (!Array.isArray(values)) return []
+  return [...new Set(values.map(v => String(v || '').trim().toUpperCase()).filter(Boolean))].sort()
+}
+
+function toScopeSignature(sessionUser) {
+  return JSON.stringify({
+    id: sessionUser?.id || '',
+    role: sessionUser?.role || '',
+    site: sessionUser?.site || '',
+    authorizedLocations: normalizeList(sessionUser?.authorizedLocations),
+    primaryScopes: normalizeList(sessionUser?.primaryScopes),
+    authScopeEnforced: sessionUser?.authScopeEnforced === true,
+    activeBackupGrants: Array.isArray(sessionUser?.activeBackupGrants)
+      ? sessionUser.activeBackupGrants
+        .map(grant => ({
+          id: grant.id,
+          locationId: String(grant.locationId || '').toUpperCase(),
+          startsAtIso: grant.startsAtIso || null,
+          expiresAtIso: grant.expiresAtIso || null,
+          state: grant.state || ''
+        }))
+        .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')))
+      : []
+  })
+}
+
 function App() {
   const [user, setUser] = useState(() => {
     const saved = sessionStorage.getItem('bhtUser')
@@ -59,20 +92,32 @@ function App() {
       localStorage.removeItem('lastActivity')
       return null
     }
-    return JSON.parse(saved)
+    try {
+      return JSON.parse(saved)
+    } catch {
+      sessionStorage.removeItem('bhtUser')
+      return null
+    }
   })
   const [page, setPage] = useState('home')
   const [transports, setTransports] = useState([])
   const [currentTransportId, setCurrentTransportId] = useState(null)
   const [currentTaskId, setCurrentTaskId] = useState(null)
   const [alertCount, setAlertCount] = useState(0)
+  const [issueUpdates, setIssueUpdates] = useState([])
+  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
 
-  const getActiveTransport = () => {
+  useEffect(() => {
+    const restoreAlerts = installAlertToastBridge()
+    return () => restoreAlerts()
+  }, [])
+
+  const getActiveTransport = useCallback(() => {
     if (!user || user.role !== 'tech') return null
     return transports.find(t => ACTIVE_TRANSPORT_STATUSES.has(String(t.status || '').toLowerCase())) || null
-  }
+  }, [transports, user])
 
-  const resumeActiveTransport = (transport) => {
+  const resumeActiveTransport = useCallback((transport) => {
     if (!transport?.id) return
     setCurrentTransportId(transport.id)
     if (transport.status === 'returned') {
@@ -80,16 +125,19 @@ function App() {
       return
     }
     setPage('transport')
-  }
+  }, [])
 
   function handleLogin(userData) {
     sessionStorage.setItem('bhtUser', JSON.stringify(userData))
     setUser(userData)
+    if (userData?.role !== 'tech') {
+      setIssueUpdates([])
+    }
     setPage('home')
     localStorage.setItem('lastActivity', Date.now().toString())
   }
 
-  function handleLogout() {
+  const handleLogout = useCallback(() => {
     const activeTransport = getActiveTransport()
     if (activeTransport) {
       alert('You cannot lock/logout while a transport is active. Close the transport first.')
@@ -103,8 +151,23 @@ function App() {
     setTransports([])
     setCurrentTransportId(null)
     setCurrentTaskId(null)
+    setIssueUpdates([])
     localStorage.removeItem('lastActivity')
-  }
+    signOut(auth).catch((err) => {
+      console.warn('Auth signOut skipped:', err)
+    })
+  }, [getActiveTransport, resumeActiveTransport])
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false)
+    const handleOffline = () => setIsOffline(true)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
 
   // Track user activity for auto-lock
   useEffect(() => {
@@ -143,7 +206,72 @@ function App() {
       })
       clearInterval(inactivityCheck)
     }
-  }, [user])
+  }, [handleLogout, getActiveTransport, resumeActiveTransport, user])
+
+  // Keep session scope aligned with live `accessGrants` lifecycle and account deactivation.
+  useEffect(() => {
+    if (!user?.id || isOffline) return
+
+    let cancelled = false
+    const refreshSessionScope = async () => {
+      try {
+        const refreshedUser = await refreshScopedSessionUser(user.id)
+        const authPolicy = await getAuthPolicy()
+        if (cancelled) return
+
+        if (!refreshedUser) {
+          alert('Your account is no longer active. Please log in again.')
+          sessionStorage.removeItem('bhtUser')
+          localStorage.removeItem('lastActivity')
+          setUser(null)
+          setPage('home')
+          setTransports([])
+          setCurrentTransportId(null)
+          setCurrentTaskId(null)
+          return
+        }
+
+        setUser(prev => {
+          if (!prev || prev.id !== refreshedUser.id) return prev
+          const mergedUser = {
+            ...refreshedUser,
+            authUid: prev.authUid || null,
+            authClaimsReady: prev.authClaimsReady || false,
+            authClaimRole: prev.authClaimRole || null,
+            authClaimLocations: Array.isArray(prev.authClaimLocations) ? prev.authClaimLocations : [],
+            authScopeEnforced: authPolicy.authScopeEnforced
+          }
+
+          if (mergedUser.authScopeEnforced && !mergedUser.authClaimsReady) {
+            alert('Access policy changed: auth claims are now required. Please re-login with a claim-enabled account.')
+            sessionStorage.removeItem('bhtUser')
+            localStorage.removeItem('lastActivity')
+            setPage('home')
+            setTransports([])
+            setCurrentTransportId(null)
+            setCurrentTaskId(null)
+            return null
+          }
+
+          if (toScopeSignature(prev) === toScopeSignature(mergedUser)) return prev
+          sessionStorage.setItem('bhtUser', JSON.stringify(mergedUser))
+          return mergedUser
+        })
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to refresh session scope:', err)
+        }
+      }
+    }
+
+    refreshSessionScope()
+    const intervalId = setInterval(refreshSessionScope, 60000)
+
+    return () => {
+      cancelled = true
+      clearInterval(intervalId)
+    }
+  }, [user?.id, isOffline])
 
   // Load transports from Firestore based on user role
   useEffect(() => {
@@ -182,11 +310,11 @@ function App() {
     })
 
     return () => unsubscribe()
-  }, [user, transports])
+  }, [user])
 
   // Sync EOC task generation + overdue status on session start.
   useEffect(() => {
-    if (!user) return
+    if (!user || isOffline) return
 
     let cancelled = false
     ;(async () => {
@@ -203,19 +331,48 @@ function App() {
     })()
 
     return () => { cancelled = true }
-  }, [user])
+  }, [user, isOffline])
 
   // Supervisor/admin alert count listener
   useEffect(() => {
     if (!user || (user.role !== 'supervisor' && user.role !== 'admin')) return
 
     const q = query(
-      collection(db, 'supervisorAlerts'),
+      collection(db, 'alerts'),
       where('read', '==', false)
     )
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setAlertCount(snapshot.size)
+      const count = snapshot.docs.reduce((acc, alertDoc) => {
+        return alertDoc.data()?.type === 'eoc_issue' ? acc + 1 : acc
+      }, 0)
+      setAlertCount(count)
+    })
+
+    return () => unsubscribe()
+  }, [user])
+
+  useEffect(() => {
+    if (!user || user.role !== 'tech') return
+
+    const q = query(
+      collection(db, 'alerts'),
+      where('type', '==', 'eoc_issue_update')
+    )
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const rows = snapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }))
+        .filter(item => item.targetUserId === user.id)
+      rows.sort((a, b) => {
+        const aMs = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0
+        const bMs = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0
+        return bMs - aMs
+      })
+      setIssueUpdates(rows.slice(0, 8))
     })
 
     return () => unsubscribe()
@@ -237,6 +394,8 @@ function App() {
   }
 
   async function handleNewTransport() {
+    if (!requireOnline('starting a new transport')) return
+
     try {
       const activeTransport = getActiveTransport()
       if (activeTransport) {
@@ -286,6 +445,7 @@ function App() {
         createdByUserId: user.id,
         createdByName: user.name,
         status: 'open',
+        version: 1,
         departedAt: serverTimestamp(),
         clients: [],
         reasons: [],
@@ -300,6 +460,7 @@ function App() {
       localStorage.setItem(lastSiteKey, transportSite)
       setCurrentTransportId(docRef.id)
       setPage('transport')
+      notifySuccess('Transport created')
     } catch (error) {
       console.error('Error creating transport:', error)
       alert('Failed to create transport. Please try again.')
@@ -331,20 +492,25 @@ function App() {
 
   if (user === null) {
     return (
-      <PinLogin onLogin={handleLogin} />
+      <>
+        <PinLogin onLogin={handleLogin} />
+        <ToastHost />
+      </>
     )
   }
 
   if (page === 'transport') {
     return (
       <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
+        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
         <TransportCard
           transportId={currentTransportId}
           user={user}
+          isOffline={isOffline}
           onReturn={handleReturn}
           onClose={handleCloseTransportCard}
         />
+        <ToastHost />
       </div>
     )
   }
@@ -352,13 +518,15 @@ function App() {
   if (page === 'closeChecklist') {
     return (
       <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
+        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
         <CloseChecklist
           transportId={currentTransportId}
           user={user}
+          isOffline={isOffline}
           onClose={handleCloseChecklistBack}
           onComplete={handleCloseChecklistComplete}
         />
+        <ToastHost />
       </div>
     )
   }
@@ -366,13 +534,15 @@ function App() {
   if (page === 'eocForm') {
     return (
       <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
+        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
         <EocChecklist
           taskId={currentTaskId}
           user={user}
+          isOffline={isOffline}
           onComplete={handleEocComplete}
           onBack={handleEocBack}
         />
+        <ToastHost />
       </div>
     )
   }
@@ -381,13 +551,15 @@ function App() {
   if (user.role === 'supervisor' || user.role === 'admin') {
     return (
       <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
+        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
         <SupervisorDashboard
           user={user}
+          isOffline={isOffline}
           onNewTransport={handleNewTransport}
           onLogout={handleLogout}
           userName={user.name}
         />
+        <ToastHost />
       </div>
     )
   }
@@ -398,16 +570,19 @@ function App() {
       minHeight: '100vh',
       backgroundColor: 'var(--bg)'
     }}>
-      <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} />
+      <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
       <BhtHub
         user={user}
         transports={transports}
+        issueUpdates={issueUpdates}
         onNewTransport={handleNewTransport}
         onContinueTransport={handleContinueTransport}
         onStartEoc={handleStartEoc}
       />
+      <ToastHost />
     </div>
   )
 }
 
 export default App
+

@@ -552,3 +552,48 @@ body {
 .glow-red {
   box-shadow: var(--glow-red);
 }
+
+/* --- Toast notifications --- */
+.toast-host {
+  position: fixed;
+  top: 72px;
+  right: 12px;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(92vw, 360px);
+  pointer-events: none;
+}
+
+.toast {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(26,35,50,0.96);
+  color: #e8e8e8;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.36);
+  animation: toastFadeIn 0.14s ease-out;
+}
+
+.toast-success {
+  border-color: rgba(76,175,80,0.5);
+  background: rgba(33,54,41,0.96);
+}
+
+.toast-warning {
+  border-color: rgba(255,152,0,0.55);
+  background: rgba(58,43,27,0.96);
+}
+
+.toast-error {
+  border-color: rgba(229,57,53,0.6);
+  background: rgba(60,30,30,0.96);
+}
+
+@keyframes toastFadeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}

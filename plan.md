@@ -1,6 +1,6 @@
 # SPRC Operations Hub Blueprint v1 (Scope, Flow, Data Contract)
 
-Last updated: 2026-02-12
+Last updated: 2026-02-13
 Status: Active Blueprint
 Source of truth: This file is the product blueprint and implementation DNA for SPRC Operations Hub.
 
@@ -41,73 +41,143 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 - If multiple BHTs exist for location+shift, supervisor must designate one primary House EOC assignee.
 - Mid-cycle reassignments do not move already-generated tasks; only future tasks follow new assignment.
 
-## Decision-Complete Product Behavior
+## User Interaction Contract
 
 ### 1. Role and Access Model
 #### Admin
 - Global read/write across all modules and locations.
-- Manages shift/scheduling settings, global templates, and hard deletes.
+- Manages shift/scheduling settings, global templates, backup access grants, and hard deletes.
 
 #### Supervisor
 - Location-scoped read/write for operations in authorized location(s).
 - Can onboard BHTs only inside authorized location(s).
 - Can assign/reassign BHTs/vans/shifts within scope.
+- Cannot change user roles.
+- Cannot delete/archive issue records.
 
 #### BHT
 - Can view and act on assigned location/shift tasks.
 - Cannot edit submitted records.
-- If no active assignment: login allowed, blocked-action screen (`No Active Assignment`).
+- If no active assignment: login allowed, blocked-action screen (`No Active Assignment`) with contact-supervisor guidance.
 
-### 2. End-User Flow
-#### BHT Flow
-1. Login by PIN.
-2. Home remains close to current layout, but task logic becomes assignment-driven.
-3. Due/overdue EOCs displayed first-class with location grouping.
-4. Van EOC:
+### 2. BHT End-to-End Flow
+1. Login by PIN with explicit inline errors for wrong PIN/inactive/no-assignment.
+2. Home is a single hub with strict ordering:
+- `New Transport` pinned at top.
+- Overdue items.
+- Due today items.
+- Active transports.
+3. EOC action states are explicit:
+- `Not Due` (disabled)
+- `Due` (enabled)
+- `Overdue` (enabled + urgent styling)
+- `Completed` (disabled)
+4. Van EOC flow:
 - Single assigned van: enter checklist directly.
-- Multiple assigned vans: choose van, then checklist.
-5. EOC issue (repair/attention) requires note; submit creates supervisor alert.
-6. New transport requires explicit location selection (default last-used).
-7. Submitted items are locked for BHT.
+- Multiple assigned vans: choose van in picker before checklist.
+5. Checklist interaction contract:
+- Per-item chips: `OK` / `Repair`.
+- `Repair` requires note before submit.
+- `Mark All OK` fills unanswered items only.
+- Sticky submit remains disabled until all items are valid.
+6. Submit outcome contract:
+- Show success confirmation.
+- Return user to Home.
+- Task state flips to `Completed` immediately.
+7. Transport flow:
+- Single active transport only.
+- Start transport: single-location users start directly; multi-location users must pick location first.
+- `ARRIVE` logs timestamped stop (multi-stop supported).
+- Finish validation uses inline section errors and jump-to-first-invalid behavior.
+- BHT closed transport access is read-only via short-window `My Recent`.
+8. Session/edge behavior:
+- Mid-session inactive user -> immediate write lock + re-auth requirement.
+- Assignment removed while active transport exists -> close-only path.
+- Lock/logout blocked while active transport exists.
+- Unlock target with active transport reopens active transport first.
+- Offline mode is read-only warning mode with writes blocked.
 
-#### Supervisor Flow
-1. Landing tab: Dashboard Metrics.
-2. KPI cards are clickable and open filtered action queues.
-3. Supervisor resolves issues/reassigns from queue views.
-4. Alerts remain active until formally resolved.
+### 3. Supervisor End-to-End Flow
+1. Mobile navigation is single dropdown module menu.
+2. Landing page is Dashboard Metrics.
+3. KPI order is locked:
+- EOC Risk
+- Compliance Risk
+- Transport Risk
+4. KPI click-through opens pre-filtered action queues:
+- Authorized scope only.
+- Open/actionable only.
+- Urgency-first sorting (overdue first).
+5. Issue lifecycle is strict:
+- `Open -> In Progress -> Resolved`
+- Resolution requires a note.
+6. Assignment edit workflow requires explicit save with diff summary.
+7. Closed transport edit workflow requires mandatory reason modal + audit event.
+8. Scope banner remains visible with primary + backup scopes and backup expiry.
 
-### 3. EOC Automation and Lifecycle
+### 4. Admin End-to-End Flow
+1. Landing page is global risk dashboard.
+2. Settings groups are fixed:
+- Scheduling
+- Templates
+- Access
+- Thresholds
+3. Template publishing flow is fixed:
+- Draft -> diff preview -> publish with version note.
+4. Backup access management supports:
+- Active/upcoming/expired states.
+- Early revoke with required reason.
+5. Hard delete policy:
+- Two-step confirm.
+- Required reason.
+- Audit log required.
+6. Audit center:
+- Admin-only.
+- Default filters: date, actor, module, location, action type.
+
+### 5. EOC Automation and Lifecycle
 - Idempotent in-app sync runs on authenticated app sessions (`syncEocTasksForUserScope`).
 - Sync generates due EOC tasks for active assignments per configured due-day rules.
 - Sync flips prior-day pending tasks to overdue once app activity occurs after 12:00 AM Phoenix.
 - Task states (user-facing): `pending`, `overdue`, `completed`.
 - Internal/audit markers may include `archived`, `hard_deleted` (admin only, logged).
 
-### 4. Transports and Compliance (v1 Refinement)
-- Transport UX and flow stay mostly unchanged.
+### 6. Transports and Compliance (v1 Refinement)
+- Transport UX and flow stay mostly unchanged except for locked flow and safety constraints above.
 - Add stricter location-scoped access and immutable submit behavior.
 - Compliance module remains Supervisor/Admin only.
 - In-app alerts only (no email/SMS in v1).
 
 ## Important Changes To Public Interfaces / Types
 
-### Firestore Collections (authoritative)
-- `appSettings`
-- `scheduling`: shift definitions, due-day config, timezone (`America/Phoenix`).
+### Important API / Interface / Type Changes (Must Be Locked)
+- `ensureDueEocTasksForScope(scope, nowPhoenix): void`
+- `applyOverdueTransitions(scope, nowPhoenix): void`
+- `submitEocTask(taskId, payload, expectedVersion): void`
+- `setIssueInProgress(issueId, expectedVersion): void`
+- `resolveIssue(issueId, resolutionNote, expectedVersion): void`
+- `createTransport(payload): void`
+- `closeTransport(transportId, payload, expectedVersion): void`
+- `editClosedTransport(transportId, patch, reason, expectedVersion): void`
+- `saveShiftAssignment(assignmentPatch, expectedVersion): void`
+- `grantBackupAccess(payload): void`
+- `revokeBackupAccess(grantId, reason): void`
+
+### Canonical Collection Contract (Source Of Truth)
 - `users`
-- role, active, auth scope, location authorizations.
-- `bhtAssignments` (new canonical assignment model)
-- `bhtUserId`, `locationId`, `shiftId`, `vanIds[]`, `isHousePrimary`, `active`, `effectiveFrom`, `effectiveTo`.
-- `eocTasks` (generated work items)
-- `taskType` (`house|van`), `locationId`, `shiftId`, `vanId?`, `assigneeUserId`, `dueDate`, `status`, `generatedAt`.
+- `shiftAssignments`
+- `eocTasks`
 - `eocSubmissions`
-- immutable submission payload + timestamps.
 - `eocIssues`
-- created from repair/attention checklist items; resolution fields.
+- `transports`
 - `alerts`
-- in-app notification records tied to location and module.
+- `accessGrants`
 - `auditLogs`
-- required for supervisor/admin corrections and all admin hard deletes.
+- `*/{recordId}/activity/*`
+
+### Deterministic EOC Task ID Contract
+- House: `house_{locationId}_{shiftId}_{dueDate}`
+- Van: `van_{locationId}_{shiftId}_{vanId}_{dueDate}`
 
 ### Existing Modules Updated
 - `transports`: add strict location scope, BHT submit-lock enforcement.
@@ -120,10 +190,15 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 - Admin hard-delete workflow (reason required + audit log write in same mutation batch)
 
 ## Data Model and Interfaces (Canonical v1)
-- Canonical assignment model: `bhtAssignments`.
-- Canonical generated task model: `eocTasks` with deterministic cycle keys.
-- Legacy `eocAssignments` remains read-only during migration; active writes belong to `bhtAssignments`/`eocTasks` workflows.
-- User credential contract: `pinHash` (`v1_sha256`) for active authentication storage; legacy plaintext PIN is staged for migration/removal.
+- Canonical assignment model: `shiftAssignments`.
+- Canonical generated task model: `eocTasks` with deterministic IDs and cycle keys.
+- Canonical alert model: `alerts`.
+- Canonical temporary scope model: `accessGrants`.
+- Current implementation migration notes:
+- `bhtAssignments` -> `shiftAssignments`
+- `supervisorAlerts` -> `alerts`
+- Legacy `eocAssignments` remains read-only during migration; active writes belong to assignment/task workflows.
+- User credential contract: `pinHash` (`v1_sha256`) for active authentication storage; legacy plaintext PIN fallback is retired.
 
 ## Write Integrity and Concurrency
 - Write batches are used for multi-document integrity flows (submission + task completion + issue/alert creation).
@@ -199,7 +274,7 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 - Implement Firestore rules by role/scope/action.
 
 ### 3. Assignment Engine (Completed 2026-02-12)
-- Introduce `bhtAssignments`.
+- Introduce `shiftAssignments`.
 - Build supervisor assignment UI and validations.
 
 ### 4. EOC Task Engine (In Progress 2026-02-12)
@@ -227,7 +302,7 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 - Added guided signoff runbook: `docs/UAT_WALKTHROUGH_PHASE9.md`.
 - Added smoke commands: `npm run smoke:phase9` (build gate) and `npm run smoke:phase9:full` (build + lint baseline report).
 - Added clean-state UAT reset seed flow to remove stale legacy records before walkthrough runs: `npm run seed -- --confirm` (or `npm run reset:uat`).
-- Resolved blocker: deployed local `firestore.rules` to `sprc-tx-l` and confirmed full `reset:uat` completion including `bhtAssignments` and `eocTasks`.
+- Resolved blocker: deployed local `firestore.rules` to `sprc-tx-l` and confirmed full `reset:uat` completion including `shiftAssignments` and `eocTasks`.
 - Current evidence:
 - `smoke:phase9`: pass (`vite build` successful).
 - `smoke:phase9:full`: fails on existing lint baseline (40 errors / 8 warnings) tracked separately from Phase 9 walkthrough signoff.
@@ -241,6 +316,10 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 - Compliance is supervisor/admin-only, not self-service for BHTs.
 - Supervisors are location-scoped; admin is global.
 - Soft delete default; admin hard delete allowed only with audit reason.
+- Export default format is `.xlsx`.
+- Export scope default is current filters.
+- Full audit center access is admin-only.
+- Canonical naming for v1 contract is `shiftAssignments`, `alerts`, and `accessGrants` (with migration mapping from current collection names).
 
 ## Continuous Update Instructions (Mandatory)
 1. Update this file after every meaningful merged change.
@@ -252,18 +331,34 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 7. If implementation diverges from blueprint, log as Deviation with owner and resolution date.
 8. Never remove historical Change Log entries.
 
+## Prompt Library
+1. Blueprint Sync Prompt
+- Read `plan.md` and current repo state. Update `plan.md` to reflect what is already implemented vs pending. Refresh Last updated, Progress Snapshot, Decision Log, and Change Log.
+2. Post-Feature Update Prompt
+- I finished `[feature]`. Update `plan.md` so it reflects exact shipped behavior, interface changes, schema changes, and verification results.
+3. Drift Detection Prompt
+- Compare implementation to `plan.md`. List all drift items, then patch `plan.md` to align with shipped behavior or flag explicit deviations.
+4. Interface Lock Prompt
+- Update `plan.md` Interfaces section as canonical contract for `[module]`. Include signatures, collection fields, validation rules, and concurrency expectations.
+5. Cutover Runbook Prompt
+- Update `plan.md` Cutover Runbook with exact current commands, verification checklist, rollback path, and signoff criteria.
+6. Milestone Review Prompt
+- Produce a milestone review from `plan.md`: done, blocked, next 7 tasks, and missing decisions.
+7. Quality Gate Prompt
+- Before coding, review `plan.md` and produce acceptance tests for `[feature]`. After coding, update `plan.md` with pass/fail evidence.
+8. Release Readiness Prompt
+- Audit `plan.md` for release readiness: unresolved decisions, missing tests, missing rule coverage, and missing rollback steps.
+
 ## Progress Snapshot
 | Area | Status | Owner | Target Date | Notes |
 |---|---|---|---|---|
-| Blueprint Lock | Completed | Claude Code | 2026-02-12 | Canonical Scope + Flow blueprint adopted and aligned as system source of truth |
-| Auth + Role Scope | Completed | Claude Code | 2026-02-12 | Phase 2 auth/rules foundation implemented (`firestore.rules`, `src/App.jsx`, `src/components/PinLogin.jsx`, `src/components/SupervisorDashboard.jsx`) |
-| Assignment Engine | Completed | Claude Code | 2026-02-12 | Persistent `bhtAssignments` model and assignment UI/logic implemented (`src/hooks/useEocAssignments.js`, `src/components/SupervisorDashboard.jsx`, `src/components/BhtHub.jsx`) |
-| EOC Task Engine | In Progress | Claude Code | 2026-02-12 | Added `eocTasks` sync engine, overdue flip logic, and task-based checklist submit flow using free-tier in-app lazy sync (no Cloud Functions) |
-| BHT UX Update | Completed | Claude Code | 2026-02-12 | Assignment-aware due/overdue queue is live with no-assignment blocked screen and multi-van picker flow for van EOC task selection |
-| Transport Hardening | Completed | Claude Code | 2026-02-12 | Enforced transport site scope for supervisor views and added submit-lock behavior to prevent post-submit edits in transport workflow |
-| Supervisor Queues | Completed | Claude Code | 2026-02-12 | Clickable KPI cards now drive queue views (issues/overdue/alerts), with resolve and reassign actions plus alert close/read lifecycle behavior |
-| Admin Controls + Audit | Completed | Claude Code | 2026-02-12 | Soft delete standardized for users/assignments; admin-only hard delete requires reason and writes immutable audit log entry; admin audit center view added |
-| Regression + UAT | In Progress | Claude Code + Admin/Supervisor | 2026-02-12 | Added Phase 9 checklist/matrix and smoke scripts; build smoke passes; final walkthrough signoff still required |
+| Auth + Role Scope | Completed | Claude Code | 2026-02-13 | Claims provisioning/verification scripts are implemented (`claims:provision`, `claims:verify`) and plaintext PIN fallback is removed in login; runbook now captures provisioning + strict enforcement execution steps |
+| Shift Assignments | Completed | Claude Code | 2026-02-13 | Canonical naming cutover is implemented in app/rules/seed paths (`shiftAssignments`) |
+| EOC Tasks + Lifecycle | In Progress | Claude Code | 2026-02-12 | Task sync/checklist flow exists with optimistic `version` checks on submit + issue lifecycle; canonical service-interface wrapper consolidation still pending |
+| Transport Hardening | In Progress | Claude Code | 2026-02-12 | Single-active and lock guards are in place; full close-only and validation contract alignment still pending |
+| Supervisor Queues | In Progress | Claude Code | 2026-02-12 | KPI queues exist and scope banner now shows primary + backup scopes; queue lifecycle still needs full canonical service-layer alignment |
+| Admin Controls + Audit | Completed | Claude Code | 2026-02-13 | Audit center/deletes/access-grant lifecycle are implemented and template management now enforces Draft -> Diff -> Publish with required version note |
+| Regression + UAT | In Progress | Claude Code + Admin/Supervisor | 2026-02-12 | Matrix and walkthrough docs exist; full signoff evidence and go/no-go checklist still pending |
 
 ## Decision Log
 | Date | Decision | Why | Impact |
@@ -300,111 +395,134 @@ Goal: One app that BHTs and supervisors use for daily operations: EOCs + transpo
 | 2026-02-12 | Backlog Closure | Added canonical blueprint contract sections and linked cutover runbook artifacts | `plan.md`, `docs/CUTOVER_RUNBOOK.md` | Manual blueprint contract review |
 | 2026-02-12 | Backlog Closure | Marked legacy `eocAssignments` controls read-only in Supervisor EOC panel with migration guidance | `src/components/SupervisorEocPanel.jsx`, `plan.md` | `npm run build` |
 | 2026-02-12 | Backlog Closure | Expanded audit logging coverage for assignment mutations, issue lifecycle actions, and transport close workflow | `src/components/SupervisorDashboard.jsx`, `src/components/CloseChecklist.jsx`, `src/App.jsx`, `plan.md` | `npm run build` |
+| 2026-02-12 | Blueprint Recovery | Applied recovery plan updates: added missing canonical headings/contracts, inserted interface signatures and deterministic IDs, normalized progress rows, and replaced backlog with table-based Implementation Task Pack | `plan.md` | Manual contract parity review against requested recovery plan |
+| 2026-02-12 | Backlog Closure | Implemented `accessGrants` lifecycle: scoped session merge, live scope refresh, admin grant/revoke panel with required revoke reason, scope banner expiry display, and UAT seed/rules coverage | `src/services/accessGrantService.js`, `src/components/PinLogin.jsx`, `src/App.jsx`, `src/components/SupervisorDashboard.jsx`, `src/components/AccessGrantPanel.jsx`, `firestore.rules`, `scripts/seedUsers.js`, `plan.md` | `npm run build` |
+| 2026-02-12 | Backlog Closure | Implemented optimistic concurrency contract (`version`/`expectedVersion`) across critical mutable flows: shift assignment save/delete, issue state transitions, EOC task submit completion, and close-transport mutation | `src/services/versioning.js`, `src/components/SupervisorDashboard.jsx`, `src/components/EocChecklist.jsx`, `src/components/CloseChecklist.jsx`, `src/services/eocTaskEngine.js`, `src/components/TransportCard.jsx`, `src/App.jsx`, `scripts/seedUsers.js`, `plan.md` | `npm run build` |
+| 2026-02-12 | Backlog Closure | Implemented offline read-only/write-block hardening and staged auth-backed scope migration: offline action guards across BHT/supervisor/admin writes, offline UI signaling, anonymous auth bootstrap on PIN login, and claim-aware hybrid Firestore role/location rules | `src/utils/networkGuard.js`, `src/App.jsx`, `src/components/Header.jsx`, `src/components/TransportCard.jsx`, `src/components/EocChecklist.jsx`, `src/components/CloseChecklist.jsx`, `src/components/SupervisorDashboard.jsx`, `src/components/AccessGrantPanel.jsx`, `src/components/PinLogin.jsx`, `src/firebase.js`, `firestore.rules`, `plan.md` | `npm run build` |
+| 2026-02-12 | Backlog Closure | Added strict auth cutover controls and enforcement toggle: login blocks when strict mode is enabled without claims, app session refresh enforces policy changes, admin UI can enable/disable strict mode with audit reason, and rules enforce claim presence when toggle is enabled | `src/services/authPolicyService.js`, `src/components/PinLogin.jsx`, `src/App.jsx`, `src/components/SupervisorDashboard.jsx`, `firestore.rules`, `plan.md` | `npm run build` |
+| 2026-02-13 | Backlog Closure | Added production auth-claims rollout tooling: custom-claim provision/verification scripts, package commands, and updated runbook references for strict-scope cutover execution | `scripts/provisionAuthClaims.js`, `scripts/verifyAuthClaims.js`, `package.json`, `docs/CUTOVER_RUNBOOK.md`, `plan.md` | `npm run build` |
+| 2026-02-13 | Backlog Closure | Completed canonical naming cutover from legacy collections to canonical contract names (`shiftAssignments`, `alerts`) across UI/services/rules/seeding/docs | `src/App.jsx`, `src/components/SupervisorDashboard.jsx`, `src/components/EocChecklist.jsx`, `src/hooks/useEocAssignments.js`, `src/services/eocTaskEngine.js`, `scripts/seedUsers.js`, `firestore.rules`, `docs/*`, `plan.md` | `npm run build` |
+| 2026-02-13 | Backlog Closure | Implemented template publish workflow contract in Admin EOC panel: Draft -> Diff -> Publish with required version note and version-history records | `src/components/SupervisorEocPanel.jsx`, `src/components/SupervisorDashboard.jsx`, `firestore.rules`, `scripts/seedUsers.js`, `plan.md` | `npm run build` |
 
-## Upcoming Tasks (Gap Closure Backlog)
+## Implementation Task Pack — Feature + UX Flow Execution
 
-### P0 Critical (Must Land Before Broader Rollout)
-1. **Fix blueprint section contract drift (Completed 2026-02-12)**
-- Added required canonical sections:
-- `Data Model and Interfaces (Canonical v1)`
-- `Write Integrity and Concurrency`
-- `Authorization and Rules Contract`
-- `Free-Tier Automation Model`
-- `One-Time Reset and Cutover Runbook`
-- Done when: `plan.md` structure fully matches the agreed canonical outline.
+### Summary
+This task pack translates locked decisions (features, UI behavior, and end-user flow) into implementation-ready work items with priorities, dependencies, and acceptance criteria.
+Use this as the executable backlog section in `plan.md` under implementation.
 
-2. **Replace client-trust security model with auth-backed enforcement**
-- Current rules explicitly state client-side trust and allow broad reads/writes (`firestore.rules`).
-- Done when: Firestore rules enforce role/location scope server-side and deny unauthorized paths.
+### Task Backlog
 
-3. **Harden PIN auth model (In Progress 2026-02-12)**
-- Implemented hash-based login contract (`pinHash`) and staged legacy plaintext migration on successful login.
-- Remaining: forced PIN change UX and full retirement/cleanup validation for any lingering plaintext records.
-- Done when: hashed PIN contract is implemented (`pinHash`, algo params), forced change flow exists, plaintext pins retired.
+#### P0 — Blueprint and Contract Lock
+| ID | Task | Dependency | Done When |
+|---|---|---|---|
+| P0-01 | Add missing required `plan.md` headings: `User Interaction Contract`, `Data Model and Interfaces (Canonical v1)`, `Write Integrity and Concurrency`, `Authorization and Rules Contract`, `Free-Tier Automation Model`, `One-Time Reset and Cutover Runbook`, `Prompt Library` | None | All required headings exist exactly once |
+| P0-02 | Move current content under canonical headings without losing behavior details | P0-01 | No behavior text orphaned under wrong sections |
+| P0-03 | Insert all required interface signatures verbatim | P0-01 | Signatures present exactly as contract text |
+| P0-04 | Insert canonical collections including `accessGrants` and `*/{recordId}/activity/*` | P0-01 | All canonical collections appear in one authoritative list |
+| P0-05 | Add deterministic task ID contract (`house_...`, `van_...`) | P0-01 | ID formulas documented in interface/data section |
+| P0-06 | Resolve naming decisions in plan text (`bhtAssignments` vs `shiftAssignments`, `supervisorAlerts` vs `alerts`) | P0-03, P0-04 | One canonical name per concept with migration note |
+| P0-07 | Remove/resolve automation contradictions in plan text (Cloud Functions vs lazy sync) | P0-01 | Single canonical automation model across all sections |
+| P0-08 | Normalize Progress Snapshot rows to target implementation areas | P0-01 | Rows include: Auth+Role Scope, Shift Assignments, EOC Tasks+Lifecycle, Transport Hardening, Supervisor Queues, Admin Controls+Audit, Regression+UAT |
 
-4. **Enforce location scope on all data reads/writes**
-- Supervisor/admin dashboards currently query global collections without scope filters.
-- Done when: every query/mutation is constrained by authorized locations and validated by rules.
+#### P0 — BHT Flow (Feature + UI)
+| ID | Task | Dependency | Done When |
+|---|---|---|---|
+| BHT-01 | Home queue order lock: `New Transport` pinned, then overdue, due today, active transports | P0-02 | Home order is deterministic across sessions |
+| BHT-02 | Stateful EOC actions: `Not Due`, `Due`, `Overdue`, `Completed` | BHT-01 | Each task renders correct state and actionability |
+| BHT-03 | Multi-van Van EOC picker flow | BHT-01 | Multi-van users must select van before checklist |
+| BHT-04 | Checklist chip UX: `OK` / `Repair` with repair-note required | BHT-02 | Repair submit blocked without note |
+| BHT-05 | Add `Mark All OK` (fills unanswered only) | BHT-04 | Pre-answered items unchanged after action |
+| BHT-06 | Sticky submit with full-answer gating | BHT-04 | Submit disabled until all items valid |
+| BHT-07 | Submit outcome behavior: success confirmation + return home + immediate `Completed` state | BHT-06 | UI reflects completion without manual refresh |
+| BHT-08 | Transport start flow: single-location direct start, multi-location picker | BHT-01 | Start flow follows scope-aware branching |
+| BHT-09 | Enforce single active transport per BHT | BHT-08 | Second active transport creation blocked |
+| BHT-10 | Finish validation UX: inline section errors + jump to first invalid | BHT-09 | Finish cannot proceed with hidden validation failures |
+| BHT-11 | Closed transport access: read-only `My Recent` window | BHT-09 | Closed items are view-only for BHT |
+| BHT-12 | Session rules: lock/logout blocked when active transport exists | BHT-09 | User cannot exit active transport path improperly |
+| BHT-13 | Mid-session deactivation handling: write lock + forced re-auth | BHT-12 | Writes fail immediately after deactivation |
+| BHT-14 | Assignment-removed with active transport: close-only path | BHT-12 | User can only close existing active transport |
+| BHT-15 | Offline mode: read-only warning state, writes blocked | BHT-12 | Offline writes are blocked with explicit feedback |
 
-5. **Correct overstated implementation status in blueprint**
-- `plan.md` marks Auth + Role Scope completed while rules remain client-trust/open.
-- Done when: Progress Snapshot and Change Log are reconciled with actual repo state.
+#### P1 — Supervisor Flow (Feature + UI)
+| ID | Task | Dependency | Done When |
+|---|---|---|---|
+| SUP-01 | Mobile navigation lock to single dropdown module menu | P0-02 | Mobile nav has one authoritative module selector |
+| SUP-02 | Dashboard KPI order lock: EOC Risk, Compliance Risk, Transport Risk | SUP-01 | KPI cards render in locked order |
+| SUP-03 | KPI click-through queues with defaults: scoped, open/actionable, urgency sort | SUP-02 | Queue opens pre-filtered with overdue first |
+| SUP-04 | Issue lifecycle implementation: `Open -> In Progress -> Resolved` | SUP-03 | State transitions enforced in UI/data |
+| SUP-05 | Resolve requires resolution note | SUP-04 | Resolve action blocked without note |
+| SUP-06 | Supervisor role restrictions: no role changes, no out-of-scope actions, no issue delete/archive | SUP-03 | Restricted actions blocked in UI + backend |
+| SUP-07 | Assignment edit workflow: explicit save + diff summary | SUP-03 | Save preview shows before/after fields |
+| SUP-08 | Closed transport edit workflow: mandatory reason modal + audit event | SUP-03 | No edit commit without reason + audit entry |
+| SUP-09 | Scope banner with primary + backup scopes and backup expiry | SUP-01 | Scope indicator always visible in supervisor context |
 
-### P1 High (Core Product Contract Completion)
-1. **Finalize and implement canonical interface contract**
-- Add/align service contracts and naming consistency for task generation, issue lifecycle, assignment save, backup access, and transport close/edit flows.
-- Done when: `plan.md` interfaces map 1:1 to implementation entry points.
+#### P1 — Admin Flow (Feature + UI)
+| ID | Task | Dependency | Done When |
+|---|---|---|---|
+| ADM-01 | Global risk dashboard landing | P0-02 | Admin lands on global risk view |
+| ADM-02 | Settings IA lock: Scheduling, Templates, Access, Thresholds | ADM-01 | Settings grouped exactly as contract |
+| ADM-03 | Template publish workflow: Draft -> Diff -> Publish + version note | ADM-02 | Publish requires diff preview and version note |
+| ADM-04 | Backup access management panel with active/upcoming/expired states | ADM-02 | Grant lifecycle states visible and accurate |
+| ADM-05 | Early revoke flow requires reason | ADM-04 | Revoke blocked without reason |
+| ADM-06 | Hard delete two-step confirmation + required reason + audit | ADM-01 | Hard delete impossible without both confirmations and reason |
+| ADM-07 | Audit center admin-only with default filters | ADM-01 | Non-admin cannot access; defaults applied on load |
 
-2. **Finalize canonical collection contract and naming**
-- Resolve `alerts` vs `supervisorAlerts`, `bhtAssignments` vs `shiftAssignments`, and legacy/target collection coexistence.
-- Done when: one authoritative schema set is documented and implemented.
+#### P1 — Data Integrity, Security, and Automation
+| ID | Task | Dependency | Done When |
+|---|---|---|---|
+| CORE-01 | Implement service-layer wrappers for all canonical interfaces | P0-03 | UI calls canonical service layer only |
+| CORE-02 | Add `version` + `expectedVersion` optimistic concurrency on mutable critical records | CORE-01 | Stale writes produce conflict flow, not overwrite |
+| CORE-03 | Enforce transaction/batch for critical multi-doc operations | CORE-01 | Critical writes are atomic |
+| CORE-04 | Firestore rules move from client-trust to role/location enforcement | P0-04 | Unauthorized cross-scope access denied server-side |
+| CORE-05 | PIN hardening migration (`pinHash`, algo fields, forced change) | CORE-04 | Plain PIN no longer authoritative storage |
+| CORE-06 | Implement `accessGrants` lifecycle + scope evaluation | CORE-04 | Backup access expires/revokes correctly |
+| CORE-07 | Lazy idempotent automation entry points (BHT Home, Supervisor Dashboard, Admin Dashboard) | CORE-01 | Missing due tasks self-heal; overdue transitions applied idempotently |
+| CORE-08 | Central audit + per-record activity writes for critical actions | CORE-03 | Every critical action has audit and activity evidence |
 
-3. **Align deterministic EOC task ID contract (Completed 2026-02-12)**
-- Canonical task IDs are finalized as deterministic `task_{locationId}_{shiftId}_{taskType}_{...}_{dueDate}` cycle keys.
-- Done when: deterministic format is finalized and duplicate prevention is verified.
+#### P2 — Cutover, UAT, and Release Readiness
+| ID | Task | Dependency | Done When |
+|---|---|---|---|
+| REL-01 | Finalize one-time reset and cutover runbook in `plan.md` with exact commands | P0-01 | Runbook is executable end-to-end |
+| REL-02 | Align `docs/UAT_WALKTHROUGH_PHASE9.md` and regression matrix to final flow contract | REL-01 | UAT docs match canonical behavior text |
+| REL-03 | Execute full UAT walkthrough with Admin + Supervisor signoff | REL-02 | Signoff table completed with pass/fail notes |
+| REL-04 | Record release readiness gaps: unresolved decisions, missing tests, missing rule coverage, rollback risk | REL-03 | Explicit go/no-go checklist exists |
+| REL-05 | Update `plan.md` Progress Snapshot + Decision Log + Change Log after each merged bundle | All | Living blueprint remains current and historically complete |
 
-4. **Retire legacy `eocAssignments` paths (In Progress 2026-02-12)**
-- `SupervisorEocPanel` legacy assignment writes are now blocked/read-only with migration guidance to `bhtAssignments`.
-- Remaining: remove legacy read dependencies after migration cutover confirms no historical dependency.
-- Done when: legacy reads/writes removed or explicitly marked read-only with migration plan.
+### Gap-to-Task Mapping (What Is Still Missing Right Now)
+1. Blueprint contract recovery in this update:
+- Added `User Interaction Contract` heading and detailed role/BHT/supervisor/admin behavior rules.
+- Added `Prompt Library`.
+- Added verbatim canonical signature list.
+- Added explicit `accessGrants` and `*/{recordId}/activity/*`.
+- Added deterministic `house_...` / `van_...` formulas.
+2. Remaining gaps are operational execution gaps:
+- Run `npm run claims:provision` + `npm run claims:verify` against production/staging user set, then enable strict enforcement in Users tab once verification is complete.
+3. Backlog format status:
+- Backlog is now aligned to table-based Implementation Task Pack sections (`P0`, `BHT`, `SUP`, `ADM`, `CORE`, `REL`).
 
-5. **Implement full issue lifecycle (Completed 2026-02-12)**
-- Lifecycle now supports `open -> in_progress -> resolved` with required resolution note in supervisor queue workflow.
-- Done when: state machine, validation, and queue UX support all states.
+### Test Cases and Scenarios
+1. Role scope enforcement (BHT/Supervisor/Admin by location).
+2. Deterministic `eocTasks` generation and duplicate prevention.
+3. Overdue transition timing at Phoenix midnight.
+4. Issue lifecycle including `In Progress` and mandatory resolution note.
+5. Single-active transport enforcement.
+6. Closed transport supervisor edit requires reason + audit.
+7. Concurrency conflict on stale `expectedVersion`.
+8. Backup access expiry/revoke behavior during active session.
+9. Offline read-only behavior and write block.
+10. Hard-delete policy with audit compliance.
 
-6. **Add concurrency/version protection**
-- No `version` / `expectedVersion` checks currently.
-- Done when: optimistic concurrency is enforced on critical mutable records with conflict UX.
-
-7. **Implement audit trail for critical actions (In Progress 2026-02-12)**
-- Added/expanded audit writes for assignment create/update, issue in-progress/resolution, transport close, and hard-delete flows.
-- Remaining: complete audit coverage matrix for any remaining critical mutation paths.
-- Done when: `auditLogs` entries exist for all critical action categories.
-
-8. **Implement soft-delete + admin hard-delete workflow (Completed 2026-02-12)**
-- Soft-delete and admin hard-delete protections are implemented with mandatory reasons and audit log linkage.
-- Done when: soft-delete fields standardized and admin hard-delete guarded by policy.
-
-9. **Implement backup access grant/revoke contract**
-- Add temporary supervisor cross-location grants with start/end + revoke reason path.
-- Done when: grant lifecycle enforced in UI + rules + data model.
-
-10. **Enforce reassignment policy exceptions**
-- Mid-cycle reassignment should affect future tasks only, except allowed inactive-assignee exception with required reason.
-- Done when: policy is encoded in assignment/task services and audited.
-
-### P2 Medium (UX and Operations Hardening)
-1. **Complete BHT EOC home state contract (Completed 2026-02-12)**
-- Added explicit state indicators (`Not Due`, `Due`, `Overdue`, `Completed`) and `Mark All OK` helper workflow.
-- Done when: UI behavior matches blueprint verbatim.
-
-2. **Enforce single-active transport per BHT (Completed 2026-02-12)**
-- New transport start now checks for existing active transport and routes user to continue/close instead of creating duplicate active sessions.
-- Done when: second active start is blocked at UI and write layer.
-
-3. **Implement location picker logic for New Transport (Completed 2026-02-12)**
-- Single location auto-start remains direct; multi-location accounts now require explicit site selection with default suggestion from last-used site.
-- Done when: start flow behavior is role/scope aware and tested.
-
-4. **Implement active-transport session guards (Completed 2026-02-12)**
-- Lock/logout now blocks while active transport exists and routes back to transport/close recovery flow.
-- Done when: session control rules match blueprint behavior.
-
-5. **Add offline read-only mode**
-- Writes should block cleanly while showing clear offline status.
-- Done when: offline write attempts are prevented and user informed.
-
-6. **Build cutover runbook and verification checklist (Completed 2026-02-12)**
-- Added `docs/CUTOVER_RUNBOOK.md` with reset, smoke, rollback, and signoff flow.
-- Done when: runbook is executable and rehearsal-validated.
-
-7. **Add acceptance and regression test suite**
-- Cover scope, EOC lifecycle, transport lifecycle, concurrency, backup expiry, and audit compliance.
-- Done when: test matrix in blueprint has executable test coverage and pass/fail evidence.
+### Assumptions and Defaults (Locked for This Plan)
+1. Timezone: `America/Phoenix`.
+2. v1 automation: no Cloud Functions critical path; lazy idempotent app-entry sync.
+3. Alerts are in-app only for v1.
+4. Export default: `.xlsx`, scoped to current filters.
+5. Audit center is admin-only.
+6. Canonical naming for final contract: `shiftAssignments`, `alerts`, `accessGrants`.
 
 ## Open Questions / Future Decisions
 | Date | Question | Options | Default if Unanswered | Owner |
 |---|---|---|---|---|
-| 2026-02-12 | Canonical assignment collection name | `bhtAssignments` vs `shiftAssignments` | Keep `bhtAssignments` in v1, map in plan | Admin/Owner |
-| 2026-02-12 | Canonical alerts collection name | `alerts` vs `supervisorAlerts` | Keep `supervisorAlerts` in v1, plan migration | Admin/Owner |
-| 2026-02-12 | PIN model cutover path | Immediate forced migration vs staged migration | Staged migration with forced first-login rotate | Admin/Owner |
+| 2026-02-12 | PIN model forced-change rollout | Immediate force on next login vs staged by role/location | Staged rollout with admin first, then supervisors, then BHTs | Admin/Owner |
+| 2026-02-12 | Auth-backed role/location enforcement migration path | Big-bang Firebase Auth cutover vs staged hybrid path | Staged hybrid path with dual-read validation period | Admin/Owner |
+| 2026-02-12 | `version`/`expectedVersion` conflict UX standard | Modal reload+retry vs silent retry vs hard-block-only | Modal reload+retry with clear diff summary | Admin/Owner |

@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, updateDoc, serverTimestamp, addDoc, collection } from 'firebase/firestore'
+import { doc, getDoc, serverTimestamp, collection, runTransaction } from 'firebase/firestore'
+import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
+import { notifySuccess } from '../utils/toast'
 
-function CloseChecklist({ transportId, onClose, onComplete, user }) {
+function CloseChecklist({ transportId, onClose, onComplete, user, isOffline = false }) {
   const [loading, setLoading] = useState(true)
   const [transport, setTransport] = useState(null)
   const [errors, setErrors] = useState([])
@@ -14,8 +16,9 @@ function CloseChecklist({ transportId, onClose, onComplete, user }) {
         const docSnap = await getDoc(docRef)
 
         if (docSnap.exists()) {
-          setTransport(docSnap.data())
-          validateTransport(docSnap.data())
+          const transportData = { id: docSnap.id, ...docSnap.data(), version: getVersionNumber(docSnap.data()) }
+          setTransport(transportData)
+          validateTransport(transportData)
         }
       } catch (error) {
         console.error('Error loading transport:', error)
@@ -50,6 +53,11 @@ function CloseChecklist({ transportId, onClose, onComplete, user }) {
   }
 
   const handleCloseTransport = async () => {
+    if (isOffline) {
+      alert('Offline mode: closing transport is unavailable until connection is restored.')
+      return
+    }
+
     if (errors.length > 0) {
       return
     }
@@ -60,26 +68,57 @@ function CloseChecklist({ transportId, onClose, onComplete, user }) {
     }
 
     try {
-      await updateDoc(doc(db, 'transports', transportId), {
-        status: 'closed',
-        closedAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      })
-      if (user?.id && user?.name) {
-        await addDoc(collection(db, 'auditLogs'), {
-          action: 'transport_close',
-          collectionPath: 'transports',
+      const expectedVersion = getVersionNumber(transport)
+      await runTransaction(db, async (transaction) => {
+        const transportRef = doc(db, 'transports', transportId)
+        const transportSnap = await transaction.get(transportRef)
+        if (!transportSnap.exists()) {
+          throw new Error('Transport no longer exists.')
+        }
+
+        const latest = transportSnap.data()
+        if (latest.status !== 'returned') {
+          throw new Error('Transport is no longer in returned status.')
+        }
+
+        const { nextVersion } = assertExpectedVersion({
+          expectedVersion,
+          currentVersion: getVersionNumber(latest),
           documentId: transportId,
-          performedByUserId: user.id,
-          performedByName: user.name,
-          reason: 'Transport closed via close checklist',
-          createdAt: serverTimestamp()
+          recordLabel: 'Transport'
         })
-      }
+
+        transaction.update(transportRef, {
+          status: 'closed',
+          closedAt: serverTimestamp(),
+          version: nextVersion,
+          updatedAt: serverTimestamp()
+        })
+
+        if (user?.id && user?.name) {
+          const auditRef = doc(collection(db, 'auditLogs'))
+          transaction.set(auditRef, {
+            action: 'transport_close',
+            collectionPath: 'transports',
+            documentId: transportId,
+            performedByUserId: user.id,
+            performedByName: user.name,
+            reason: 'Transport closed via close checklist',
+            version: 1,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          })
+        }
+      })
+      notifySuccess('Transport closed')
       onComplete()
     } catch (error) {
       console.error('Error closing transport:', error)
-      alert('Failed to close transport. Please try again.')
+      if (error?.code === 'version-conflict') {
+        alert(formatVersionConflictMessage(error))
+      } else {
+        alert(error?.message || 'Failed to close transport. Please try again.')
+      }
     }
   }
 
@@ -283,23 +322,28 @@ function CloseChecklist({ transportId, onClose, onComplete, user }) {
           </button>
           <button
             onClick={handleCloseTransport}
-            disabled={errors.length > 0}
+            disabled={errors.length > 0 || isOffline}
             style={{
               flex: 1,
               padding: '16px',
-              backgroundColor: errors.length > 0 ? '#e8e8e8' : '#4CAF50',
-              color: errors.length > 0 ? '#999' : 'white',
+              backgroundColor: (errors.length > 0 || isOffline) ? '#e8e8e8' : '#4CAF50',
+              color: (errors.length > 0 || isOffline) ? '#999' : 'white',
               border: 'none',
               borderRadius: '12px',
               fontSize: '18px',
               fontWeight: 'bold',
-              cursor: errors.length > 0 ? 'not-allowed' : 'pointer',
-              opacity: errors.length > 0 ? 0.6 : 1
+              cursor: (errors.length > 0 || isOffline) ? 'not-allowed' : 'pointer',
+              opacity: (errors.length > 0 || isOffline) ? 0.6 : 1
             }}
           >
             Close Transport
           </button>
         </div>
+        {isOffline && (
+          <div style={{ marginTop: '10px', fontSize: '12px', color: '#FF9800', textAlign: 'center' }}>
+            Offline mode is active. Close transport is disabled until connection is restored.
+          </div>
+        )}
       </div>
     </div>
   )

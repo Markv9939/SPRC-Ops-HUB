@@ -1,3 +1,4 @@
+/* global process */
 /**
  * Deactivate stale clients script
  *
@@ -28,7 +29,7 @@ try {
     credential: admin.credential.applicationDefault(),
     projectId: 'sprc-tx-l'
   })
-} catch (error) {
+} catch {
   console.log('Using service account key for authentication')
   try {
     const serviceAccount = JSON.parse(

@@ -12,7 +12,7 @@ import AutocompleteDropdown from './AutocompleteDropdown'
  * - Queries Firestore clients collection (active only)
  * - Upserts new clients to Firestore with lastUsedAt tracking
  */
-function ClientAutocomplete({ onAddClient, existingClients = [], transportId }) {
+function ClientAutocomplete({ onAddClient, existingClients = [] }) {
   const [inputValue, setInputValue] = useState('')
   const inputRef = useRef(null)
   const { suggestions, isVisible, search, select, hide, show } = useAutocomplete(

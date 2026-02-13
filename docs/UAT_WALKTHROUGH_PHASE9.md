@@ -1,6 +1,6 @@
 # Phase 9 UAT Walkthrough Script
 
-Last updated: 2026-02-12
+Last updated: 2026-02-13
 Goal: Execute a single guided walkthrough and capture signoff evidence for Phase 9.
 
 ## Preconditions
@@ -22,6 +22,8 @@ Goal: Execute a single guided walkthrough and capture signoff evidence for Phase
    - 1 overdue EOC task from prior day
 5. Start app:
    - `npm run dev`
+6. Validate claims provisioning before strict-mode tests:
+   - `npm run claims:verify`
 
 ## Environment Note (2026-02-12)
 
@@ -51,6 +53,17 @@ For each test case below, capture:
    - Login as Admin.
    - Verify access across all configured locations.
    - Expected: full visibility.
+4. RS-4 Backup access grant lifecycle
+   - As Admin, create backup grant in Users tab for a scoped Supervisor (start now, near-term expiry).
+   - Verify scope banner shows backup scope + expiry; then revoke with required reason.
+   - Expected: grant status transitions active/upcoming/expired/revoked correctly and revoke is blocked without reason.
+5. RS-5 Custom-claim provisioning verification
+   - Run `npm run claims:verify`.
+   - Expected: all active rollout users pass with no claim mismatches.
+6. RS-6 Strict auth mode toggle
+   - As Admin, switch `Auth Scope Enforcement` to strict mode from Users tab.
+   - Attempt login with a session lacking custom claims.
+   - Expected: login blocked with strict-mode message until claim-enabled account is used.
 
 ### B. Assignment + EOC Generation
 
@@ -97,6 +110,9 @@ For each test case below, capture:
 4. DI-4 Hard delete reason requirement
    - Attempt admin hard delete without reason.
    - Expected: blocked.
+5. DI-5 Offline write protection
+   - Disable network and attempt transport/EOC/supervisor write actions.
+   - Expected: explicit offline warning and write blocked until reconnect.
 
 ### F. Scheduler/Idempotency
 

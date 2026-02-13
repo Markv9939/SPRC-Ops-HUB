@@ -1,3 +1,4 @@
+/* global process */
 /**
  * Migration script: Add active and lastUsedAt fields to existing clients
  *
@@ -22,7 +23,7 @@ try {
     credential: admin.credential.applicationDefault(),
     projectId: 'sprc-tx-l'
   })
-} catch (error) {
+} catch {
   console.log('Using service account key for authentication')
   try {
     const serviceAccount = JSON.parse(

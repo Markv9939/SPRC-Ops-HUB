@@ -1,11 +1,17 @@
-import { useState, useEffect, useMemo } from 'react'
-import { db } from '../firebase'
-import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, getDocs, updateDoc, serverTimestamp, addDoc, writeBatch } from 'firebase/firestore'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { db, auth } from '../firebase'
+import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, getDocs, updateDoc, serverTimestamp, addDoc, writeBatch, runTransaction } from 'firebase/firestore'
+import { signInAnonymously, signOut } from 'firebase/auth'
 import * as XLSX from 'xlsx'
 import SupervisorEocPanel from './SupervisorEocPanel'
-import CompliancePanel, { getStatus } from './CompliancePanel'
+import CompliancePanel from './CompliancePanel'
+import AccessGrantPanel from './AccessGrantPanel'
 import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 import { hashPin } from '../utils/pinHash'
+import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
+import { getAuthPolicy, setAuthScopeEnforced } from '../services/authPolicyService'
+import { notifySuccess } from '../utils/toast'
+import { getStatus } from '../utils/complianceStatus'
 
 const TAB_LABELS = {
   dashboard: '\u{1F4C8} Dashboard',
@@ -20,7 +26,7 @@ const TAB_KEYS = Object.keys(TAB_LABELS)
 const TRANSPORT_SITES = new Set(['PHP', 'RTC'])
 const COMPLIANCE_SITES = new Set(['RTC', 'OTC'])
 
-function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
+function SupervisorDashboard({ user, isOffline = false }) {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
   const [transports, setTransports] = useState([])
@@ -38,9 +44,14 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   // Filters
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [transportSiteFilter, setTransportSiteFilter] = useState('ALL')
+  const [transportStatusFilter, setTransportStatusFilter] = useState('all')
+  const [transportReasonFilter, setTransportReasonFilter] = useState('')
   const [selectedDriver, setSelectedDriver] = useState('')
   const [overdueFilter, setOverdueFilter] = useState('all')
   const [clientSearch, setClientSearch] = useState('')
+  const [isDashboardDrilldownActive, setIsDashboardDrilldownActive] = useState(false)
+  const [drilldownLabel, setDrilldownLabel] = useState('')
 
   const [drivers, setDrivers] = useState([])
 
@@ -50,8 +61,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   const [eocAlerts, setEocAlerts] = useState([])
   const [queueView, setQueueView] = useState('issues')
   const [queueLocationFilter, setQueueLocationFilter] = useState('all')
-  const [eocResolvingId, setEocResolvingId] = useState(null)
-  const [eocResolveNotes, setEocResolveNotes] = useState('')
+  const [eocIssueActionNotes, setEocIssueActionNotes] = useState({})
 
   // Compliance dashboard summary
   const [complianceItems, setComplianceItems] = useState([])
@@ -61,9 +71,11 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   const [users, setUsers] = useState([])
   const [editingUser, setEditingUser] = useState(null)
   const [userForm, setUserForm] = useState({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true })
+  const [authScopeEnforced, setAuthScopeEnforcedState] = useState(false)
+  const [authPolicyLoading, setAuthPolicyLoading] = useState(false)
 
   // Assignment Management
-  const [bhtAssignments, setBhtAssignments] = useState([])
+  const [shiftAssignments, setShiftAssignments] = useState([])
   const [editingAssignment, setEditingAssignment] = useState(null)
   const [assignmentForm, setAssignmentForm] = useState({
     bhtUserId: '', locationId: '', shiftId: '', vanIds: [], isHousePrimary: false, active: true
@@ -71,15 +83,44 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
 
   const isAdmin = user?.role === 'admin'
   const availableTabKeys = isAdmin ? TAB_KEYS : TAB_KEYS.filter(k => k !== 'audit')
-  const rawScopes = Array.isArray(user?.authorizedLocations) ? user.authorizedLocations : []
-  const normalizedScopes = [...new Set([
-    ...(user?.site ? [user.site] : []),
-    ...rawScopes
-  ].map(v => String(v || '').trim().toUpperCase()))]
-  const allowedTransportSites = isAdmin ? [] : normalizedScopes.filter(v => TRANSPORT_SITES.has(v))
-  const allowedComplianceSites = isAdmin ? [] : normalizedScopes.filter(v => COMPLIANCE_SITES.has(v))
-  const inTransportScope = (site) => isAdmin || allowedTransportSites.includes(String(site || '').trim().toUpperCase())
-  const inComplianceScope = (site) => isAdmin || allowedComplianceSites.includes(String(site || '').trim().toUpperCase())
+  const rawScopes = useMemo(
+    () => (Array.isArray(user?.authorizedLocations) ? user.authorizedLocations : []),
+    [user?.authorizedLocations]
+  )
+  const normalizedScopes = useMemo(() => (
+    [...new Set([
+      ...(user?.site ? [user.site] : []),
+      ...rawScopes
+    ].map(v => String(v || '').trim().toUpperCase()))]
+  ), [rawScopes, user?.site])
+  const primaryScopes = useMemo(() => (
+    [...new Set([
+      ...(Array.isArray(user?.primaryScopes) ? user.primaryScopes : []),
+      ...(user?.site ? [user.site] : [])
+    ].map(v => String(v || '').trim().toUpperCase()).filter(Boolean))]
+  ), [user?.primaryScopes, user?.site])
+  const activeBackupGrants = useMemo(
+    () => (Array.isArray(user?.activeBackupGrants)
+      ? user.activeBackupGrants.filter(grant => grant?.state === 'active')
+      : []),
+    [user?.activeBackupGrants]
+  )
+  const allowedTransportSites = useMemo(
+    () => (isAdmin ? [] : normalizedScopes.filter(v => TRANSPORT_SITES.has(v))),
+    [isAdmin, normalizedScopes]
+  )
+  const allowedComplianceSites = useMemo(
+    () => (isAdmin ? [] : normalizedScopes.filter(v => COMPLIANCE_SITES.has(v))),
+    [isAdmin, normalizedScopes]
+  )
+  const inTransportScope = useCallback(
+    (site) => isAdmin || allowedTransportSites.includes(String(site || '').trim().toUpperCase()),
+    [allowedTransportSites, isAdmin]
+  )
+  const inComplianceScope = useCallback(
+    (site) => isAdmin || allowedComplianceSites.includes(String(site || '').trim().toUpperCase()),
+    [allowedComplianceSites, isAdmin]
+  )
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 600px)')
@@ -109,9 +150,11 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       }
     )
     const unsubAlerts = onSnapshot(
-      query(collection(db, 'supervisorAlerts'), where('read', '==', false)),
+      query(collection(db, 'alerts'), where('read', '==', false)),
       (snap) => {
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        const rows = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(alertItem => alertItem.type === 'eoc_issue')
         rows.sort((a, b) => {
           const aMs = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0
           const bMs = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0
@@ -130,96 +173,218 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   // Load BHT Assignments
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, 'bhtAssignments'), orderBy('bhtUserName', 'asc')),
+      query(collection(db, 'shiftAssignments'), orderBy('bhtUserName', 'asc')),
       (snap) => {
         const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        setBhtAssignments(rows.filter(a => !a.deletedAt && a.deleted !== true))
+        setShiftAssignments(rows.filter(a => !a.deletedAt && a.deleted !== true))
       }
     )
     return unsub
   }, [])
 
-  const handleDashStartIssue = async (issueId) => {
+  const updateIssueActionNote = (issueId, note) => {
+    setEocIssueActionNotes(prev => ({
+      ...prev,
+      [issueId]: note
+    }))
+  }
+
+  const clearIssueActionNote = (issueId) => {
+    setEocIssueActionNotes(prev => {
+      if (!(issueId in prev)) return prev
+      const next = { ...prev }
+      delete next[issueId]
+      return next
+    })
+  }
+
+  const getIssueActionNote = (issueId) => String(eocIssueActionNotes[issueId] || '')
+
+  const handleDashStartIssue = async (issueId, progressNote) => {
+    if (blockIfOffline('starting issue progress')) return
+
+    const trimmedProgressNote = String(progressNote || '').trim()
+    if (!trimmedProgressNote) {
+      alert('Note is required before moving an issue to in progress.')
+      return
+    }
+
+    const selectedIssue = eocIssues.find(issue => issue.id === issueId)
+    if (!selectedIssue) {
+      alert('Issue no longer exists.')
+      return
+    }
+    const expectedVersion = getVersionNumber(selectedIssue)
+
     try {
-      await updateDoc(doc(db, 'eocIssues', issueId), {
-        status: 'in_progress',
-        inProgressAt: serverTimestamp(),
-        inProgressByUserId: user?.id || null,
-        inProgressByName: user?.name || null,
-        updatedAt: serverTimestamp()
+      await runTransaction(db, async (transaction) => {
+        const issueRef = doc(db, 'eocIssues', issueId)
+        const issueSnap = await transaction.get(issueRef)
+        if (!issueSnap.exists()) {
+          throw new Error('Issue no longer exists.')
+        }
+
+        const latestIssue = issueSnap.data()
+        const { nextVersion } = assertExpectedVersion({
+          expectedVersion,
+          currentVersion: getVersionNumber(latestIssue),
+          documentId: issueId,
+          recordLabel: 'EOC Issue'
+        })
+
+        transaction.update(issueRef, {
+          status: 'in_progress',
+          inProgressNotes: trimmedProgressNote,
+          inProgressAt: serverTimestamp(),
+          inProgressByUserId: user?.id || null,
+          inProgressByName: user?.name || null,
+          version: nextVersion,
+          updatedAt: serverTimestamp()
+        })
       })
+      await createIssueStatusNotification({
+        issue: selectedIssue,
+        nextStatus: 'in_progress',
+        note: trimmedProgressNote
+      })
+
       await writeAuditLog({
         action: 'issue_in_progress',
         collectionPath: 'eocIssues',
         documentId: issueId,
-        reason: 'Supervisor started issue work'
+        reason: trimmedProgressNote
       })
+      clearIssueActionNote(issueId)
     } catch (err) {
       console.error('Error moving issue to in_progress:', err)
-      alert('Failed to start issue progress')
+      alertVersionConflict(err, 'Failed to start issue progress')
     }
   }
 
-  const handleDashResolveIssue = async (issueId) => {
-    if (!eocResolveNotes.trim()) {
+  const handleDashResolveIssue = async (issueId, resolveNote) => {
+    if (blockIfOffline('resolving issues')) return
+
+    const trimmedResolveNote = String(resolveNote || '').trim()
+    if (!trimmedResolveNote) {
       alert('Resolution note is required.')
       return
     }
 
-    try {
-      const batch = writeBatch(db)
+    const selectedIssue = eocIssues.find(issue => issue.id === issueId)
+    if (!selectedIssue) {
+      alert('Issue no longer exists.')
+      return
+    }
+    const expectedVersion = getVersionNumber(selectedIssue)
 
-      batch.update(doc(db, 'eocIssues', issueId), {
-        status: 'resolved',
-        resolvedNotes: eocResolveNotes.trim(),
-        resolvedAt: serverTimestamp(),
-        resolvedByUserId: user?.id || null,
-        resolvedByName: user?.name || null,
-        updatedAt: serverTimestamp()
+    try {
+      await runTransaction(db, async (transaction) => {
+        const issueRef = doc(db, 'eocIssues', issueId)
+        const issueSnap = await transaction.get(issueRef)
+        if (!issueSnap.exists()) {
+          throw new Error('Issue no longer exists.')
+        }
+
+        const latestIssue = issueSnap.data()
+        const { nextVersion } = assertExpectedVersion({
+          expectedVersion,
+          currentVersion: getVersionNumber(latestIssue),
+          documentId: issueId,
+          recordLabel: 'EOC Issue'
+        })
+
+        transaction.update(issueRef, {
+          status: 'resolved',
+          resolvedNotes: trimmedResolveNote,
+          resolvedAt: serverTimestamp(),
+          resolvedByUserId: user?.id || null,
+          resolvedByName: user?.name || null,
+          version: nextVersion,
+          updatedAt: serverTimestamp()
+        })
       })
 
       // Close any open alerts tied to this issue as part of resolution lifecycle.
       const relatedAlerts = await getDocs(
-        query(collection(db, 'supervisorAlerts'), where('issueId', '==', issueId))
+        query(collection(db, 'alerts'), where('issueId', '==', issueId))
       )
+      const alertBatch = writeBatch(db)
+      let alertMutations = 0
       relatedAlerts.docs.forEach(alertDoc => {
-        if (alertDoc.data().read === true) return
-        batch.update(alertDoc.ref, {
+        if (alertDoc.data().type !== 'eoc_issue' || alertDoc.data().read === true) return
+        alertBatch.update(alertDoc.ref, {
           read: true,
           resolvedAt: serverTimestamp(),
           resolvedByUserId: user?.id || null,
-          resolvedByName: user?.name || null
+          resolvedByName: user?.name || null,
+          version: getVersionNumber(alertDoc.data()) + 1,
+          updatedAt: serverTimestamp()
         })
+        alertMutations += 1
       })
 
-      await batch.commit()
+      if (alertMutations > 0) {
+        await alertBatch.commit()
+      }
+      await createIssueStatusNotification({
+        issue: selectedIssue,
+        nextStatus: 'resolved',
+        note: trimmedResolveNote
+      })
       await writeAuditLog({
         action: 'issue_resolved',
         collectionPath: 'eocIssues',
         documentId: issueId,
-        reason: eocResolveNotes.trim()
+        reason: trimmedResolveNote
       })
-      setEocResolvingId(null)
-      setEocResolveNotes('')
+      clearIssueActionNote(issueId)
     } catch (err) {
       console.error('Error resolving issue:', err)
-      alert('Failed to resolve issue')
+      alertVersionConflict(err, 'Failed to resolve issue')
     }
   }
 
   const handleMarkAlertRead = async (alertId) => {
+    if (blockIfOffline('marking alerts as read')) return
+
+    const selectedAlert = eocAlerts.find(alertRow => alertRow.id === alertId)
     try {
-      await updateDoc(doc(db, 'supervisorAlerts', alertId), {
+      await updateDoc(doc(db, 'alerts', alertId), {
         read: true,
         readAt: serverTimestamp(),
         readByUserId: user?.id || null,
-        readByName: user?.name || null
+        readByName: user?.name || null,
+        version: getVersionNumber(selectedAlert) + 1,
+        updatedAt: serverTimestamp()
       })
     } catch (err) {
       console.error('Error marking alert read:', err)
       alert('Failed to mark alert as read')
     }
   }
+
+  const loadUsers = useCallback(async () => {
+    const usersSnapshot = await getDocs(collection(db, 'users'))
+    const usersData = usersSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }))
+    setUsers(usersData.filter(u => !u.deletedAt && u.deleted !== true))
+  }, [])
+
+  const loadAuthPolicyState = useCallback(async () => {
+    if (!isAdmin) return
+    setAuthPolicyLoading(true)
+    try {
+      const policy = await getAuthPolicy()
+      setAuthScopeEnforcedState(policy.authScopeEnforced === true)
+    } catch (error) {
+      console.error('Failed to load auth policy:', error)
+      setAuthScopeEnforcedState(false)
+    } finally {
+      setAuthPolicyLoading(false)
+    }
+  }, [isAdmin])
 
   useEffect(() => {
     // Set default to current month
@@ -232,7 +397,8 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
 
     // Load users
     loadUsers()
-  }, [])
+    loadAuthPolicyState()
+  }, [loadAuthPolicyState, loadUsers])
 
   useEffect(() => {
     if (!isAdmin) {
@@ -246,15 +412,6 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     )
     return unsub
   }, [isAdmin])
-
-  const loadUsers = async () => {
-    const usersSnapshot = await getDocs(collection(db, 'users'))
-    const usersData = usersSnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }))
-    setUsers(usersData.filter(u => !u.deletedAt && u.deleted !== true))
-  }
 
   const techUsers = users.filter(u => u.role === 'tech' && u.active)
 
@@ -272,6 +429,31 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     })
   }
 
+  const createIssueStatusNotification = async ({ issue, nextStatus, note }) => {
+    if (!issue?.locationId || !issue?.reportedByUserId) return
+    const actorName = user?.name || 'Supervisor'
+    const statusLabel = nextStatus === 'resolved' ? 'resolved' : 'in progress'
+    await addDoc(collection(db, 'alerts'), {
+      type: 'eoc_issue_update',
+      issueId: issue.id,
+      taskId: issue.taskId || null,
+      locationId: issue.locationId,
+      eocType: issue.eocType || null,
+      severity: issue.severity || 'medium',
+      targetUserId: issue.reportedByUserId,
+      targetUserName: issue.reportedByName || null,
+      status: nextStatus,
+      statusNote: note,
+      actorUserId: user?.id || null,
+      actorName,
+      message: `${actorName} marked "${issue.label || 'Issue'}" as ${statusLabel}.`,
+      read: false,
+      version: 1,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    })
+  }
+
   const promptDeleteReason = (label) => {
     const reason = prompt(`Enter reason for ${label}:`)
     if (reason === null) return null
@@ -280,6 +462,40 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       return null
     }
     return reason.trim()
+  }
+
+  const alertVersionConflict = (error, fallbackMessage) => {
+    if (error?.code === 'version-conflict') {
+      alert(formatVersionConflictMessage(error))
+      return true
+    }
+    alert(fallbackMessage)
+    return false
+  }
+
+  const blockIfOffline = (actionLabel) => {
+    if (!isOffline) return false
+    alert(`Offline mode: ${actionLabel} is unavailable until connection is restored.`)
+    return true
+  }
+
+  const refreshAdminAuthSession = async () => {
+    if (user?.role !== 'admin') return false
+    try {
+      if (auth.currentUser) {
+        await signOut(auth)
+      }
+    } catch (signOutError) {
+      console.warn('Admin auth sign-out before refresh failed:', signOutError)
+    }
+
+    try {
+      await signInAnonymously(auth)
+      return true
+    } catch (signInError) {
+      console.error('Admin auth refresh failed:', signInError)
+      return false
+    }
   }
 
   const handleAddUser = () => {
@@ -293,6 +509,8 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   }
 
   const handleSaveUser = async () => {
+    if (blockIfOffline('saving users')) return
+
     if (!userForm.id || !userForm.name || !userForm.pin) {
       alert('Please fill in all required fields (ID, Name, PIN)')
       return
@@ -324,7 +542,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       } else {
         await updateDoc(doc(db, 'users', userForm.id), payload)
       }
-      alert('User saved successfully!')
+      notifySuccess('User saved successfully')
       setEditingUser(null)
       loadUsers()
     } catch (error) {
@@ -334,6 +552,8 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   }
 
   const handleDeleteUser = async (userId) => {
+    if (blockIfOffline('deleting users')) return
+
     if (!confirm(`Soft-delete user ${userId}?`)) return
 
     const reason = promptDeleteReason(`soft-delete of user ${userId}`)
@@ -355,7 +575,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
         documentId: userId,
         reason
       })
-      alert('User soft-deleted successfully.')
+      notifySuccess('User soft-deleted')
       loadUsers()
     } catch (error) {
       console.error('Error deleting user:', error)
@@ -364,6 +584,8 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   }
 
   const handleHardDeleteUser = async (userId) => {
+    if (blockIfOffline('hard-deleting users')) return
+
     if (!isAdmin) {
       alert('Only admin can hard-delete records.')
       return
@@ -393,7 +615,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       })
       batch.delete(doc(db, 'users', userId))
       await batch.commit()
-      alert('User hard-deleted successfully.')
+      notifySuccess('User hard-deleted')
       loadUsers()
     } catch (error) {
       console.error('Error hard deleting user:', error)
@@ -401,10 +623,188 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     }
   }
 
+  const handleSetAuthScopeEnforced = async (enabled) => {
+    if (blockIfOffline('updating auth scope policy')) return
+    if (!isAdmin) {
+      alert('Only admin can change auth scope policy.')
+      return
+    }
+
+    if (enabled === true && !(user?.authClaimsReady && user?.authClaimRole === 'admin')) {
+      alert('Cannot enable strict auth mode from this session. Log in with admin custom claims first.')
+      return
+    }
+
+    if (authScopeEnforced === enabled) return
+    const reason = prompt(`Enter reason for ${enabled ? 'enabling' : 'disabling'} strict auth scope enforcement:`)
+    if (reason === null) return
+    if (!reason.trim()) {
+      alert('Reason is required.')
+      return
+    }
+
+    try {
+      await setAuthScopeEnforced({
+        enabled,
+        actorUserId: user?.id || null,
+        actorName: user?.name || null,
+        reason
+      })
+      await writeAuditLog({
+        action: enabled ? 'auth_scope_enforcement_enable' : 'auth_scope_enforcement_disable',
+        collectionPath: 'appSettings',
+        documentId: 'security',
+        reason: reason.trim()
+      })
+      setAuthScopeEnforcedState(enabled)
+      notifySuccess(`Strict auth mode ${enabled ? 'enabled' : 'disabled'}`)
+    } catch (error) {
+      console.error('Failed to update auth scope policy:', error)
+      alert('Failed to update auth scope policy.')
+    }
+  }
+
   const handleCancelEdit = () => {
     setEditingUser(null)
     setUserForm({ id: '', name: '', pin: '', role: 'tech', site: 'PHP', active: true })
   }
+
+  const renderUserEditorFields = (isNewUser) => (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+      <div>
+        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          User ID *
+        </label>
+        <input
+          type="text"
+          value={userForm.id}
+          onChange={(e) => setUserForm({ ...userForm, id: e.target.value })}
+          disabled={!isNewUser}
+          placeholder="e.g., tech3"
+          style={{
+            width: '100%',
+            padding: '8px',
+            border: '2px solid rgba(255,255,255,0.1)',
+            borderRadius: '6px',
+            fontSize: '14px',
+            boxSizing: 'border-box',
+            backgroundColor: !isNewUser ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
+            color: '#e8e8e8'
+          }}
+        />
+      </div>
+      <div>
+        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          Name *
+        </label>
+        <input
+          type="text"
+          value={userForm.name}
+          onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+          placeholder="Full Name"
+          style={{
+            width: '100%',
+            padding: '8px',
+            border: '2px solid rgba(255,255,255,0.1)',
+            borderRadius: '6px',
+            fontSize: '14px',
+            boxSizing: 'border-box',
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            color: '#e8e8e8'
+          }}
+        />
+      </div>
+      <div>
+        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          PIN (4 digits) * {!isNewUser ? '(set new PIN to rotate)' : ''}
+        </label>
+        <input
+          type="text"
+          value={userForm.pin}
+          onChange={(e) => setUserForm({ ...userForm, pin: e.target.value.replace(/\D/g, '') })}
+          placeholder="1234"
+          maxLength="4"
+          style={{
+            width: '100%',
+            padding: '8px',
+            border: '2px solid rgba(255,255,255,0.1)',
+            borderRadius: '6px',
+            fontSize: '14px',
+            boxSizing: 'border-box',
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            color: '#e8e8e8'
+          }}
+        />
+      </div>
+      <div>
+        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          Role
+        </label>
+        <select
+          value={userForm.role}
+          onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
+          style={{
+            width: '100%',
+            padding: '8px',
+            border: '2px solid rgba(255,255,255,0.1)',
+            borderRadius: '6px',
+            fontSize: '14px',
+            boxSizing: 'border-box',
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            color: '#e8e8e8'
+          }}
+        >
+          <option value="tech">Tech</option>
+          <option value="supervisor">Supervisor</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div>
+        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          Site
+        </label>
+        <select
+          value={userForm.site}
+          onChange={(e) => setUserForm({ ...userForm, site: e.target.value })}
+          style={{
+            width: '100%',
+            padding: '8px',
+            border: '2px solid rgba(255,255,255,0.1)',
+            borderRadius: '6px',
+            fontSize: '14px',
+            boxSizing: 'border-box',
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            color: '#e8e8e8'
+          }}
+        >
+          <option value="PHP">PHP</option>
+          <option value="RTC">RTC</option>
+        </select>
+      </div>
+      <div>
+        <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          Active
+        </label>
+        <select
+          value={userForm.active}
+          onChange={(e) => setUserForm({ ...userForm, active: e.target.value === 'true' })}
+          style={{
+            width: '100%',
+            padding: '8px',
+            border: '2px solid rgba(255,255,255,0.1)',
+            borderRadius: '6px',
+            fontSize: '14px',
+            boxSizing: 'border-box',
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            color: '#e8e8e8'
+          }}
+        >
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </select>
+      </div>
+    </div>
+  )
 
   // Assignment handlers
   const handleAddAssignment = () => {
@@ -425,6 +825,8 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
   }
 
   const handleSaveAssignment = async () => {
+    if (blockIfOffline('saving assignments')) return
+
     if (!assignmentForm.bhtUserId || !assignmentForm.locationId || !assignmentForm.shiftId) {
       alert('Please select a BHT, location, and shift')
       return
@@ -438,7 +840,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
 
     // Validate: if isHousePrimary is true, check no other active assignment at same location+shift is also primary
     if (assignmentForm.isHousePrimary) {
-      const conflicting = bhtAssignments.find(a =>
+      const conflicting = shiftAssignments.find(a =>
         a.active &&
         a.locationId === assignmentForm.locationId &&
         a.shiftId === assignmentForm.shiftId &&
@@ -461,70 +863,157 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       active: assignmentForm.active
     }
 
-    try {
+    const persistAssignment = async () => {
       if (editingAssignment === 'new') {
-        const createdRef = await addDoc(collection(db, 'bhtAssignments'), {
+        const createdRef = await addDoc(collection(db, 'shiftAssignments'), {
           ...payload,
+          version: 1,
           effectiveFrom: serverTimestamp(),
           effectiveTo: null,
-          createdAt: serverTimestamp()
-        })
-        await writeAuditLog({
-          action: 'assignment_create',
-          collectionPath: 'bhtAssignments',
-          documentId: createdRef.id,
-          reason: 'Supervisor created assignment',
-          extra: { locationId: payload.locationId, shiftId: payload.shiftId }
-        })
-      } else {
-        await updateDoc(doc(db, 'bhtAssignments', editingAssignment), {
-          ...payload,
+          createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         })
-        await writeAuditLog({
-          action: 'assignment_update',
-          collectionPath: 'bhtAssignments',
-          documentId: editingAssignment,
-          reason: 'Supervisor updated assignment',
-          extra: { locationId: payload.locationId, shiftId: payload.shiftId }
+
+        try {
+          await writeAuditLog({
+            action: 'assignment_create',
+            collectionPath: 'shiftAssignments',
+            documentId: createdRef.id,
+            reason: 'Supervisor created assignment',
+            extra: { locationId: payload.locationId, shiftId: payload.shiftId }
+          })
+        } catch (auditErr) {
+          console.warn('Assignment saved but audit log write failed:', auditErr)
+        }
+      } else {
+        const currentAssignment = shiftAssignments.find(a => a.id === editingAssignment)
+        const expectedVersion = getVersionNumber(currentAssignment)
+        await runTransaction(db, async (transaction) => {
+          const assignmentRef = doc(db, 'shiftAssignments', editingAssignment)
+          const assignmentSnap = await transaction.get(assignmentRef)
+          if (!assignmentSnap.exists()) {
+            throw new Error('Assignment no longer exists.')
+          }
+
+          const latestAssignment = assignmentSnap.data()
+          const { nextVersion } = assertExpectedVersion({
+            expectedVersion,
+            currentVersion: getVersionNumber(latestAssignment),
+            documentId: editingAssignment,
+            recordLabel: 'Assignment'
+          })
+
+          transaction.update(assignmentRef, {
+            ...payload,
+            version: nextVersion,
+            updatedAt: serverTimestamp()
+          })
         })
+
+        try {
+          await writeAuditLog({
+            action: 'assignment_update',
+            collectionPath: 'shiftAssignments',
+            documentId: editingAssignment,
+            reason: 'Supervisor updated assignment',
+            extra: { locationId: payload.locationId, shiftId: payload.shiftId }
+          })
+        } catch (auditErr) {
+          console.warn('Assignment updated but audit log write failed:', auditErr)
+        }
       }
+    }
+
+    try {
+      await persistAssignment()
+      notifySuccess(editingAssignment === 'new' ? 'Assignment created' : 'Assignment updated')
       setEditingAssignment(null)
     } catch (err) {
-      console.error('Error saving assignment:', err)
-      alert('Failed to save assignment: ' + err.message)
+      let activeError = err
+      console.error('Error saving assignment:', activeError)
+
+      if (activeError?.code === 'permission-denied' && user?.role === 'admin') {
+        const tokenRole = String(user?.authClaimRole || '').trim() || '(none)'
+        const refreshed = await refreshAdminAuthSession()
+        if (refreshed) {
+          try {
+            await persistAssignment()
+            notifySuccess('Assignment saved after refreshing admin auth session.')
+            setEditingAssignment(null)
+            return
+          } catch (retryErr) {
+            console.error('Retry failed after admin auth refresh:', retryErr)
+            activeError = retryErr
+          }
+        }
+
+        alert(`Admin save failed due to auth scope mismatch (token role: ${tokenRole}). Lock/logout, sign in again, and confirm latest Firestore rules are deployed.`)
+        return
+      }
+
+      if (activeError?.code === 'version-conflict') {
+        alert(formatVersionConflictMessage(activeError))
+      } else if (activeError?.code === 'permission-denied') {
+        alert('Failed to save assignment: your account is not scoped for that location.')
+      } else {
+        alert('Failed to save assignment: ' + activeError.message)
+      }
     }
   }
 
   const handleDeleteAssignment = async (id) => {
+    if (blockIfOffline('deleting assignments')) return
+
     if (!confirm('Soft-delete this assignment?')) return
 
     const reason = promptDeleteReason('soft-delete of assignment')
     if (!reason) return
 
     try {
-      await updateDoc(doc(db, 'bhtAssignments', id), {
-        deleted: true,
-        deletedAt: serverTimestamp(),
-        deletedByUserId: user?.id || null,
-        deletedByName: user?.name || null,
-        deleteReason: reason,
-        active: false,
-        updatedAt: serverTimestamp()
+      const currentAssignment = shiftAssignments.find(a => a.id === id)
+      const expectedVersion = getVersionNumber(currentAssignment)
+      await runTransaction(db, async (transaction) => {
+        const assignmentRef = doc(db, 'shiftAssignments', id)
+        const assignmentSnap = await transaction.get(assignmentRef)
+        if (!assignmentSnap.exists()) {
+          throw new Error('Assignment no longer exists.')
+        }
+
+        const latestAssignment = assignmentSnap.data()
+        const { nextVersion } = assertExpectedVersion({
+          expectedVersion,
+          currentVersion: getVersionNumber(latestAssignment),
+          documentId: id,
+          recordLabel: 'Assignment'
+        })
+
+        transaction.update(assignmentRef, {
+          deleted: true,
+          deletedAt: serverTimestamp(),
+          deletedByUserId: user?.id || null,
+          deletedByName: user?.name || null,
+          deleteReason: reason,
+          active: false,
+          version: nextVersion,
+          updatedAt: serverTimestamp()
+        })
       })
       await writeAuditLog({
         action: 'soft_delete',
-        collectionPath: 'bhtAssignments',
+        collectionPath: 'shiftAssignments',
         documentId: id,
         reason
       })
+      notifySuccess('Assignment soft-deleted')
     } catch (err) {
       console.error('Error deleting assignment:', err)
-      alert('Failed to delete assignment')
+      alertVersionConflict(err, 'Failed to delete assignment')
     }
   }
 
   const handleHardDeleteAssignment = async (id) => {
+    if (blockIfOffline('hard-deleting assignments')) return
+
     if (!isAdmin) {
       alert('Only admin can hard-delete records.')
       return
@@ -540,15 +1029,16 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       const auditRef = doc(collection(db, 'auditLogs'))
       batch.set(auditRef, {
         action: 'hard_delete',
-        collectionPath: 'bhtAssignments',
+        collectionPath: 'shiftAssignments',
         documentId: id,
         performedByUserId: user?.id || null,
         performedByName: user?.name || null,
         reason,
         createdAt: serverTimestamp()
       })
-      batch.delete(doc(db, 'bhtAssignments', id))
+      batch.delete(doc(db, 'shiftAssignments', id))
       await batch.commit()
+      notifySuccess('Assignment hard-deleted')
     } catch (err) {
       console.error('Error hard deleting assignment:', err)
       alert('Failed to hard-delete assignment')
@@ -575,6 +1065,56 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       isHousePrimary: task.taskType === 'house',
       active: true
     })
+  }
+
+  const toDateInputValue = (value) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ''
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const isCompletedTransport = (transport) => {
+    const status = String(transport?.status || '').toLowerCase()
+    return status === 'returned' || status === 'closed'
+  }
+
+  const handleDashboardDrilldown = (type, value = '') => {
+    const startOfMonth = new Date(dashMonth.getFullYear(), dashMonth.getMonth(), 1)
+    const endOfMonth = new Date(dashMonth.getFullYear(), dashMonth.getMonth() + 1, 0)
+
+    setStartDate(toDateInputValue(startOfMonth))
+    setEndDate(toDateInputValue(endOfMonth))
+    setTransportSiteFilter(dashSite)
+    setTransportStatusFilter('completed')
+    setTransportReasonFilter('')
+    setSelectedDriver('')
+    setOverdueFilter('all')
+    setClientSearch('')
+
+    if (type === 'reason' && value) {
+      setTransportReasonFilter(value)
+      setDrilldownLabel(`Reason: ${value}`)
+    } else if (type === 'tech' && value) {
+      setSelectedDriver(value)
+      setDrilldownLabel(`Tech: ${value}`)
+    } else {
+      setDrilldownLabel('Total completed transports')
+    }
+
+    setIsDashboardDrilldownActive(true)
+    setActiveTab('transports')
+  }
+
+  const clearDashboardDrilldown = () => {
+    setTransportSiteFilter('ALL')
+    setTransportStatusFilter('all')
+    setTransportReasonFilter('')
+    setSelectedDriver('')
+    setIsDashboardDrilldownActive(false)
+    setDrilldownLabel('')
   }
 
   useEffect(() => {
@@ -607,10 +1147,22 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     })
 
     return () => unsubscribe()
-  }, [startDate, endDate, user?.role, user?.site, JSON.stringify(user?.authorizedLocations || [])])
+  }, [startDate, endDate, inTransportScope])
 
   useEffect(() => {
     let filtered = [...transports]
+
+    if (transportSiteFilter !== 'ALL') {
+      filtered = filtered.filter(t => String(t.site || '').trim().toUpperCase() === transportSiteFilter)
+    }
+
+    if (transportStatusFilter === 'completed') {
+      filtered = filtered.filter(t => isCompletedTransport(t))
+    }
+
+    if (transportReasonFilter) {
+      filtered = filtered.filter(t => t.reasons?.includes(transportReasonFilter))
+    }
 
     // Driver filter
     if (selectedDriver) {
@@ -633,7 +1185,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     }
 
     setFilteredTransports(filtered)
-  }, [transports, selectedDriver, overdueFilter, clientSearch])
+  }, [transports, transportSiteFilter, transportStatusFilter, transportReasonFilter, selectedDriver, overdueFilter, clientSearch])
 
   // Dashboard data fetch
   useEffect(() => {
@@ -657,7 +1209,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
 
         // Client-side filters
         data = data.filter(t => inTransportScope(t.site))
-        data = data.filter(t => t.status === 'returned' || t.status === 'closed')
+        data = data.filter(t => isCompletedTransport(t))
         if (dashSite !== 'ALL') {
           data = data.filter(t => t.site === dashSite)
         }
@@ -671,7 +1223,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     }
 
     fetchDashData()
-  }, [activeTab, dashMonth, dashSite, user?.role, user?.site, JSON.stringify(user?.authorizedLocations || [])])
+  }, [activeTab, dashMonth, dashSite, inTransportScope])
 
   // Dashboard aggregation
   const dashStats = useMemo(() => {
@@ -720,7 +1272,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     })
     summary.total = scoped.length
     return summary
-  }, [complianceItems, isAdmin, JSON.stringify(allowedComplianceSites)])
+  }, [complianceItems, inComplianceScope, isAdmin])
 
   const isOverdue = (transport) => {
     if (transport.status === 'closed' || transport.status === 'returned') {
@@ -754,6 +1306,19 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     })
   }
 
+  const formatScopeExpiry = (value) => {
+    if (!value) return '--'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return '--'
+    return date.toLocaleString('en-US', {
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
   const locationMatchesQueueFilter = (locationId) => {
     if (queueLocationFilter === 'all') return true
     return locationId === queueLocationFilter
@@ -768,6 +1333,25 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
     overdue: filteredOverdueTaskQueue.length,
     alerts: filteredAlertQueue.length
   }
+
+  const transportReasonOptions = useMemo(() => {
+    const reasonSet = new Set()
+    transports.forEach((transport) => {
+      if (!Array.isArray(transport?.reasons)) return
+      transport.reasons.forEach((reason) => {
+        const value = String(reason || '').trim()
+        if (value) {
+          reasonSet.add(value)
+        }
+      })
+    })
+
+    const options = [...reasonSet].sort((a, b) => a.localeCompare(b))
+    if (transportReasonFilter && !reasonSet.has(transportReasonFilter)) {
+      options.unshift(transportReasonFilter)
+    }
+    return options
+  }, [transports, transportReasonFilter])
 
   const exportToExcel = () => {
     const data = filteredTransports.map(t => {
@@ -831,7 +1415,63 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
         </h2>
       </div>
 
-      {/* Tabs — dropdown on mobile, button strip on desktop */}
+      <div style={{
+        backgroundColor: 'rgba(255,255,255,0.04)',
+        borderRadius: '10px',
+        border: '1px solid rgba(255,255,255,0.1)',
+        padding: '12px 14px',
+        marginBottom: '16px'
+      }}>
+        <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '6px' }}>
+          Scope
+        </div>
+        {isAdmin ? (
+          <div style={{ fontSize: '13px', color: '#4CAF50' }}>
+            Global access (all locations)
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ fontSize: '13px', color: '#e8e8e8' }}>
+              Primary: {primaryScopes.length > 0 ? primaryScopes.join(', ') : 'None'}
+            </div>
+            <div style={{ fontSize: '13px', color: '#e8e8e8' }}>
+              Backup: {activeBackupGrants.length > 0 ? '' : 'None'}
+            </div>
+            {activeBackupGrants.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {activeBackupGrants.map(grant => (
+                  <span
+                    key={grant.id}
+                    style={{
+                      fontSize: '11px',
+                      color: '#FF9800',
+                      border: '1px solid rgba(255,152,0,0.3)',
+                      borderRadius: '999px',
+                      padding: '3px 8px',
+                      backgroundColor: 'rgba(255,152,0,0.12)'
+                    }}
+                  >
+                    {String(grant.locationId || '').toUpperCase()} until {formatScopeExpiry(grant.expiresAtIso)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isOffline && (
+        <div style={{
+          marginBottom: '16px',
+          fontSize: '12px',
+          color: '#FF9800',
+          textAlign: 'center'
+        }}>
+          Offline mode is active. Supervisor/Admin write actions are disabled until connection is restored.
+        </div>
+      )}
+
+      {/* Tabs - dropdown on mobile, button strip on desktop */}
       {isMobile ? (
         <div style={{ marginBottom: '20px' }}>
           <select
@@ -892,7 +1532,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
       )}
 
       {/* EOC Tab */}
-      {activeTab === 'eoc' && <SupervisorEocPanel />}
+      {activeTab === 'eoc' && <SupervisorEocPanel user={user} isOffline={isOffline} />}
 
       {/* Compliance Tab */}
       {activeTab === 'compliance' && (
@@ -967,7 +1607,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
             backdropFilter: 'blur(12px)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', color: '#e8e8e8' }}>BHT Assignments ({bhtAssignments.length})</h3>
+              <h3 style={{ margin: 0, fontSize: '16px', color: '#e8e8e8' }}>BHT Assignments ({shiftAssignments.length})</h3>
               <button
                 onClick={handleAddAssignment}
                 style={{
@@ -1106,7 +1746,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {bhtAssignments.map(a => (
+              {shiftAssignments.map(a => (
                 <div
                   key={a.id}
                   style={{
@@ -1188,7 +1828,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                   </div>
                 </div>
               ))}
-              {bhtAssignments.length === 0 && (
+              {shiftAssignments.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>
                   No assignments yet. Create one to assign a BHT to a location, shift, and van(s).
                 </div>
@@ -1209,6 +1849,57 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
             border: '1px solid rgba(229,57,53,0.2)',
             backdropFilter: 'blur(12px)'
           }}>
+            {isAdmin && (
+              <div style={{
+                marginBottom: '14px',
+                padding: '12px',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.08)',
+                backgroundColor: 'rgba(255,255,255,0.03)'
+              }}>
+                <div style={{ fontSize: '13px', color: '#e8e8e8', fontWeight: 'bold', marginBottom: '6px' }}>
+                  Auth Scope Enforcement
+                </div>
+                <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                  Status: {authPolicyLoading ? 'loading...' : (authScopeEnforced ? 'ENFORCED (claims required)' : 'HYBRID (claims optional)')}
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => handleSetAuthScopeEnforced(true)}
+                    disabled={isOffline || authPolicyLoading || authScopeEnforced}
+                    style={{
+                      padding: '8px 14px',
+                      backgroundColor: (isOffline || authPolicyLoading || authScopeEnforced) ? 'rgba(255,255,255,0.08)' : '#E53935',
+                      color: (isOffline || authPolicyLoading || authScopeEnforced) ? '#8899aa' : 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      cursor: (isOffline || authPolicyLoading || authScopeEnforced) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    Enable Strict Mode
+                  </button>
+                  <button
+                    onClick={() => handleSetAuthScopeEnforced(false)}
+                    disabled={isOffline || authPolicyLoading || !authScopeEnforced}
+                    style={{
+                      padding: '8px 14px',
+                      backgroundColor: (isOffline || authPolicyLoading || !authScopeEnforced) ? 'rgba(255,255,255,0.08)' : '#4CAF50',
+                      color: (isOffline || authPolicyLoading || !authScopeEnforced) ? '#8899aa' : 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      cursor: (isOffline || authPolicyLoading || !authScopeEnforced) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    Disable Strict Mode
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ margin: 0, fontSize: '16px', color: '#e8e8e8' }}>Users ({users.length})</h3>
               <button
@@ -1228,7 +1919,7 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
               </button>
             </div>
 
-            {editingUser && (
+            {editingUser === 'new' && (
               <div style={{
                 backgroundColor: 'rgba(255,255,255,0.03)',
                 padding: '20px',
@@ -1237,142 +1928,9 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                 border: '2px solid #E53935'
               }}>
                 <h4 style={{ margin: '0 0 16px 0', color: '#e8e8e8' }}>
-                  {editingUser === 'new' ? 'Add New User' : 'Edit User'}
+                  Add New User
                 </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                      User ID *
-                    </label>
-                    <input
-                      type="text"
-                      value={userForm.id}
-                      onChange={(e) => setUserForm({ ...userForm, id: e.target.value })}
-                      disabled={editingUser !== 'new'}
-                      placeholder="e.g., tech3"
-                      style={{
-                        width: '100%',
-                        padding: '8px',
-                        border: '2px solid rgba(255,255,255,0.1)',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        boxSizing: 'border-box',
-                        backgroundColor: editingUser !== 'new' ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
-                        color: '#e8e8e8'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                      Name *
-                    </label>
-                    <input
-                      type="text"
-                      value={userForm.name}
-                      onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
-                      placeholder="Full Name"
-                      style={{
-                        width: '100%',
-                        padding: '8px',
-                        border: '2px solid rgba(255,255,255,0.1)',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        boxSizing: 'border-box',
-                        backgroundColor: 'rgba(255,255,255,0.06)',
-                        color: '#e8e8e8'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                      PIN (4 digits) * {editingUser !== 'new' ? '(set new PIN to rotate)' : ''}
-                    </label>
-                    <input
-                      type="text"
-                      value={userForm.pin}
-                      onChange={(e) => setUserForm({ ...userForm, pin: e.target.value.replace(/\D/g, '') })}
-                      placeholder="1234"
-                      maxLength="4"
-                      style={{
-                        width: '100%',
-                        padding: '8px',
-                        border: '2px solid rgba(255,255,255,0.1)',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        boxSizing: 'border-box',
-                        backgroundColor: 'rgba(255,255,255,0.06)',
-                        color: '#e8e8e8'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                      Role
-                    </label>
-                    <select
-                      value={userForm.role}
-                      onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '8px',
-                        border: '2px solid rgba(255,255,255,0.1)',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        boxSizing: 'border-box',
-                        backgroundColor: 'rgba(255,255,255,0.06)',
-                        color: '#e8e8e8'
-                      }}
-                    >
-                      <option value="tech">Tech</option>
-                      <option value="supervisor">Supervisor</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                      Site
-                    </label>
-                    <select
-                      value={userForm.site}
-                      onChange={(e) => setUserForm({ ...userForm, site: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '8px',
-                        border: '2px solid rgba(255,255,255,0.1)',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        boxSizing: 'border-box',
-                        backgroundColor: 'rgba(255,255,255,0.06)',
-                        color: '#e8e8e8'
-                      }}
-                    >
-                      <option value="PHP">PHP</option>
-                      <option value="RTC">RTC</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-                      Active
-                    </label>
-                    <select
-                      value={userForm.active}
-                      onChange={(e) => setUserForm({ ...userForm, active: e.target.value === 'true' })}
-                      style={{
-                        width: '100%',
-                        padding: '8px',
-                        border: '2px solid rgba(255,255,255,0.1)',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        boxSizing: 'border-box',
-                        backgroundColor: 'rgba(255,255,255,0.06)',
-                        color: '#e8e8e8'
-                      }}
-                    >
-                      <option value="true">Active</option>
-                      <option value="false">Inactive</option>
-                    </select>
-                  </div>
-                </div>
+                {renderUserEditorFields(true)}
                 <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
                   <button
                     onClick={handleSaveUser}
@@ -1409,105 +1967,160 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {users.map(user => (
-                <div
-                  key={user.id}
-                  style={{
-                    padding: '16px',
-                    borderRadius: '8px',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    backgroundColor: user.active ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.01)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}
-                >
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', flex: 1 }}>
-                    <div>
-                      <div style={{ fontSize: '11px', color: '#8899aa' }}>ID</div>
-                      <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{user.id}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: '#8899aa' }}>Name</div>
-                      <div style={{ fontSize: '14px' }}>{user.name}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: '#8899aa' }}>PIN Storage</div>
-                      <div style={{ fontSize: '14px', fontFamily: 'monospace' }}>
-                        {user.pinHash ? 'hashed (v1)' : (user.pin ? 'legacy plaintext' : 'unset')}
+              {users.map((managedUser) => {
+                const isEditingThisUser = editingUser === managedUser.id
+                return (
+                  <div
+                    key={managedUser.id}
+                    style={{
+                      padding: '16px',
+                      borderRadius: '8px',
+                      border: isEditingThisUser ? '2px solid #E53935' : '1px solid rgba(255,255,255,0.08)',
+                      backgroundColor: managedUser.active ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.01)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', flex: 1 }}>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#8899aa' }}>ID</div>
+                          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{managedUser.id}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#8899aa' }}>Name</div>
+                          <div style={{ fontSize: '14px' }}>{managedUser.name}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#8899aa' }}>PIN Storage</div>
+                          <div style={{ fontSize: '14px', fontFamily: 'monospace' }}>
+                            {managedUser.pinHash ? 'hashed (v1)' : (managedUser.pin ? 'legacy plaintext' : 'unset')}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#8899aa' }}>Role</div>
+                          <div style={{ fontSize: '14px', textTransform: 'capitalize' }}>{managedUser.role}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#8899aa' }}>Site</div>
+                          <div style={{ fontSize: '14px' }}>{managedUser.site}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#8899aa' }}>Status</div>
+                          <div style={{
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            color: managedUser.active ? '#4CAF50' : '#999'
+                          }}>
+                            {managedUser.active ? 'ACTIVE' : 'INACTIVE'}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', marginLeft: '16px', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={() => handleEditUser(managedUser)}
+                          style={{
+                            padding: '8px 16px',
+                            backgroundColor: '#E53935',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {isEditingThisUser ? 'Editing' : 'Edit'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteUser(managedUser.id)}
+                          style={{
+                            padding: '8px 16px',
+                            backgroundColor: '#f44336',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Soft Delete
+                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleHardDeleteUser(managedUser.id)}
+                            style={{
+                              padding: '8px 16px',
+                              backgroundColor: '#7B1FA2',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: 'bold',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Hard Delete
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: '#8899aa' }}>Role</div>
-                      <div style={{ fontSize: '14px', textTransform: 'capitalize' }}>{user.role}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: '#8899aa' }}>Site</div>
-                      <div style={{ fontSize: '14px' }}>{user.site}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: '#8899aa' }}>Status</div>
+
+                    {isEditingThisUser && (
                       <div style={{
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                        color: user.active ? '#4CAF50' : '#999'
+                        marginTop: '16px',
+                        paddingTop: '16px',
+                        borderTop: '1px solid rgba(255,255,255,0.1)'
                       }}>
-                        {user.active ? 'ACTIVE' : 'INACTIVE'}
+                        <h4 style={{ margin: '0 0 16px 0', color: '#e8e8e8' }}>
+                          Edit User
+                        </h4>
+                        {renderUserEditorFields(false)}
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+                          <button
+                            onClick={handleSaveUser}
+                            style={{
+                              padding: '10px 20px',
+                              backgroundColor: '#4CAF50',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '8px',
+                              fontSize: '14px',
+                              fontWeight: 'bold',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={handleCancelEdit}
+                            style={{
+                              padding: '10px 20px',
+                              backgroundColor: '#999',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '8px',
+                              fontSize: '14px',
+                              fontWeight: 'bold',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', marginLeft: '16px' }}>
-                    <button
-                      onClick={() => handleEditUser(user)}
-                      style={{
-                        padding: '8px 16px',
-                        backgroundColor: '#E53935',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDeleteUser(user.id)}
-                      style={{
-                        padding: '8px 16px',
-                        backgroundColor: '#f44336',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Soft Delete
-                    </button>
-                    {isAdmin && (
-                      <button
-                        onClick={() => handleHardDeleteUser(user.id)}
-                        style={{
-                          padding: '8px 16px',
-                          backgroundColor: '#7B1FA2',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          fontSize: '12px',
-                          fontWeight: 'bold',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Hard Delete
-                      </button>
                     )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
+
+            {isAdmin && (
+              <AccessGrantPanel
+                currentUser={user}
+                users={users}
+                isOffline={isOffline}
+              />
+            )}
           </div>
         </div>
       )}
@@ -1643,60 +2256,50 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                       {issue.vanId ? ` \u00B7 ${VANS.find(v => v.id === issue.vanId)?.label || issue.vanId}` : ''}
                     </div>
 
-                    {issue.status === 'open' && (
-                      <button
-                        onClick={() => handleDashStartIssue(issue.id)}
-                        style={{
-                          padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8',
-                          border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Start Progress
-                      </button>
-                    )}
-
-                    {issue.status === 'in_progress' && eocResolvingId === issue.id ? (
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    {(issue.status === 'open' || issue.status === 'in_progress') && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <input
                           className="input"
-                          placeholder="Resolution notes (required)..."
-                          value={eocResolveNotes}
-                          onChange={e => setEocResolveNotes(e.target.value)}
-                          style={{ flex: 1, padding: '6px 10px', fontSize: '13px' }}
+                          placeholder="Status note (required)..."
+                          value={getIssueActionNote(issue.id)}
+                          onChange={e => updateIssueActionNote(issue.id, e.target.value)}
+                          style={{ width: '100%', padding: '6px 10px', fontSize: '13px' }}
                         />
-                        <button
-                          onClick={() => handleDashResolveIssue(issue.id)}
-                          style={{
-                            padding: '6px 14px', backgroundColor: '#4CAF50', color: 'white',
-                            border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Resolve
-                        </button>
-                        <button
-                          onClick={() => { setEocResolvingId(null); setEocResolveNotes('') }}
-                          style={{
-                            padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#8899aa',
-                            border: 'none', borderRadius: '6px', fontSize: '13px', cursor: 'pointer'
-                          }}
-                        >
-                          Cancel
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          {issue.status === 'open' && (
+                            <button
+                              onClick={() => handleDashStartIssue(issue.id, getIssueActionNote(issue.id))}
+                              style={{
+                                padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8',
+                                border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              In Progress
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDashResolveIssue(issue.id, getIssueActionNote(issue.id))}
+                            style={{
+                              padding: '6px 14px', backgroundColor: '#4CAF50', color: 'white',
+                              border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Resolve
+                          </button>
+                          <button
+                            onClick={() => clearIssueActionNote(issue.id)}
+                            style={{
+                              padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#8899aa',
+                              border: 'none', borderRadius: '6px', fontSize: '13px', cursor: 'pointer'
+                            }}
+                          >
+                            Clear Note
+                          </button>
+                        </div>
                       </div>
-                    ) : issue.status === 'in_progress' ? (
-                      <button
-                        onClick={() => setEocResolvingId(issue.id)}
-                        style={{
-                          padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8',
-                          border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Resolve
-                      </button>
-                    ) : null}
+                    )}
                     {issue.status === 'in_progress' && issue.inProgressByName && (
                       <div style={{ fontSize: '11px', color: '#8899aa', marginTop: '6px' }}>
                         In progress by {issue.inProgressByName}
@@ -1928,17 +2531,24 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
           ) : (
             <>
               {/* Total card */}
-              <div className="glass-card" style={{
-                backgroundColor: 'rgba(255,255,255,0.05)',
-                borderRadius: '12px',
-                padding: '20px',
-                marginBottom: '20px',
-                border: '1px solid #eee',
-                textAlign: 'center'
-              }}>
+              <button
+                type="button"
+                className="glass-card"
+                onClick={() => handleDashboardDrilldown('total')}
+                style={{
+                  width: '100%',
+                  backgroundColor: 'rgba(255,255,255,0.05)',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  marginBottom: '20px',
+                  border: '1px solid #eee',
+                  textAlign: 'center',
+                  cursor: 'pointer'
+                }}
+              >
                 <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '4px' }}>Total Transports</div>
                 <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#E53935' }}>{dashStats.total}</div>
-              </div>
+              </button>
 
               {/* Two-column breakdown */}
               <div style={{
@@ -1960,17 +2570,25 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {dashStats.byReason.map(([reason, count]) => (
-                        <div key={reason} style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '8px 12px',
-                          backgroundColor: 'rgba(255,255,255,0.04)',
-                          borderRadius: '6px'
-                        }}>
+                        <button
+                          key={reason}
+                          type="button"
+                          onClick={() => handleDashboardDrilldown('reason', reason)}
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '8px 12px',
+                            backgroundColor: 'rgba(255,255,255,0.04)',
+                            borderRadius: '6px',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                            cursor: 'pointer'
+                          }}
+                        >
                           <span style={{ fontSize: '14px' }}>{reason}</span>
                           <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#E53935' }}>{count}</span>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -1984,21 +2602,33 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
                   border: '1px solid #eee'
                 }}>
                   <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#e8e8e8' }}>By Tech</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {dashStats.byTech.map(([tech, count]) => (
-                      <div key={tech} style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '8px 12px',
-                        backgroundColor: 'rgba(255,255,255,0.04)',
-                        borderRadius: '6px'
-                      }}>
-                        <span style={{ fontSize: '14px' }}>{tech}</span>
-                        <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#E53935' }}>{count}</span>
-                      </div>
-                    ))}
-                  </div>
+                  {dashStats.byTech.length === 0 ? (
+                    <div style={{ color: '#556677', fontSize: '14px' }}>No tech activity recorded</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {dashStats.byTech.map(([tech, count]) => (
+                        <button
+                          key={tech}
+                          type="button"
+                          onClick={() => handleDashboardDrilldown('tech', tech)}
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '8px 12px',
+                            backgroundColor: 'rgba(255,255,255,0.04)',
+                            borderRadius: '6px',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <span style={{ fontSize: '14px' }}>{tech}</span>
+                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#E53935' }}>{count}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2093,6 +2723,49 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
 
           <div>
             <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+              Site
+            </label>
+            <select
+              value={transportSiteFilter}
+              onChange={(e) => setTransportSiteFilter(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px',
+                border: '2px solid #eee',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box'
+              }}
+            >
+              <option value="ALL">All Sites</option>
+              <option value="PHP">PHP</option>
+              <option value="RTC">RTC</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+              Status
+            </label>
+            <select
+              value={transportStatusFilter}
+              onChange={(e) => setTransportStatusFilter(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px',
+                border: '2px solid #eee',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box'
+              }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="completed">Completed Only</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
               Driver
             </label>
             <select
@@ -2110,6 +2783,29 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
               <option value="">All Drivers</option>
               {drivers.map(driver => (
                 <option key={driver} value={driver}>{driver}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+              Reason
+            </label>
+            <select
+              value={transportReasonFilter}
+              onChange={(e) => setTransportReasonFilter(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px',
+                border: '2px solid #eee',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box'
+              }}
+            >
+              <option value="">All Reasons</option>
+              {transportReasonOptions.map(reason => (
+                <option key={reason} value={reason}>{reason}</option>
               ))}
             </select>
           </div>
@@ -2156,6 +2852,40 @@ function SupervisorDashboard({ user, onNewTransport, onLogout, userName }) {
             }}
           />
         </div>
+
+        {isDashboardDrilldownActive && (
+          <div style={{
+            marginTop: '12px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+            padding: '10px 12px',
+            backgroundColor: 'rgba(229,57,53,0.12)',
+            border: '1px solid rgba(229,57,53,0.35)',
+            borderRadius: '8px'
+          }}>
+            <div style={{ fontSize: '12px', color: '#e8e8e8' }}>
+              Active drill-down: {drilldownLabel || 'Dashboard context'}
+            </div>
+            <button
+              type="button"
+              onClick={clearDashboardDrilldown}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: 'rgba(255,255,255,0.1)',
+                color: '#e8e8e8',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '6px',
+                fontSize: '12px',
+                cursor: 'pointer'
+              }}
+            >
+              Clear Drill-down
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Actions */}

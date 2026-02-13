@@ -61,7 +61,7 @@ function useAutocomplete(collectionName, searchField, minChars = 1, maxResults =
   }, [collectionName, searchField, minChars, maxResults])
 
   // Select a suggestion
-  const select = useCallback((item) => {
+  const select = useCallback(() => {
     setIsVisible(false)
     setSuggestions([])
   }, [])
