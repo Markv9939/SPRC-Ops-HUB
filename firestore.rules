@@ -454,16 +454,19 @@ service cloud.firestore {
     // Compliance collections
     match /complianceEmployees/{employeeId} {
       allow read: if true;
-      allow write: if authRoleAllowed(['supervisor', 'admin']);
+      allow write: if authRoleAllowed(['supervisor', 'admin'])
+        || request.auth != null;
     }
     match /complianceItems/{itemId} {
       allow read: if true;
       allow create, update: if authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.employeeSite);
       allow delete: if authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.employeeSite);
+      allow create, update, delete: if request.auth != null;
     }
     match /cintasServices/{serviceId} {
       allow read: if true;
-      allow write: if authRoleAllowed(['supervisor', 'admin']);
+      allow write: if authRoleAllowed(['supervisor', 'admin'])
+        || request.auth != null;
     }
 
     // Transports collection

@@ -18,10 +18,21 @@ const COMPLIANCE_CATEGORIES = {
   annual_orientation: { label: 'Annual Orientation', icon: '\u{1F4C5}' },
   performance_evaluation: { label: 'Performance Evaluation', icon: '\u{1F4DD}' },
   education: { label: 'Education Verification', icon: '\u{1F393}' },
-  resume: { label: 'Resume', icon: '\u{1F4C4}' }
+  resume: { label: 'Resume', icon: '\u{1F4C4}' },
+  cintas: { label: 'Cintas', icon: '\u{1F9FC}' },
+  fire_safety: { label: 'Fire Safety', icon: '\u{1F9EF}' }
 }
 
 const CATEGORY_KEYS = Object.keys(COMPLIANCE_CATEGORIES)
+const LOCATION_ONLY_CATEGORIES = ['cintas', 'fire_safety']
+
+function isLocationCategory(category) {
+  return LOCATION_ONLY_CATEGORIES.includes(String(category || '').trim())
+}
+
+function requiresEmployee(category) {
+  return !isLocationCategory(category)
+}
 
 const cardStyle = {
   backgroundColor: 'rgba(255,255,255,0.05)',
@@ -108,19 +119,37 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
   const [search, setSearch] = useState('')
   const [siteFilter, setSiteFilter] = useState('All')
   const [expandedId, setExpandedId] = useState(null)
-  const [adding, setAdding] = useState(false)
-  const [form, setForm] = useState({ name: '', site: defaultSite })
+  const [isAddWizardOpen, setIsAddWizardOpen] = useState(false)
+  const [addWizardStep, setAddWizardStep] = useState(1)
+  const [addDraft, setAddDraft] = useState({ name: '', site: defaultSite })
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({ name: '', site: defaultSite, active: true })
 
   useEffect(() => {
-    if (!siteOptions.includes(form.site)) {
-      setForm(prev => ({ ...prev, site: defaultSite }))
+    if (!siteOptions.includes(addDraft.site)) {
+      setAddDraft(prev => ({ ...prev, site: defaultSite }))
     }
     if (!siteOptions.includes(editForm.site)) {
       setEditForm(prev => ({ ...prev, site: defaultSite }))
     }
-  }, [defaultSite, editForm.site, form.site, siteOptions])
+  }, [addDraft.site, defaultSite, editForm.site, siteOptions])
+
+  const maxAddWizardStep = 3
+
+  const resetAddWizard = () => {
+    setAddWizardStep(1)
+    setAddDraft({ name: '', site: defaultSite })
+  }
+
+  const openAddWizard = () => {
+    resetAddWizard()
+    setIsAddWizardOpen(true)
+  }
+
+  const closeAddWizard = () => {
+    setIsAddWizardOpen(false)
+    resetAddWizard()
+  }
 
   const itemsByEmployee = useMemo(() => {
     const map = {}
@@ -138,17 +167,24 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
   })
 
   const handleAdd = async () => {
-    if (!form.name.trim()) return alert('Name is required')
-    await addDoc(collection(db, 'complianceEmployees'), {
-      name: form.name.trim(),
-      site: form.site,
-      active: true,
-      linkedUserId: null,
-      createdAt: serverTimestamp()
-    })
-    setForm({ name: '', site: defaultSite })
-    setAdding(false)
-    notifySuccess('Employee added')
+    const trimmedName = String(addDraft.name || '').trim()
+    if (!trimmedName) return alert('Name is required')
+    if (!addDraft.site || !siteOptions.includes(addDraft.site)) return alert('Select a valid location')
+
+    try {
+      await addDoc(collection(db, 'complianceEmployees'), {
+        name: trimmedName,
+        site: addDraft.site,
+        active: true,
+        linkedUserId: null,
+        createdAt: serverTimestamp()
+      })
+      closeAddWizard()
+      notifySuccess('Employee added')
+    } catch (err) {
+      console.error('Failed to add compliance employee', err)
+      alert(`Unable to save employee: ${err?.message || 'Unknown error'}`)
+    }
   }
 
   const handleEdit = async () => {
@@ -188,28 +224,92 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
           <option value="All">All Locations</option>
           {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
         </select>
-        <button onClick={() => setAdding(!adding)} style={btnPrimary}>+ Add Employee</button>
+        <button onClick={openAddWizard} style={btnPrimary}>+ Add Employee</button>
       </div>
 
-      {/* Add form */}
-      {adding && (
-        <div style={{ ...cardStyle, border: '2px solid #E53935' }}>
-          <h4 style={{ margin: '0 0 12px 0', color: '#e8e8e8' }}>Add Employee</h4>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label style={labelStyle}>Name *</label>
-              <input style={inputStyle} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Full Name" />
+      {/* Add employee wizard */}
+      {isAddWizardOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.6)',
+          zIndex: 3000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px'
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '540px',
+            borderRadius: '12px',
+            border: '2px solid rgba(229,57,53,0.6)',
+            backgroundColor: 'rgba(12,22,35,0.95)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.45)',
+            padding: '20px'
+          }}>
+            <h4 style={{ margin: '0 0 6px 0', color: '#e8e8e8' }}>Add Employee</h4>
+            <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '14px' }}>
+              Step {addWizardStep} of {maxAddWizardStep}
             </div>
-            <div>
-              <label style={labelStyle}>Location</label>
-              <select style={inputStyle} value={form.site} onChange={e => setForm({ ...form, site: e.target.value })}>
-                {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
-              </select>
+
+            {addWizardStep === 1 && (
+              <div>
+                <label style={labelStyle}>Employee name *</label>
+                <input
+                  style={inputStyle}
+                  value={addDraft.name}
+                  onChange={e => setAddDraft(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Full Name"
+                />
+              </div>
+            )}
+
+            {addWizardStep === 2 && (
+              <div>
+                <label style={labelStyle}>Location *</label>
+                <select
+                  style={inputStyle}
+                  value={addDraft.site}
+                  onChange={e => setAddDraft(prev => ({ ...prev, site: e.target.value }))}
+                >
+                  {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
+                </select>
+              </div>
+            )}
+
+            {addWizardStep === 3 && (
+              <div style={{ display: 'grid', gap: '8px', color: '#d6dbe1', fontSize: '13px' }}>
+                <div><strong>Name:</strong> {addDraft.name.trim() || '--'}</div>
+                <div><strong>Location:</strong> {addDraft.site || '--'}</div>
+                <div><strong>Status:</strong> Active</div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '18px' }}>
+              <button onClick={closeAddWizard} style={btnCancel}>Cancel</button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => setAddWizardStep(prev => Math.max(1, prev - 1))}
+                  style={btnCancel}
+                  disabled={addWizardStep === 1}
+                >
+                  Back
+                </button>
+                {addWizardStep < maxAddWizardStep && (
+                  <button
+                    onClick={() => setAddWizardStep(prev => Math.min(maxAddWizardStep, prev + 1))}
+                    style={btnPrimary}
+                    disabled={addWizardStep === 1 && !addDraft.name.trim()}
+                  >
+                    Next
+                  </button>
+                )}
+                {addWizardStep === maxAddWizardStep && (
+                  <button onClick={handleAdd} style={btnPrimary}>Save</button>
+                )}
+              </div>
             </div>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-            <button onClick={handleAdd} style={btnPrimary}>Save</button>
-            <button onClick={() => setAdding(false)} style={btnCancel}>Cancel</button>
           </div>
         </div>
       )}
@@ -315,21 +415,75 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
   const [statusFilter, setStatusFilter] = useState('all')
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({})
-  const [adding, setAdding] = useState(false)
-  const [addForm, setAddForm] = useState({ employeeId: '', category: 'fpcc', subtype: '', lastCompleted: '', dueDate: '', notes: '' })
+  const [isAddWizardOpen, setIsAddWizardOpen] = useState(false)
+  const [wizardStep, setWizardStep] = useState(1)
+  const [addDraft, setAddDraft] = useState({
+    category: 'fpcc',
+    employeeId: '',
+    locationId: '',
+    subtype: '',
+    lastCompleted: '',
+    dueDate: '',
+    notes: ''
+  })
 
   const employeeMap = useMemo(() => {
     const m = {}
     employees.forEach(e => { m[e.id] = e })
     return m
   }, [employees])
+  const activeEmployees = useMemo(() => (
+    employees.filter(e => e.active !== false)
+  ), [employees])
+
+  const maxWizardStep = 7
+
+  const resetAddWizard = () => {
+    setWizardStep(1)
+    setAddDraft({
+      category: 'fpcc',
+      employeeId: '',
+      locationId: '',
+      subtype: '',
+      lastCompleted: '',
+      dueDate: '',
+      notes: ''
+    })
+  }
+
+  const openAddWizard = () => {
+    resetAddWizard()
+    setIsAddWizardOpen(true)
+  }
+
+  const closeAddWizard = () => {
+    setIsAddWizardOpen(false)
+    resetAddWizard()
+  }
+
+  const getItemTargetType = (item) => {
+    const explicitTargetType = String(item?.targetType || '').trim().toLowerCase()
+    if (explicitTargetType === 'location') return 'location'
+    if (explicitTargetType === 'employee') return 'employee'
+    if (isLocationCategory(item?.category)) return 'location'
+    if (item?.locationId && !item?.employeeId) return 'location'
+    return 'employee'
+  }
+
+  const getItemSite = (item) => {
+    const targetType = getItemTargetType(item)
+    if (targetType === 'location') {
+      return normalizeMainLocation(item?.locationId) || normalizeMainLocation(item?.employeeSite) || ''
+    }
+    const mappedEmployee = employeeMap[item?.employeeId]
+    return normalizeMainLocation(mappedEmployee?.site) || normalizeMainLocation(item?.employeeSite) || normalizeMainLocation(item?.locationId) || ''
+  }
 
   const filtered = complianceItems.filter(item => {
-    const emp = employeeMap[item.employeeId]
-    if (!emp) return false
     if (categoryFilter !== 'all' && item.category !== categoryFilter) return false
+    const itemSite = getItemSite(item)
     if (siteFilter !== 'all') {
-      if (emp.site !== siteFilter) return false
+      if (itemSite !== siteFilter) return false
     }
     if (statusFilter !== 'all') {
       const s = getStatus(item.dueDate)
@@ -353,24 +507,37 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
   }
 
   const handleAdd = async () => {
-    if (!addForm.employeeId) return alert('Select an employee')
-    const emp = employeeMap[addForm.employeeId]
-    await addDoc(collection(db, 'complianceItems'), {
-      employeeId: addForm.employeeId,
-      employeeName: emp?.name || '',
-      employeeSite: emp?.site || null,
-      category: addForm.category,
-      subtype: addForm.subtype || null,
-      lastCompleted: addForm.lastCompleted ? Timestamp.fromDate(new Date(addForm.lastCompleted)) : null,
-      dueDate: addForm.dueDate ? Timestamp.fromDate(new Date(addForm.dueDate)) : null,
-      notes: addForm.notes || '',
-      source: 'manual',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    })
-    setAddForm({ employeeId: '', category: 'fpcc', subtype: '', lastCompleted: '', dueDate: '', notes: '' })
-    setAdding(false)
-    notifySuccess('Compliance item added')
+    const employeeCategory = requiresEmployee(addDraft.category)
+    const normalizedLocation = normalizeMainLocation(addDraft.locationId) || String(addDraft.locationId || '').trim().toUpperCase() || null
+    const selectedEmployee = employeeCategory ? employeeMap[addDraft.employeeId] : null
+    if (employeeCategory && !addDraft.employeeId) return alert('Select an employee')
+    if (employeeCategory && !selectedEmployee) return alert('Select a valid employee')
+    if (!employeeCategory && !normalizedLocation) return alert('Select a location')
+
+    try {
+      await addDoc(collection(db, 'complianceItems'), {
+        targetType: employeeCategory ? 'employee' : 'location',
+        locationId: employeeCategory ? null : normalizedLocation,
+        employeeId: employeeCategory ? addDraft.employeeId : null,
+        employeeName: employeeCategory ? (selectedEmployee?.name || '') : null,
+        employeeSite: employeeCategory
+          ? (normalizeMainLocation(selectedEmployee?.site) || selectedEmployee?.site || null)
+          : normalizedLocation,
+        category: addDraft.category,
+        subtype: addDraft.subtype || null,
+        lastCompleted: addDraft.lastCompleted ? Timestamp.fromDate(new Date(addDraft.lastCompleted)) : null,
+        dueDate: addDraft.dueDate ? Timestamp.fromDate(new Date(addDraft.dueDate)) : null,
+        notes: addDraft.notes || '',
+        source: 'manual',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      })
+      closeAddWizard()
+      notifySuccess('Compliance item added')
+    } catch (err) {
+      console.error('Failed to add compliance item', err)
+      alert(`Unable to save compliance item: ${err?.message || 'Unknown error'}`)
+    }
   }
 
   const handleDelete = async (itemId) => {
@@ -390,6 +557,15 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
     return d.toISOString().split('T')[0]
   }
 
+  const categoryNeedsEmployee = requiresEmployee(addDraft.category)
+  const canAdvanceWizard = (() => {
+    if (wizardStep === 1) return Boolean(addDraft.category)
+    if (wizardStep === 2) {
+      return categoryNeedsEmployee ? Boolean(addDraft.employeeId) : Boolean(addDraft.locationId)
+    }
+    return true
+  })()
+
   return (
     <div>
       {/* Filters */}
@@ -408,47 +584,177 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
           <option value="upcoming">Due in 30 days</option>
           <option value="current">Current</option>
         </select>
-        <button onClick={() => setAdding(!adding)} style={btnPrimary}>+ Add Item</button>
+        <button onClick={openAddWizard} style={btnPrimary}>+ Add Item</button>
       </div>
 
-      {/* Add form */}
-      {adding && (
-        <div style={{ ...cardStyle, border: '2px solid #E53935' }}>
-          <h4 style={{ margin: '0 0 12px 0', color: '#e8e8e8' }}>Add Compliance Item</h4>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-            <div>
-              <label style={labelStyle}>Employee *</label>
-              <select style={inputStyle} value={addForm.employeeId} onChange={e => setAddForm({ ...addForm, employeeId: e.target.value })}>
-                <option value="">Select...</option>
-                {employees.filter(e => e.active !== false).map(e => <option key={e.id} value={e.id}>{e.name} ({e.site})</option>)}
-              </select>
+      {/* Add wizard */}
+      {isAddWizardOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.6)',
+          zIndex: 3000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px'
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '620px',
+            borderRadius: '12px',
+            border: '2px solid rgba(229,57,53,0.6)',
+            backgroundColor: 'rgba(12,22,35,0.95)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.45)',
+            padding: '20px'
+          }}>
+            <h4 style={{ margin: '0 0 6px 0', color: '#e8e8e8' }}>Add Compliance Item</h4>
+            <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '14px' }}>
+              Step {wizardStep} of {maxWizardStep}
             </div>
-            <div>
-              <label style={labelStyle}>Category *</label>
-              <select style={inputStyle} value={addForm.category} onChange={e => setAddForm({ ...addForm, category: e.target.value })}>
-                {CATEGORY_KEYS.map(k => <option key={k} value={k}>{COMPLIANCE_CATEGORIES[k].label}</option>)}
-              </select>
+
+            {wizardStep === 1 && (
+              <div>
+                <label style={labelStyle}>Which item are you adding?</label>
+                <select
+                  style={inputStyle}
+                  value={addDraft.category}
+                  onChange={e => setAddDraft(prev => ({
+                    ...prev,
+                    category: e.target.value,
+                    employeeId: '',
+                    locationId: ''
+                  }))}
+                >
+                  {CATEGORY_KEYS.map(k => (
+                    <option key={k} value={k}>
+                      {COMPLIANCE_CATEGORIES[k].icon} {COMPLIANCE_CATEGORIES[k].label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {wizardStep === 2 && categoryNeedsEmployee && (
+              <div>
+                <label style={labelStyle}>Select employee *</label>
+                <select
+                  style={inputStyle}
+                  value={addDraft.employeeId}
+                  onChange={e => setAddDraft(prev => ({ ...prev, employeeId: e.target.value }))}
+                >
+                  <option value="">Select...</option>
+                  {activeEmployees.map(e => (
+                    <option key={e.id} value={e.id}>
+                      {e.name} ({e.site})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {wizardStep === 2 && !categoryNeedsEmployee && (
+              <div>
+                <label style={labelStyle}>Select location *</label>
+                <select
+                  style={inputStyle}
+                  value={addDraft.locationId}
+                  onChange={e => setAddDraft(prev => ({ ...prev, locationId: e.target.value }))}
+                >
+                  <option value="">Select...</option>
+                  {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
+                </select>
+              </div>
+            )}
+
+            {wizardStep === 3 && (
+              <div>
+                <label style={labelStyle}>Subtype (optional)</label>
+                <input
+                  style={inputStyle}
+                  value={addDraft.subtype}
+                  onChange={e => setAddDraft(prev => ({ ...prev, subtype: e.target.value }))}
+                  placeholder="e.g., 90_day"
+                />
+              </div>
+            )}
+
+            {wizardStep === 4 && (
+              <div>
+                <label style={labelStyle}>Last Completed (optional)</label>
+                <input
+                  type="date"
+                  style={inputStyle}
+                  value={addDraft.lastCompleted}
+                  onChange={e => setAddDraft(prev => ({ ...prev, lastCompleted: e.target.value }))}
+                />
+              </div>
+            )}
+
+            {wizardStep === 5 && (
+              <div>
+                <label style={labelStyle}>Due Date (optional)</label>
+                <input
+                  type="date"
+                  style={inputStyle}
+                  value={addDraft.dueDate}
+                  onChange={e => setAddDraft(prev => ({ ...prev, dueDate: e.target.value }))}
+                />
+              </div>
+            )}
+
+            {wizardStep === 6 && (
+              <div>
+                <label style={labelStyle}>Notes (optional)</label>
+                <input
+                  style={inputStyle}
+                  value={addDraft.notes}
+                  onChange={e => setAddDraft(prev => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+            )}
+
+            {wizardStep === 7 && (
+              <div style={{ display: 'grid', gap: '8px', color: '#d6dbe1', fontSize: '13px' }}>
+                <div><strong>Category:</strong> {COMPLIANCE_CATEGORIES[addDraft.category]?.label || addDraft.category}</div>
+                <div>
+                  <strong>Target:</strong>{' '}
+                  {categoryNeedsEmployee
+                    ? (employeeMap[addDraft.employeeId]?.name || 'Not selected')
+                    : (addDraft.locationId || 'Not selected')}
+                </div>
+                <div><strong>Subtype:</strong> {addDraft.subtype || '--'}</div>
+                <div><strong>Last Completed:</strong> {addDraft.lastCompleted || '--'}</div>
+                <div><strong>Due Date:</strong> {addDraft.dueDate || '--'}</div>
+                <div><strong>Notes:</strong> {addDraft.notes || '--'}</div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '18px' }}>
+              <button onClick={closeAddWizard} style={btnCancel}>Cancel</button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => setWizardStep(prev => Math.max(1, prev - 1))}
+                  style={btnCancel}
+                  disabled={wizardStep === 1}
+                >
+                  Back
+                </button>
+                {wizardStep < maxWizardStep && (
+                  <button
+                    onClick={() => setWizardStep(prev => Math.min(maxWizardStep, prev + 1))}
+                    style={btnPrimary}
+                    disabled={!canAdvanceWizard}
+                  >
+                    Next
+                  </button>
+                )}
+                {wizardStep === maxWizardStep && (
+                  <button onClick={handleAdd} style={btnPrimary}>Save</button>
+                )}
+              </div>
             </div>
-            <div>
-              <label style={labelStyle}>Subtype</label>
-              <input style={inputStyle} value={addForm.subtype} onChange={e => setAddForm({ ...addForm, subtype: e.target.value })} placeholder="e.g., 90_day" />
-            </div>
-            <div>
-              <label style={labelStyle}>Last Completed</label>
-              <input type="date" style={inputStyle} value={addForm.lastCompleted} onChange={e => setAddForm({ ...addForm, lastCompleted: e.target.value })} />
-            </div>
-            <div>
-              <label style={labelStyle}>Due Date</label>
-              <input type="date" style={inputStyle} value={addForm.dueDate} onChange={e => setAddForm({ ...addForm, dueDate: e.target.value })} />
-            </div>
-            <div>
-              <label style={labelStyle}>Notes</label>
-              <input style={inputStyle} value={addForm.notes} onChange={e => setAddForm({ ...addForm, notes: e.target.value })} placeholder="Optional" />
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-            <button onClick={handleAdd} style={btnPrimary}>Save</button>
-            <button onClick={() => setAdding(false)} style={btnCancel}>Cancel</button>
           </div>
         </div>
       )}
@@ -459,6 +765,11 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
         {filtered.map(item => {
           const s = getStatus(item.dueDate)
           const isEditing = editingId === item.id
+          const itemTargetType = getItemTargetType(item)
+          const itemSite = getItemSite(item)
+          const itemDisplayLabel = itemTargetType === 'location'
+            ? `Location: ${itemSite || '--'}`
+            : (item.employeeName || employeeMap[item.employeeId]?.name || 'Unknown employee')
 
           if (isEditing) {
             return (
@@ -493,7 +804,18 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
               backgroundColor: 'rgba(255,255,255,0.03)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 'bold', fontSize: '14px', minWidth: '140px' }}>{item.employeeName}</span>
+                <span style={{ fontWeight: 'bold', fontSize: '14px', minWidth: '140px' }}>{itemDisplayLabel}</span>
+                {itemTargetType === 'employee' && itemSite && (
+                  <span style={{
+                    fontSize: '12px',
+                    color: '#8899aa',
+                    backgroundColor: 'rgba(255,255,255,0.06)',
+                    padding: '2px 8px',
+                    borderRadius: '4px'
+                  }}>
+                    {itemSite}
+                  </span>
+                )}
                 <span style={{ fontSize: '13px' }}>
                   {COMPLIANCE_CATEGORIES[item.category]?.icon} {COMPLIANCE_CATEGORIES[item.category]?.label || item.category}
                   {item.subtype && <span style={{ color: '#8899aa' }}> ({item.subtype})</span>}
