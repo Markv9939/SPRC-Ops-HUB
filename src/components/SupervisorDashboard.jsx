@@ -505,7 +505,11 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
   const handleEditUser = (user) => {
     setEditingUser(user.id)
-    setUserForm({ ...user, pin: '' })
+    setUserForm({
+      ...user,
+      site: String(user?.site || (user?.role === 'admin' ? 'GLOBAL' : 'PHP')).trim().toUpperCase(),
+      pin: ''
+    })
   }
 
   const handleSaveUser = async () => {
@@ -523,15 +527,25 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
     try {
       const pinHash = await hashPin(userForm.pin)
+      const normalizedRole = String(userForm.role || 'tech').trim().toLowerCase()
+      const normalizedSite = String(userForm.site || '').trim().toUpperCase()
+      const requestedScopes = Array.isArray(userForm.authorizedLocations)
+        ? userForm.authorizedLocations
+          .map(value => String(value || '').trim().toUpperCase())
+          .filter(Boolean)
+        : []
+      const authorizedLocations = normalizedRole === 'admin'
+        ? []
+        : [...new Set([...(normalizedSite ? [normalizedSite] : []), ...requestedScopes])]
       const payload = {
         name: userForm.name,
         pinHash,
         pinVersion: 'v1_sha256',
         pinUpdatedAt: serverTimestamp(),
-        role: userForm.role,
-        site: userForm.site,
-        active: userForm.active,
-        authorizedLocations: userForm.authorizedLocations || null,
+        role: normalizedRole,
+        site: normalizedRole === 'admin' ? 'GLOBAL' : (normalizedSite || 'PHP'),
+        active: userForm.active === true,
+        authorizedLocations,
         updatedAt: serverTimestamp()
       }
       if (editingUser === 'new') {
@@ -742,7 +756,16 @@ function SupervisorDashboard({ user, isOffline = false }) {
         </label>
         <select
           value={userForm.role}
-          onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
+          onChange={(e) => {
+            const nextRole = String(e.target.value || '').trim().toLowerCase()
+            setUserForm(prev => ({
+              ...prev,
+              role: nextRole,
+              site: nextRole === 'admin'
+                ? 'GLOBAL'
+                : (String(prev.site || '').trim().toUpperCase() === 'GLOBAL' ? 'PHP' : prev.site)
+            }))
+          }}
           style={{
             width: '100%',
             padding: '8px',
@@ -766,6 +789,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         <select
           value={userForm.site}
           onChange={(e) => setUserForm({ ...userForm, site: e.target.value })}
+          disabled={userForm.role === 'admin'}
           style={{
             width: '100%',
             padding: '8px',
@@ -773,12 +797,19 @@ function SupervisorDashboard({ user, isOffline = false }) {
             borderRadius: '6px',
             fontSize: '14px',
             boxSizing: 'border-box',
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            color: '#e8e8e8'
+            backgroundColor: userForm.role === 'admin' ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
+            color: '#e8e8e8',
+            cursor: userForm.role === 'admin' ? 'not-allowed' : 'pointer'
           }}
         >
-          <option value="PHP">PHP</option>
-          <option value="RTC">RTC</option>
+          {userForm.role === 'admin' ? (
+            <option value="GLOBAL">GLOBAL (full access)</option>
+          ) : (
+            <>
+              <option value="PHP">PHP</option>
+              <option value="RTC">RTC</option>
+            </>
+          )}
         </select>
       </div>
       <div>
@@ -2001,7 +2032,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
                         </div>
                         <div>
                           <div style={{ fontSize: '11px', color: '#8899aa' }}>Site</div>
-                          <div style={{ fontSize: '14px' }}>{managedUser.site}</div>
+                          <div style={{ fontSize: '14px' }}>
+                            {managedUser.role === 'admin' ? 'GLOBAL (full access)' : (managedUser.site || '--')}
+                          </div>
                         </div>
                         <div>
                           <div style={{ fontSize: '11px', color: '#8899aa' }}>Status</div>
