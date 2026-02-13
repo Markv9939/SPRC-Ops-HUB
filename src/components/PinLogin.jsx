@@ -4,6 +4,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore'
 import { signInAnonymously } from 'firebase/auth'
 import { hashPin } from '../utils/pinHash'
 import { getScopedSessionUser } from '../services/accessGrantService'
+import { getAuthPolicy } from '../services/authPolicyService'
 import { isOfflineMode } from '../utils/networkGuard'
 import {
   GLOBAL_SCOPE,
@@ -162,16 +163,18 @@ function PinLogin({ onLogin }) {
         localStorage.removeItem('lockoutUntil')
         setFailedAttempts(0)
 
+        const policy = await getAuthPolicy()
+        const authScopeEnforced = policy?.authScopeEnforced === true
         const authSession = await ensureAuthSession()
 
-        // Prevent stale claim sessions (from prior logins) from constraining this PIN identity.
-        if (!claimsMatchPinUser(authSession, userData)) {
+        // When claim enforcement is on, prevent stale claim sessions from constraining PIN identity.
+        if (authScopeEnforced && !claimsMatchPinUser(authSession, userData)) {
           setError('Access blocked: auth claims do not match this PIN account. Use the matching claim-enabled account.')
           setPin('')
           return
         }
 
-        if (!authSession.authClaimsReady) {
+        if (authScopeEnforced && !authSession.authClaimsReady) {
           setError('Access blocked: auth claims are required for this environment. Contact admin.')
           setPin('')
           return
@@ -202,14 +205,14 @@ function PinLogin({ onLogin }) {
             primaryScopes: normalizeScopeValues(baseScopes),
             activeBackupGrants: [],
             scopeRefreshedAt: new Date().toISOString(),
-            authScopeEnforced: true,
+            authScopeEnforced,
             ...authSession
           }
         }
 
         onLogin({
           ...scopedSessionUser,
-          authScopeEnforced: true,
+          authScopeEnforced,
           ...authSession
         })
       }

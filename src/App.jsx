@@ -13,6 +13,7 @@ import ToastHost from './components/ToastHost'
 import DialogHost from './components/DialogHost'
 import { syncEocTasksForUserScope } from './services/eocTaskEngine'
 import { refreshScopedSessionUser } from './services/accessGrantService'
+import { getAuthPolicy } from './services/authPolicyService'
 import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
 import { installAlertDialogBridge, showPromptDialog } from './utils/dialogs'
@@ -228,6 +229,9 @@ function App() {
         const refreshedUser = await refreshScopedSessionUser(user.id)
         if (cancelled) return
 
+        const policy = await getAuthPolicy()
+        const authScopeEnforced = policy?.authScopeEnforced === true
+
         if (!refreshedUser) {
           alert('Your account is no longer active. Please log in again.')
           sessionStorage.removeItem('bhtUser')
@@ -248,10 +252,10 @@ function App() {
             authClaimsReady: prev.authClaimsReady || false,
             authClaimRole: prev.authClaimRole || null,
             authClaimLocations: Array.isArray(prev.authClaimLocations) ? prev.authClaimLocations : [],
-            authScopeEnforced: true
+            authScopeEnforced
           }
 
-          if (!mergedUser.authClaimsReady) {
+          if (mergedUser.authScopeEnforced && !mergedUser.authClaimsReady) {
             alert('Access policy changed: auth claims are now required. Please re-login with a claim-enabled account.')
             sessionStorage.removeItem('bhtUser')
             localStorage.removeItem('lastActivity')
