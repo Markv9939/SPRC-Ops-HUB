@@ -53,6 +53,10 @@ service cloud.firestore {
       return vanId in ['van_1', 'van_2', 'van_3', 'van_4'];
     }
 
+    function validShiftId(shiftId) {
+      return shiftId in ['shift_1', 'shift_2'];
+    }
+
     function userLocationValue(data) {
       return ('location' in data) ? data.location : (('site' in data) ? data.site : '');
     }
@@ -66,6 +70,8 @@ service cloud.firestore {
             validMainLocation(userLocationValue(data))
             && data.vanId is string
             && validVanId(data.vanId)
+            && data.shiftId is string
+            && validShiftId(data.shiftId)
             && data.locationId is string
             && (
               mainLocation == 'OTC'
@@ -193,6 +199,7 @@ service cloud.firestore {
         && (!('location' in data) || data.location is string)
         && (!('house' in data) || data.house == null || data.house is string)
         && (!('locationId' in data) || data.locationId == null || data.locationId is string)
+        && (!('shiftId' in data) || data.shiftId == null || data.shiftId is string)
         && (!('vanId' in data) || data.vanId == null || data.vanId is string)
         && (!('authorizedLocations' in data) || data.authorizedLocations is list)
         && (!('pin' in data) || data.pin is string)
@@ -285,13 +292,14 @@ service cloud.firestore {
 
       allow create: if request.resource.data.keys().hasAll([
         'bhtUserId', 'bhtUserName', 'locationId', 'shiftId', 'vanIds',
-        'isHousePrimary', 'active'
+        'active'
       ])
         && request.resource.data.bhtUserId is string
+        && request.resource.data.bhtUserName is string
         && request.resource.data.locationId is string
         && request.resource.data.shiftId is string
+        && validShiftId(request.resource.data.shiftId)
         && request.resource.data.vanIds is list
-        && request.resource.data.isHousePrimary is bool
         && request.resource.data.active is bool
         && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
@@ -307,17 +315,20 @@ service cloud.firestore {
       allow read: if true;
 
       allow create: if request.resource.data.keys().hasAll([
-        'taskType', 'locationId', 'shiftId', 'assigneeUserId',
-        'dueDate', 'status', 'cycleKey'
+        'taskType', 'locationId', 'shiftId', 'dueDate', 'status', 'cycleKey',
+        'eligibleUserIds'
       ])
         && request.resource.data.taskType in ['house', 'van']
         && validEocTaskStatus(request.resource.data.status)
         && validIgnoredTaskPayload(request.resource.data)
+        && request.resource.data.eligibleUserIds is list
         && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
       allow update: if validEocTaskStatus(request.resource.data.status)
         && validIgnoredTaskPayload(request.resource.data)
+        && (!('eligibleUserIds' in request.resource.data) || request.resource.data.eligibleUserIds is list)
+        && (!('eligibleUserNames' in request.resource.data) || request.resource.data.eligibleUserNames is list)
         && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();

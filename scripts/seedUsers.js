@@ -136,6 +136,7 @@ async function seedUsers() {
       location: 'OTC',
       house: 'MESQUITE',
       locationId: 'mesquite',
+      shiftId: 'shift_1',
       vanId: 'van_1',
       active: true,
       authorizedLocations: ['OTC', 'MESQUITE']
@@ -149,6 +150,7 @@ async function seedUsers() {
       location: 'OTC',
       house: 'MESQUITE',
       locationId: 'mesquite',
+      shiftId: 'shift_1',
       vanId: 'van_2',
       active: true,
       authorizedLocations: ['OTC', 'MESQUITE']
@@ -162,6 +164,7 @@ async function seedUsers() {
       location: 'OTC',
       house: 'LONE_MOUNTAIN',
       locationId: 'lone_mountain',
+      shiftId: 'shift_2',
       vanId: 'van_4',
       active: true,
       authorizedLocations: ['OTC', 'LONE_MOUNTAIN']
@@ -175,6 +178,7 @@ async function seedUsers() {
       location: 'RES',
       house: null,
       locationId: 'res',
+      shiftId: 'shift_1',
       vanId: 'van_3',
       active: true,
       authorizedLocations: ['RES']
@@ -202,43 +206,43 @@ async function seedUsers() {
 async function seedAssignments() {
   const assignments = [
     {
-      id: 'asg_mesquite_shift1_a',
+      id: 'asg_tech_mesquite_a',
       bhtUserId: 'tech_mesquite_a',
       bhtUserName: 'BHT Mesquite A',
       locationId: 'mesquite',
       shiftId: 'shift_1',
       vanIds: ['van_1'],
-      isHousePrimary: true,
+      source: 'user_profile',
       active: true
     },
     {
-      id: 'asg_mesquite_shift1_b',
+      id: 'asg_tech_mesquite_b',
       bhtUserId: 'tech_mesquite_b',
       bhtUserName: 'BHT Mesquite B',
       locationId: 'mesquite',
       shiftId: 'shift_1',
       vanIds: ['van_2'],
-      isHousePrimary: false,
+      source: 'user_profile',
       active: true
     },
     {
-      id: 'asg_lm_shift2_multi',
+      id: 'asg_tech_lm_multi',
       bhtUserId: 'tech_lm_multi',
       bhtUserName: 'BHT Lone Mountain',
       locationId: 'lone_mountain',
       shiftId: 'shift_2',
-      vanIds: ['van_2', 'van_4'],
-      isHousePrimary: true,
+      vanIds: ['van_4'],
+      source: 'user_profile',
       active: true
     },
     {
-      id: 'asg_res_shift1',
+      id: 'asg_tech_unassigned',
       bhtUserId: 'tech_unassigned',
       bhtUserName: 'BHT RES',
       locationId: 'res',
       shiftId: 'shift_1',
       vanIds: ['van_3'],
-      isHousePrimary: true,
+      source: 'user_profile',
       active: true
     }
   ]
@@ -334,6 +338,8 @@ async function seedEocTasks() {
       taskType: 'house',
       locationId: 'mesquite',
       shiftId: 'shift_1',
+      eligibleUserIds: ['tech_mesquite_a', 'tech_mesquite_b'],
+      eligibleUserNames: ['BHT Mesquite A', 'BHT Mesquite B'],
       assigneeUserId: 'tech_mesquite_a',
       assigneeUserName: 'BHT Mesquite A',
       dueDate: today,
@@ -345,6 +351,8 @@ async function seedEocTasks() {
       locationId: 'mesquite',
       shiftId: 'shift_1',
       vanId: 'van_1',
+      eligibleUserIds: ['tech_mesquite_a', 'tech_mesquite_b'],
+      eligibleUserNames: ['BHT Mesquite A', 'BHT Mesquite B'],
       assigneeUserId: 'tech_mesquite_a',
       assigneeUserName: 'BHT Mesquite A',
       dueDate: today,
@@ -356,6 +364,8 @@ async function seedEocTasks() {
       locationId: 'mesquite',
       shiftId: 'shift_1',
       vanId: 'van_2',
+      eligibleUserIds: ['tech_mesquite_a', 'tech_mesquite_b'],
+      eligibleUserNames: ['BHT Mesquite A', 'BHT Mesquite B'],
       assigneeUserId: 'tech_mesquite_b',
       assigneeUserName: 'BHT Mesquite B',
       dueDate: today,
@@ -366,6 +376,8 @@ async function seedEocTasks() {
       taskType: 'house',
       locationId: 'lone_mountain',
       shiftId: 'shift_2',
+      eligibleUserIds: ['tech_lm_multi'],
+      eligibleUserNames: ['BHT Lone Mountain'],
       assigneeUserId: 'tech_lm_multi',
       assigneeUserName: 'BHT Lone Mountain',
       dueDate: yesterday,
@@ -377,6 +389,8 @@ async function seedEocTasks() {
       locationId: 'res',
       shiftId: 'shift_1',
       vanId: 'van_3',
+      eligibleUserIds: ['tech_unassigned'],
+      eligibleUserNames: ['BHT RES'],
       assigneeUserId: 'tech_unassigned',
       assigneeUserName: 'BHT RES',
       dueDate: today,

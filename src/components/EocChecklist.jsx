@@ -43,6 +43,16 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           return
         }
 
+        const eligibleUserIds = Array.isArray(data.eligibleUserIds) ? data.eligibleUserIds : []
+        const canCurrentUserComplete = eligibleUserIds.length > 0
+          ? eligibleUserIds.includes(user?.id)
+          : (!data.assigneeUserId || data.assigneeUserId === user?.id)
+        if (!canCurrentUserComplete) {
+          setError('You are not eligible to complete this EOC task.')
+          setLoading(false)
+          return
+        }
+
         const nextType = data.taskType || data.eocType || ''
         setEocType(nextType)
 
@@ -65,7 +75,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     }
 
     loadTask()
-  }, [taskId, user?.name])
+  }, [taskId, user?.id, user?.name])
 
   useEffect(() => {
     if (!eocType) return
@@ -219,6 +229,14 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           throw new Error(`This EOC task is already ${latestTask.status}.`)
         }
 
+        const latestEligibleUserIds = Array.isArray(latestTask.eligibleUserIds) ? latestTask.eligibleUserIds : []
+        const canCurrentUserComplete = latestEligibleUserIds.length > 0
+          ? latestEligibleUserIds.includes(user?.id)
+          : (!latestTask.assigneeUserId || latestTask.assigneeUserId === user?.id)
+        if (!canCurrentUserComplete) {
+          throw new Error('You are not eligible to complete this EOC task.')
+        }
+
         const { nextVersion } = assertExpectedVersion({
           expectedVersion: getVersionNumber(task),
           currentVersion: getVersionNumber(latestTask),
@@ -253,6 +271,8 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           status: 'completed',
           submissionId: submissionRef.id,
           completedAt: serverTimestamp(),
+          completedByUserId: user.id,
+          completedByName: user.name,
           version: nextVersion,
           updatedAt: serverTimestamp()
         })

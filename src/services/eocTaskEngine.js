@@ -3,6 +3,7 @@ import { SHIFTS } from '../data/eocConstants'
 import { getCurrentCycleDueDate, phoenixNow } from '../utils/eocSchedule'
 import { collection, query, where, getDocs, doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore'
 import { getVersionNumber } from './versioning'
+import { getAvailableMainLocationsForUser, isAdminRole, isBhtRole, locationIdToMainLocation } from '../utils/orgModel'
 
 function toPhoenixDateStr() {
   const now = phoenixNow()
@@ -16,22 +17,64 @@ function buildTaskDocId({ locationId, shiftId, taskType, dueDate, vanId }) {
   return `task_${locationId}_${shiftId}_van_${vanId}_${dueDate}`
 }
 
+function buildGroupKey(locationId, shiftId) {
+  return `${locationId}::${shiftId}`
+}
+
 function getDesiredStatus(dueDate, currentStatus, todayStr) {
   if (currentStatus === 'completed' || currentStatus === 'ignored') return currentStatus
   return dueDate < todayStr ? 'overdue' : 'pending'
 }
 
-function createTaskRecord(assignment, taskType, dueDate, shift, vanId = null) {
+function sortUnique(values) {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)))
+}
+
+function arraysEqual(a, b) {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+function normalizeAssignment(raw) {
+  const locationId = String(raw?.locationId || '').trim().toLowerCase()
+  const shiftId = String(raw?.shiftId || '').trim()
+  if (!locationId || !shiftId) return null
+  const bhtUserId = String(raw?.bhtUserId || '').trim()
+  const bhtUserName = String(raw?.bhtUserName || '').trim()
+  const vanIds = sortUnique((Array.isArray(raw?.vanIds) ? raw.vanIds : []).map(v => String(v || '').trim().toLowerCase()))
+  return {
+    id: raw?.id || '',
+    bhtUserId,
+    bhtUserName,
+    locationId,
+    shiftId,
+    vanIds,
+    active: raw?.active === true
+  }
+}
+
+function createTaskRecord(group, taskType, vanId = null) {
+  const eligibleUserIds = sortUnique(group.eligibleUserIds)
+  const eligibleUserNames = sortUnique(group.eligibleUserNames)
+  const primaryUserId = eligibleUserIds[0] || ''
+  const primaryUserName = eligibleUserNames[0] || ''
+
   const task = {
     taskType,
-    locationId: assignment.locationId,
-    shiftId: assignment.shiftId,
-    assigneeUserId: assignment.bhtUserId,
-    assigneeUserName: assignment.bhtUserName || '',
-    dueDate,
+    locationId: group.locationId,
+    shiftId: group.shiftId,
+    assigneeUserId: primaryUserId,
+    assigneeUserName: primaryUserName,
+    eligibleUserIds,
+    eligibleUserNames,
+    dueDate: group.dueDate,
     status: 'pending',
     cycleKey: '',
-    active: true
+    active: true,
+    scopeKey: buildGroupKey(group.locationId, group.shiftId)
   }
 
   if (taskType === 'van') {
@@ -42,49 +85,111 @@ function createTaskRecord(assignment, taskType, dueDate, shift, vanId = null) {
     locationId: task.locationId,
     shiftId: task.shiftId,
     taskType: task.taskType,
-    dueDate,
+    dueDate: group.dueDate,
     vanId
   })
 
-  task.shiftLabel = shift.label
+  task.shiftLabel = group.shiftLabel
   return task
 }
 
 function buildDesiredTasks(assignments) {
-  const tasks = []
+  const groups = new Map()
+
   for (const assignment of assignments) {
     const shift = SHIFTS.find(s => s.id === assignment.shiftId)
     if (!shift) continue
 
-    const dueDate = getCurrentCycleDueDate(shift)
-
-    if (assignment.isHousePrimary) {
-      tasks.push(createTaskRecord(assignment, 'house', dueDate, shift))
+    const groupKey = buildGroupKey(assignment.locationId, assignment.shiftId)
+    const existingGroup = groups.get(groupKey) || {
+      locationId: assignment.locationId,
+      shiftId: assignment.shiftId,
+      shiftLabel: shift.label,
+      dueDate: getCurrentCycleDueDate(shift),
+      eligibleUserIds: [],
+      eligibleUserNames: [],
+      vanIds: []
     }
 
-    const vanIds = Array.isArray(assignment.vanIds) ? [...new Set(assignment.vanIds.filter(Boolean))] : []
-    for (const vanId of vanIds) {
-      tasks.push(createTaskRecord(assignment, 'van', dueDate, shift, vanId))
+    if (assignment.bhtUserId) {
+      existingGroup.eligibleUserIds.push(assignment.bhtUserId)
+    }
+    if (assignment.bhtUserName) {
+      existingGroup.eligibleUserNames.push(assignment.bhtUserName)
+    }
+    existingGroup.vanIds.push(...assignment.vanIds)
+    groups.set(groupKey, existingGroup)
+  }
+
+  const tasks = []
+  for (const group of groups.values()) {
+    group.eligibleUserIds = sortUnique(group.eligibleUserIds)
+    group.eligibleUserNames = sortUnique(group.eligibleUserNames)
+    group.vanIds = sortUnique(group.vanIds)
+    if (group.eligibleUserIds.length === 0) continue
+
+    tasks.push(createTaskRecord(group, 'house'))
+
+    for (const vanId of group.vanIds) {
+      tasks.push(createTaskRecord(group, 'van', vanId))
     }
   }
-  return tasks
+
+  return tasks.sort((a, b) => String(a.cycleKey || '').localeCompare(String(b.cycleKey || '')))
+}
+
+function getAccessibleGroupKeys(user, normalizedAssignments) {
+  if (!user?.id) return new Set()
+
+  if (isBhtRole(user.role)) {
+    return new Set(
+      normalizedAssignments
+        .filter(assignment => assignment.active && assignment.bhtUserId === user.id)
+        .map(assignment => buildGroupKey(assignment.locationId, assignment.shiftId))
+    )
+  }
+
+  if (isAdminRole(user.role)) {
+    return new Set(normalizedAssignments.map(assignment => buildGroupKey(assignment.locationId, assignment.shiftId)))
+  }
+
+  const allowedMainLocations = new Set(getAvailableMainLocationsForUser(user))
+  if (allowedMainLocations.size === 0) return new Set()
+
+  return new Set(
+    normalizedAssignments
+      .filter((assignment) => allowedMainLocations.has(locationIdToMainLocation(assignment.locationId)))
+      .map(assignment => buildGroupKey(assignment.locationId, assignment.shiftId))
+  )
+}
+
+function taskInScope(task, scopedGroupKeys) {
+  return scopedGroupKeys.has(buildGroupKey(String(task?.locationId || '').trim().toLowerCase(), String(task?.shiftId || '').trim()))
 }
 
 export async function syncEocTasksForUserScope(user) {
   if (!user?.id) return { created: 0, updated: 0, scanned: 0 }
 
   const todayStr = toPhoenixDateStr()
-  const isElevated = user.role === 'supervisor' || user.role === 'admin'
 
   const assignmentsSnap = await getDocs(
     query(collection(db, 'shiftAssignments'), where('active', '==', true))
   )
 
-  const scopedAssignments = assignmentsSnap.docs
-    .map(d => ({ id: d.id, ...d.data() }))
-    .filter(a => (isElevated ? true : a.bhtUserId === user.id))
+  const normalizedAssignments = assignmentsSnap.docs
+    .map(d => normalizeAssignment({ id: d.id, ...d.data() }))
+    .filter(Boolean)
+    .filter(assignment => assignment.active)
 
-  const desiredTasks = buildDesiredTasks(scopedAssignments)
+  const scopedGroupKeys = getAccessibleGroupKeys(user, normalizedAssignments)
+  if (scopedGroupKeys.size === 0) {
+    return { created: 0, updated: 0, scanned: 0 }
+  }
+
+  const assignmentsForScope = normalizedAssignments
+    .filter(assignment => scopedGroupKeys.has(buildGroupKey(assignment.locationId, assignment.shiftId)))
+
+  const desiredTasks = buildDesiredTasks(assignmentsForScope)
   const batch = writeBatch(db)
   const touched = new Set()
 
@@ -110,9 +215,40 @@ export async function syncEocTasksForUserScope(user) {
     }
 
     const existing = existingSnap.data()
+    const nextEligibleUserIds = sortUnique(Array.isArray(task.eligibleUserIds) ? task.eligibleUserIds : [])
+    const nextEligibleUserNames = sortUnique(Array.isArray(task.eligibleUserNames) ? task.eligibleUserNames : [])
+    const currentEligibleUserIds = sortUnique(Array.isArray(existing.eligibleUserIds) ? existing.eligibleUserIds : [])
+    const currentEligibleUserNames = sortUnique(Array.isArray(existing.eligibleUserNames) ? existing.eligibleUserNames : [])
+    const scopeKey = buildGroupKey(task.locationId, task.shiftId)
     const nextStatus = getDesiredStatus(task.dueDate, existing.status, todayStr)
-    if (nextStatus !== existing.status) {
+    const needsTaskShapeUpdate =
+      existing.taskType !== task.taskType
+      || existing.locationId !== task.locationId
+      || existing.shiftId !== task.shiftId
+      || existing.vanId !== (task.vanId || null)
+      || existing.dueDate !== task.dueDate
+      || existing.shiftLabel !== task.shiftLabel
+      || existing.scopeKey !== scopeKey
+      || !arraysEqual(currentEligibleUserIds, nextEligibleUserIds)
+      || !arraysEqual(currentEligibleUserNames, nextEligibleUserNames)
+      || existing.assigneeUserId !== (task.assigneeUserId || '')
+      || existing.assigneeUserName !== (task.assigneeUserName || '')
+      || existing.active !== true
+
+    if (nextStatus !== existing.status || needsTaskShapeUpdate) {
       batch.update(taskRef, {
+        taskType: task.taskType,
+        locationId: task.locationId,
+        shiftId: task.shiftId,
+        vanId: task.vanId || null,
+        dueDate: task.dueDate,
+        shiftLabel: task.shiftLabel,
+        scopeKey,
+        eligibleUserIds: nextEligibleUserIds,
+        eligibleUserNames: nextEligibleUserNames,
+        assigneeUserId: task.assigneeUserId || '',
+        assigneeUserName: task.assigneeUserName || '',
+        active: true,
         status: nextStatus,
         version: getVersionNumber(existing) + 1,
         updatedAt: serverTimestamp()
@@ -125,7 +261,7 @@ export async function syncEocTasksForUserScope(user) {
   const pendingSnap = await getDocs(query(collection(db, 'eocTasks'), where('status', '==', 'pending')))
   for (const taskDoc of pendingSnap.docs) {
     const data = taskDoc.data()
-    if (!isElevated && data.assigneeUserId !== user.id) continue
+    if (!taskInScope(data, scopedGroupKeys)) continue
     if (!data.dueDate || data.dueDate >= todayStr) continue
     if (touched.has(taskDoc.id)) continue
 

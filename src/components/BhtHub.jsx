@@ -6,7 +6,7 @@ import { getCurrentCycleDueDate } from '../utils/eocSchedule'
 
 function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinueTransport, onStartEoc }) {
   const { assignment, loading: assignmentLoading } = useEocAssignments(user)
-  const { tasks, loading: tasksLoading } = useEocTasks(user)
+  const { tasks, loading: tasksLoading } = useEocTasks(user, assignment)
   const [selectedVanTaskId, setSelectedVanTaskId] = useState('')
 
   const hasAssignment = !!assignment
@@ -131,9 +131,7 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
   const dueCount = currentCycleTasks.filter(t => t.status === 'pending').length
   const overdueCount = currentCycleTasks.filter(t => t.status === 'overdue').length
   const completedCount = currentCycleTasks.filter(t => t.status === 'completed').length
-  const expectedTaskCount = hasAssignment
-    ? (assignment.isHousePrimary ? 1 : 0) + (Array.isArray(assignment.vanIds) ? assignment.vanIds.length : 0)
-    : 0
+  const expectedTaskCount = currentCycleTasks.length
   const notDueCount = Math.max(0, expectedTaskCount - (dueCount + overdueCount + completedCount))
 
   if (assignmentLoading || tasksLoading) {
@@ -176,7 +174,6 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
         <div style={{ fontSize: '13px', color: '#8899aa' }}>
           {locationLabel} - {shiftLabel}
           {vanLabels.length > 0 ? ` - ${vanLabels.join(', ')}` : ''}
-          {assignment.isHousePrimary && <span style={{ color: '#4CAF50', marginLeft: '8px' }}>House Primary</span>}
         </div>
       </div>
 

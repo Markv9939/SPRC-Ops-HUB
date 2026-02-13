@@ -23,8 +23,7 @@ function normalizeTemplatePayload(templateForm, templateType) {
 }
 
 function SupervisorEocPanel({ user, isOffline = false }) {
-  const LEGACY_ASSIGNMENTS_READ_ONLY = true
-  const [subTab, setSubTab] = useState('compliance') // compliance | assignments | issues | template | vehicles
+  const [subTab, setSubTab] = useState('compliance') // compliance | issues | template | vehicles
   const [assignments, setAssignments] = useState([])
   const [issues, setIssues] = useState([])
   const [publishedTemplateItems, setPublishedTemplateItems] = useState([])
@@ -264,22 +263,6 @@ function SupervisorEocPanel({ user, isOffline = false }) {
     } catch (err) {
       console.error('Error resolving issue:', err)
       alert('Failed to resolve issue')
-    }
-  }
-
-  const handleUpdateVan = async (assignmentId, vanId) => {
-    if (LEGACY_ASSIGNMENTS_READ_ONLY) {
-      alert('Legacy eocAssignments are read-only. Use Assignment Engine (shiftAssignments) in Supervisor Dashboard.')
-      return
-    }
-    try {
-      await updateDoc(doc(db, 'eocAssignments', assignmentId), {
-        vanId,
-        updatedAt: serverTimestamp()
-      })
-    } catch (err) {
-      console.error('Error updating van:', err)
-      alert('Failed to update van')
     }
   }
 
@@ -639,9 +622,6 @@ function SupervisorEocPanel({ user, isOffline = false }) {
         <button style={tabBtnStyle(subTab === 'compliance')} onClick={() => setSubTab('compliance')}>
           Compliance
         </button>
-        <button style={tabBtnStyle(subTab === 'assignments')} onClick={() => setSubTab('assignments')}>
-          Assignments
-        </button>
         <button style={tabBtnStyle(subTab === 'issues')} onClick={() => setSubTab('issues')}>
           Issues ({issues.filter(i => i.status === 'open').length})
         </button>
@@ -707,70 +687,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
             </div>
           )}
         </div>
-      )}
-
-      {/* ===== ASSIGNMENTS TAB ===== */}
-      {subTab === 'assignments' && (
-        <div>
-          {LEGACY_ASSIGNMENTS_READ_ONLY && (
-            <div style={{ marginBottom: '10px', fontSize: '12px', color: '#FF9800' }}>
-              Legacy `eocAssignments` records are read-only in this panel. Use `Assignments` tab in Supervisor Dashboard for active workflow changes.
-            </div>
-          )}
-          <p style={{ fontSize: '13px', color: '#8899aa', marginBottom: '16px' }}>
-            Manage upcoming assignments - reassign BHTs or override van assignments.
-          </p>
-          {loadingAssignments ? (
-            <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>Loading...</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {assignments.filter(a => a.status === 'pending').map(a => (
-                <div key={a.id} style={{
-                  padding: '14px',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  backgroundColor: 'rgba(255,255,255,0.05)'
-                }}>
-                  <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '8px' }}>
-                    {locationLabel(a.locationId)} — {shiftLabel(a.shiftId)} {a.eocType ? `(${a.eocType.toUpperCase()})` : ''}
-                  </div>
-                  <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '8px' }}>
-                    Due: {a.dueDate}
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <div>
-                      <label style={{ fontSize: '11px', color: '#556677' }}>BHT</label>
-                      <div style={{ fontSize: '13px', fontWeight: 600 }}>
-                        {a.assignedTechName || 'Unassigned'}
-                      </div>
-                    </div>
-                    {a.eocType === 'van' && (
-                      <div>
-                        <label style={{ fontSize: '11px', color: '#556677', display: 'block' }}>Van</label>
-                        <select
-                          value={a.vanId || ''}
-                          onChange={e => handleUpdateVan(a.id, e.target.value || null)}
-                          disabled={LEGACY_ASSIGNMENTS_READ_ONLY}
-                          style={selectStyle}
-                        >
-                          <option value="">None</option>
-                          {VANS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {assignments.filter(a => a.status === 'pending').length === 0 && (
-                <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>
-                  No pending assignments
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
+      )}
       {/* ===== ISSUES TAB ===== */}
       {subTab === 'issues' && (
         <div>
@@ -1221,4 +1138,5 @@ function SupervisorEocPanel({ user, isOffline = false }) {
 }
 
 export default SupervisorEocPanel
+
 

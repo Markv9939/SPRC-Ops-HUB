@@ -10,6 +10,7 @@ import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 import { hashPin } from '../utils/pinHash'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { getAuthPolicy, setAuthScopeEnforced } from '../services/authPolicyService'
+import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../services/assignmentService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
 import { getStatus } from '../utils/complianceStatus'
@@ -22,7 +23,6 @@ import {
   buildBhtLocationId,
   canActorManageRole,
   formatRoleLabel,
-  getAllowedVanIdsForLocationId,
   getAllowedVanIdsForMainLocation,
   getAvailableMainLocationsForUser,
   getHouseOptionsForMainLocation,
@@ -42,7 +42,6 @@ const TAB_LABELS = {
   dashboard: '\u{1F4C8} Dashboard',
   transports: '\u{1F4CA} Transports',
   users: '\u{1F465} Users',
-  assignments: '\u{1F4CB} Assignments',
   eoc: '\u{1F527} EOC',
   compliance: '\u{1F4CB} Compliance',
   audit: '\u{1F9FE} Audit'
@@ -143,7 +142,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const [eocIssueActionNotes, setEocIssueActionNotes] = useState({})
   const [overdueTaskActionId, setOverdueTaskActionId] = useState(null)
   const [overdueTaskActionMode, setOverdueTaskActionMode] = useState(null)
-  const [overdueTaskAssigneeUserId, setOverdueTaskAssigneeUserId] = useState('')
   const [overdueTaskActionReason, setOverdueTaskActionReason] = useState('')
   const [overdueTaskActionSubmitting, setOverdueTaskActionSubmitting] = useState(false)
 
@@ -161,18 +159,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
     role: '',
     location: '',
     house: '',
+    shiftId: '',
     vanId: '',
     active: true
   })
   const [authScopeEnforced, setAuthScopeEnforcedState] = useState(false)
   const [authPolicyLoading, setAuthPolicyLoading] = useState(false)
-
-  // Assignment Management
-  const [shiftAssignments, setShiftAssignments] = useState([])
-  const [editingAssignment, setEditingAssignment] = useState(null)
-  const [assignmentForm, setAssignmentForm] = useState({
-    bhtUserId: '', locationId: '', shiftId: '', vanIds: [], isHousePrimary: false, active: true
-  })
 
   const isAdmin = isAdminRole(user?.role)
   const availableTabKeys = isAdmin ? TAB_KEYS : TAB_KEYS.filter(k => k !== 'audit')
@@ -272,7 +264,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
     if (queueView === 'overdue') return
     setOverdueTaskActionId(null)
     setOverdueTaskActionMode(null)
-    setOverdueTaskAssigneeUserId('')
     setOverdueTaskActionReason('')
     setOverdueTaskActionSubmitting(false)
   }, [queueView])
@@ -319,18 +310,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
     )
     return () => { unsubIssues(); unsubOverdueTasks(); unsubAlerts(); unsubCompliance() }
   }, [inEocScope])
-
-  // Load BHT Assignments
-  useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'shiftAssignments'), orderBy('bhtUserName', 'asc')),
-      (snap) => {
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        setShiftAssignments(rows.filter(a => !a.deletedAt && a.deleted !== true))
-      }
-    )
-    return unsub
-  }, [])
 
   const updateIssueActionNote = (issueId, note) => {
     setEocIssueActionNotes(prev => ({
@@ -532,6 +511,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           location: normalizedLocation,
           site: normalizedLocation,
           house: normalizedHouse || '',
+          shiftId: String(loadedUser.shiftId || '').trim(),
           vanId: loadedUser.vanId || ''
         }
       })
@@ -589,8 +569,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
     )
     return unsub
   }, [isAdmin])
-
-  const bhtUsers = users.filter(u => isBhtRole(u.role) && u.active)
 
   const writeAuditLog = async ({ action, collectionPath, documentId, reason, extra = {} }) => {
     if (!user?.id || !user?.name) return
@@ -688,6 +666,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
     role: '',
     location: '',
     house: '',
+    shiftId: '',
     vanId: '',
     active: true
   }), [])
@@ -719,6 +698,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
       location: normalizedLocation,
       site: normalizedLocation,
       house: normalizeHouseId(managedUser?.house || managedUser?.locationId),
+      shiftId: String(managedUser?.shiftId || '').trim(),
       vanId: String(managedUser?.vanId || '').trim().toLowerCase(),
       pin: ''
     })
@@ -769,6 +749,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
       let normalizedHouse = ''
       let normalizedVanId = ''
       let normalizedLocationId = null
+      let normalizedShiftId = ''
 
       if (isBhtRole(normalizedRole)) {
         if (!normalizedLocation) {
@@ -786,6 +767,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
         const allowedVans = getAllowedVanIdsForMainLocation(normalizedLocation)
         if (!normalizedVanId || !allowedVans.includes(normalizedVanId)) {
           alert(`Please select a valid van for ${normalizedLocation}.`)
+          return
+        }
+
+        normalizedShiftId = String(userForm.shiftId || '').trim()
+        if (!normalizedShiftId || !SHIFTS.some(shiftOption => shiftOption.id === normalizedShiftId)) {
+          alert('Please select a valid shift for this BHT user.')
           return
         }
 
@@ -812,19 +799,56 @@ function SupervisorDashboard({ user, isOffline = false }) {
         location: normalizedRole === 'admin' ? GLOBAL_SCOPE : normalizedLocation,
         house: isBhtRole(normalizedRole) ? normalizedHouse || null : null,
         locationId: isBhtRole(normalizedRole) ? normalizedLocationId : null,
+        shiftId: isBhtRole(normalizedRole) ? normalizedShiftId : null,
         vanId: isBhtRole(normalizedRole) ? normalizedVanId : null,
         active: userForm.active === true,
         authorizedLocations,
         updatedAt: serverTimestamp()
       }
-      if (editingUser === 'new') {
-        await setDoc(doc(db, 'users', userForm.id), {
-          ...payload,
-          createdAt: serverTimestamp()
+      const persistUserAndAssignment = async () => {
+        if (editingUser === 'new') {
+          await setDoc(doc(db, 'users', userForm.id), {
+            ...payload,
+            createdAt: serverTimestamp()
+          })
+        } else {
+          await updateDoc(doc(db, 'users', userForm.id), payload)
+        }
+
+        await syncDerivedAssignmentForUser(userForm.id, {
+          name: userForm.name,
+          role: normalizedRole,
+          locationId: normalizedLocationId,
+          shiftId: normalizedShiftId,
+          vanId: normalizedVanId,
+          active: userForm.active === true
         })
-      } else {
-        await updateDoc(doc(db, 'users', userForm.id), payload)
       }
+
+      try {
+        await persistUserAndAssignment()
+      } catch (persistError) {
+        if (persistError?.code === 'permission-denied' && isAdminRole(user?.role)) {
+          const tokenRole = String(user?.authClaimRole || '').trim() || '(none)'
+          const refreshed = await refreshAdminAuthSession()
+          if (refreshed) {
+            try {
+              await persistUserAndAssignment()
+              notifySuccess('User saved after refreshing admin auth session.')
+              setEditingUser(null)
+              loadUsers()
+              return
+            } catch (retryErr) {
+              console.error('Retry failed after admin auth refresh:', retryErr)
+              throw retryErr
+            }
+          }
+          alert(`Admin save failed due to auth scope mismatch (token role: ${tokenRole}). Lock/logout, sign in again, and confirm latest Firestore rules are deployed.`)
+          return
+        }
+        throw persistError
+      }
+
       notifySuccess('User saved successfully')
       setEditingUser(null)
       loadUsers()
@@ -845,6 +869,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
     const reason = await promptDeleteReason(`soft-delete of user ${userId}`)
     if (!reason) return
+    const targetUser = users.find(candidate => candidate.id === userId)
 
     try {
       await updateDoc(doc(db, 'users', userId), {
@@ -855,6 +880,14 @@ function SupervisorDashboard({ user, isOffline = false }) {
         deleteReason: reason,
         active: false,
         updatedAt: serverTimestamp()
+      })
+      await syncDerivedAssignmentForUser(userId, {
+        name: targetUser?.name || userId,
+        role: targetUser?.role || 'bht',
+        locationId: targetUser?.locationId || null,
+        shiftId: targetUser?.shiftId || '',
+        vanId: targetUser?.vanId || '',
+        active: false
       })
       await writeAuditLog({
         action: 'soft_delete',
@@ -906,6 +939,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
       })
       batch.delete(doc(db, 'users', userId))
       await batch.commit()
+      await hardDeleteDerivedAssignment(userId)
       notifySuccess('User hard-deleted')
       loadUsers()
     } catch (error) {
@@ -1067,6 +1101,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 role: nextRole,
                 location: nextLocation,
                 house: nextRole === ROLE_BHT ? prev.house : '',
+                shiftId: nextRole === ROLE_BHT ? prev.shiftId : '',
                 vanId: nextRole === ROLE_BHT ? prev.vanId : ''
               }))
             }}
@@ -1184,6 +1219,32 @@ function SupervisorDashboard({ user, isOffline = false }) {
             </select>
           </div>
         )}
+        {isBhtRole(normalizedFormRole) && (
+          <div>
+            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+              Shift *
+            </label>
+            <select
+              value={userForm.shiftId}
+              onChange={(e) => setUserForm({ ...userForm, shiftId: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '8px',
+                border: '2px solid rgba(255,255,255,0.1)',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                color: '#e8e8e8'
+              }}
+            >
+              <option value="">Select Shift...</option>
+              {SHIFTS.map(shiftOption => (
+                <option key={shiftOption.id} value={shiftOption.id}>{shiftOption.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
             Active
@@ -1209,305 +1270,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
       </div>
     )
   }
-
-  // Assignment handlers
-  const handleAddAssignment = () => {
-    setEditingAssignment('new')
-    setAssignmentForm({ bhtUserId: '', locationId: '', shiftId: '', vanIds: [], isHousePrimary: false, active: true })
-  }
-
-  const handleEditAssignment = (a) => {
-    setEditingAssignment(a.id)
-    setAssignmentForm({
-      bhtUserId: a.bhtUserId,
-      locationId: a.locationId,
-      shiftId: a.shiftId,
-      vanIds: a.vanIds || [],
-      isHousePrimary: a.isHousePrimary || false,
-      active: a.active !== false
-    })
-  }
-
-  const handleSaveAssignment = async () => {
-    if (blockIfOffline('saving assignments')) return
-
-    if (!assignmentForm.bhtUserId || !assignmentForm.locationId || !assignmentForm.shiftId) {
-      alert('Please select a BHT, location, and shift')
-      return
-    }
-
-    const selectedUser = users.find(u => u.id === assignmentForm.bhtUserId)
-    if (!selectedUser) {
-      alert('Selected user not found')
-      return
-    }
-
-    const allowedVanIds = getAllowedVanIdsForLocationId(assignmentForm.locationId)
-    const invalidVanIds = assignmentForm.vanIds.filter(vanId => !allowedVanIds.includes(vanId))
-    if (invalidVanIds.length > 0) {
-      alert('Selected van choices do not match the selected location.')
-      return
-    }
-
-    // Validate: if isHousePrimary is true, check no other active assignment at same location+shift is also primary
-    if (assignmentForm.isHousePrimary) {
-      const conflicting = shiftAssignments.find(a =>
-        a.active &&
-        a.locationId === assignmentForm.locationId &&
-        a.shiftId === assignmentForm.shiftId &&
-        a.isHousePrimary &&
-        a.id !== editingAssignment
-      )
-      if (conflicting) {
-        alert(`${conflicting.bhtUserName} is already the House Primary for this location/shift. Remove their primary status first.`)
-        return
-      }
-    }
-
-    const payload = {
-      bhtUserId: assignmentForm.bhtUserId,
-      bhtUserName: selectedUser.name,
-      locationId: assignmentForm.locationId,
-      shiftId: assignmentForm.shiftId,
-      vanIds: assignmentForm.vanIds,
-      isHousePrimary: assignmentForm.isHousePrimary,
-      active: assignmentForm.active
-    }
-
-    const persistAssignment = async () => {
-      if (editingAssignment === 'new') {
-        const createdRef = await addDoc(collection(db, 'shiftAssignments'), {
-          ...payload,
-          version: 1,
-          effectiveFrom: serverTimestamp(),
-          effectiveTo: null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        })
-
-        try {
-          await writeAuditLog({
-            action: 'assignment_create',
-            collectionPath: 'shiftAssignments',
-            documentId: createdRef.id,
-            reason: 'Supervisor created assignment',
-            extra: { locationId: payload.locationId, shiftId: payload.shiftId }
-          })
-        } catch (auditErr) {
-          console.warn('Assignment saved but audit log write failed:', auditErr)
-        }
-      } else {
-        const currentAssignment = shiftAssignments.find(a => a.id === editingAssignment)
-        const expectedVersion = getVersionNumber(currentAssignment)
-        await runTransaction(db, async (transaction) => {
-          const assignmentRef = doc(db, 'shiftAssignments', editingAssignment)
-          const assignmentSnap = await transaction.get(assignmentRef)
-          if (!assignmentSnap.exists()) {
-            throw new Error('Assignment no longer exists.')
-          }
-
-          const latestAssignment = assignmentSnap.data()
-          const { nextVersion } = assertExpectedVersion({
-            expectedVersion,
-            currentVersion: getVersionNumber(latestAssignment),
-            documentId: editingAssignment,
-            recordLabel: 'Assignment'
-          })
-
-          transaction.update(assignmentRef, {
-            ...payload,
-            version: nextVersion,
-            updatedAt: serverTimestamp()
-          })
-        })
-
-        try {
-          await writeAuditLog({
-            action: 'assignment_update',
-            collectionPath: 'shiftAssignments',
-            documentId: editingAssignment,
-            reason: 'Supervisor updated assignment',
-            extra: { locationId: payload.locationId, shiftId: payload.shiftId }
-          })
-        } catch (auditErr) {
-          console.warn('Assignment updated but audit log write failed:', auditErr)
-        }
-      }
-    }
-
-    try {
-      await persistAssignment()
-      notifySuccess(editingAssignment === 'new' ? 'Assignment created' : 'Assignment updated')
-      setEditingAssignment(null)
-    } catch (err) {
-      let activeError = err
-      console.error('Error saving assignment:', activeError)
-
-      if (activeError?.code === 'permission-denied' && isAdminRole(user?.role)) {
-        const tokenRole = String(user?.authClaimRole || '').trim() || '(none)'
-        const refreshed = await refreshAdminAuthSession()
-        if (refreshed) {
-          try {
-            await persistAssignment()
-            notifySuccess('Assignment saved after refreshing admin auth session.')
-            setEditingAssignment(null)
-            return
-          } catch (retryErr) {
-            console.error('Retry failed after admin auth refresh:', retryErr)
-            activeError = retryErr
-          }
-        }
-
-        alert(`Admin save failed due to auth scope mismatch (token role: ${tokenRole}). Lock/logout, sign in again, and confirm latest Firestore rules are deployed.`)
-        return
-      }
-
-      if (activeError?.code === 'version-conflict') {
-        alert(formatVersionConflictMessage(activeError))
-      } else if (activeError?.code === 'permission-denied') {
-        alert('Failed to save assignment: your account is not scoped for that location.')
-      } else {
-        alert('Failed to save assignment: ' + activeError.message)
-      }
-    }
-  }
-
-  const handleDeleteAssignment = async (id) => {
-    if (blockIfOffline('deleting assignments')) return
-
-    if (!(await showConfirmDialog('Soft-delete this assignment?', {
-      title: 'Soft Delete Assignment',
-      tone: 'danger',
-      confirmText: 'Soft Delete'
-    }))) return
-
-    const reason = await promptDeleteReason('soft-delete of assignment')
-    if (!reason) return
-
-    try {
-      const currentAssignment = shiftAssignments.find(a => a.id === id)
-      const expectedVersion = getVersionNumber(currentAssignment)
-      await runTransaction(db, async (transaction) => {
-        const assignmentRef = doc(db, 'shiftAssignments', id)
-        const assignmentSnap = await transaction.get(assignmentRef)
-        if (!assignmentSnap.exists()) {
-          throw new Error('Assignment no longer exists.')
-        }
-
-        const latestAssignment = assignmentSnap.data()
-        const { nextVersion } = assertExpectedVersion({
-          expectedVersion,
-          currentVersion: getVersionNumber(latestAssignment),
-          documentId: id,
-          recordLabel: 'Assignment'
-        })
-
-        transaction.update(assignmentRef, {
-          deleted: true,
-          deletedAt: serverTimestamp(),
-          deletedByUserId: user?.id || null,
-          deletedByName: user?.name || null,
-          deleteReason: reason,
-          active: false,
-          version: nextVersion,
-          updatedAt: serverTimestamp()
-        })
-      })
-      await writeAuditLog({
-        action: 'soft_delete',
-        collectionPath: 'shiftAssignments',
-        documentId: id,
-        reason
-      })
-      notifySuccess('Assignment soft-deleted')
-    } catch (err) {
-      console.error('Error deleting assignment:', err)
-      alertVersionConflict(err, 'Failed to delete assignment')
-    }
-  }
-
-  const handleHardDeleteAssignment = async (id) => {
-    if (blockIfOffline('hard-deleting assignments')) return
-
-    if (!isAdmin) {
-      alert('Only admin can hard-delete records.')
-      return
-    }
-
-    if (!(await showConfirmDialog('Permanently hard-delete this assignment? This cannot be undone.', {
-      title: 'Hard Delete Assignment',
-      tone: 'danger',
-      confirmText: 'Hard Delete'
-    }))) return
-
-    const reason = await promptDeleteReason('hard-delete of assignment')
-    if (!reason) return
-
-    try {
-      const batch = writeBatch(db)
-      const auditRef = doc(collection(db, 'auditLogs'))
-      batch.set(auditRef, {
-        action: 'hard_delete',
-        collectionPath: 'shiftAssignments',
-        documentId: id,
-        performedByUserId: user?.id || null,
-        performedByName: user?.name || null,
-        reason,
-        createdAt: serverTimestamp()
-      })
-      batch.delete(doc(db, 'shiftAssignments', id))
-      await batch.commit()
-      notifySuccess('Assignment hard-deleted')
-    } catch (err) {
-      console.error('Error hard deleting assignment:', err)
-      alert('Failed to hard-delete assignment')
-    }
-  }
-
-  const toggleVanId = (vanId) => {
-    const allowedVanSet = new Set(getAllowedVanIdsForLocationId(assignmentForm.locationId))
-    if (allowedVanSet.size > 0 && !allowedVanSet.has(vanId)) return
-
-    setAssignmentForm(prev => ({
-      ...prev,
-      vanIds: prev.vanIds.includes(vanId)
-        ? prev.vanIds.filter(v => v !== vanId)
-        : [...prev.vanIds, vanId]
-    }))
-  }
-
-  const getAssignableBhtUsersForTask = (task) => {
-    const normalizedLocation = String(task?.locationId || '').trim().toUpperCase()
-    const scopedLocation = locationScopeAlias(normalizedLocation)
-    const locationHouse = normalizeHouseId(normalizedLocation)
-
-    return bhtUsers.filter((candidateUser) => {
-      const candidateScopes = normalizeScopeValues([
-        ...(candidateUser?.site ? [candidateUser.site] : []),
-        ...(Array.isArray(candidateUser?.authorizedLocations) ? candidateUser.authorizedLocations : [])
-      ])
-
-      if (candidateScopes.length === 0) return true
-      return candidateScopes.includes(normalizedLocation)
-        || candidateScopes.includes(scopedLocation)
-        || (locationHouse && candidateScopes.includes(locationHouse))
-    })
-  }
-
   const resetOverdueTaskActionState = () => {
     setOverdueTaskActionId(null)
     setOverdueTaskActionMode(null)
-    setOverdueTaskAssigneeUserId('')
-    setOverdueTaskActionReason('')
-    setOverdueTaskActionSubmitting(false)
-  }
-
-  const openOverdueTaskReassign = (task) => {
-    const candidates = getAssignableBhtUsersForTask(task)
-    const preferredAssignee = candidates.find(candidate => candidate.id === task.assigneeUserId) || candidates[0] || null
-    setOverdueTaskActionId(task.id)
-    setOverdueTaskActionMode('reassign')
-    setOverdueTaskAssigneeUserId(preferredAssignee?.id || '')
     setOverdueTaskActionReason('')
     setOverdueTaskActionSubmitting(false)
   }
@@ -1515,92 +1280,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const openOverdueTaskIgnore = (task) => {
     setOverdueTaskActionId(task.id)
     setOverdueTaskActionMode('ignore')
-    setOverdueTaskAssigneeUserId(task.assigneeUserId || '')
     setOverdueTaskActionReason('')
-    setOverdueTaskActionSubmitting(false)
-  }
-
-  const handleOverdueTaskReassign = async (task) => {
-    if (blockIfOffline('reassigning overdue tasks')) return
-    if (!task?.id) return
-
-    const reason = String(overdueTaskActionReason || '').trim()
-    if (!reason) {
-      alert('Reassignment reason is required.')
-      return
-    }
-
-    const candidateUsers = getAssignableBhtUsersForTask(task)
-    const selectedAssignee = candidateUsers.find(candidate => candidate.id === overdueTaskAssigneeUserId)
-    if (!selectedAssignee) {
-      alert('Select a valid assignee for this task.')
-      return
-    }
-
-    if (selectedAssignee.id === task.assigneeUserId) {
-      alert('Select a different assignee to reassign this task.')
-      return
-    }
-
-    setOverdueTaskActionSubmitting(true)
-    try {
-      const expectedVersion = getVersionNumber(task)
-      await runTransaction(db, async (transaction) => {
-        const taskRef = doc(db, 'eocTasks', task.id)
-        const taskSnap = await transaction.get(taskRef)
-        if (!taskSnap.exists()) {
-          throw new Error('Task no longer exists.')
-        }
-
-        const latestTask = taskSnap.data()
-        if (latestTask.status !== 'overdue') {
-          throw new Error('Task is no longer overdue.')
-        }
-
-        const { nextVersion } = assertExpectedVersion({
-          expectedVersion,
-          currentVersion: getVersionNumber(latestTask),
-          documentId: task.id,
-          recordLabel: 'EOC Task'
-        })
-
-        transaction.update(taskRef, {
-          assigneeUserId: selectedAssignee.id,
-          assigneeUserName: selectedAssignee.name || selectedAssignee.id,
-          reassignedAt: serverTimestamp(),
-          reassignedByUserId: user?.id || null,
-          reassignedByName: user?.name || null,
-          reassignedReason: reason,
-          version: nextVersion,
-          updatedAt: serverTimestamp()
-        })
-      })
-
-      await writeAuditLog({
-        action: 'eoc_task_reassign',
-        collectionPath: 'eocTasks',
-        documentId: task.id,
-        reason,
-        extra: {
-          locationId: task.locationId || '',
-          shiftId: task.shiftId || '',
-          dueDate: task.dueDate || '',
-          previousAssigneeUserId: task.assigneeUserId || null,
-          previousAssigneeUserName: task.assigneeUserName || null,
-          nextAssigneeUserId: selectedAssignee.id,
-          nextAssigneeUserName: selectedAssignee.name || selectedAssignee.id
-        }
-      })
-
-      notifySuccess('Overdue task reassigned')
-      resetOverdueTaskActionState()
-    } catch (error) {
-      console.error('Failed to reassign overdue task:', error)
-      alertVersionConflict(error, error?.message || 'Failed to reassign overdue task')
-      setOverdueTaskActionSubmitting(false)
-      return
-    }
-
     setOverdueTaskActionSubmitting(false)
   }
 
@@ -1655,9 +1335,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         extra: {
           locationId: task.locationId || '',
           shiftId: task.shiftId || '',
-          dueDate: task.dueDate || '',
-          assigneeUserId: task.assigneeUserId || null,
-          assigneeUserName: task.assigneeUserName || null
+          dueDate: task.dueDate || ''
         }
       })
 
@@ -1671,19 +1349,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
     }
 
     setOverdueTaskActionSubmitting(false)
-  }
-
-  const handleQueueReassign = (task) => {
-    setActiveTab('assignments')
-    setEditingAssignment('new')
-    setAssignmentForm({
-      bhtUserId: task.assigneeUserId || '',
-      locationId: task.locationId || '',
-      shiftId: task.shiftId || '',
-      vanIds: task.taskType === 'van' && task.vanId ? [task.vanId] : [],
-      isHousePrimary: task.taskType === 'house',
-      active: true
-    })
   }
 
   const toDateInputValue = (value) => {
@@ -2304,262 +1969,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
           </div>
         </div>
       )}
-
-      {/* Assignments Tab */}
-      {activeTab === 'assignments' && (
-        <div>
-          <div style={{
-            backgroundColor: 'rgba(255,255,255,0.05)',
-            borderRadius: '12px',
-            padding: '20px',
-            marginBottom: '20px',
-            border: '1px solid rgba(229,57,53,0.2)',
-            backdropFilter: 'blur(12px)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', color: '#e8e8e8' }}>BHT Assignments ({shiftAssignments.length})</h3>
-              <button
-                onClick={handleAddAssignment}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: '#4CAF50',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer'
-                }}
-              >
-                + New Assignment
-              </button>
-            </div>
-
-            {editingAssignment && (
-              <div style={{
-                backgroundColor: 'rgba(255,255,255,0.03)',
-                padding: '20px',
-                borderRadius: '8px',
-                marginBottom: '20px',
-                border: '2px solid #E53935'
-              }}>
-                <h4 style={{ margin: '0 0 16px 0', color: '#e8e8e8' }}>
-                  {editingAssignment === 'new' ? 'New Assignment' : 'Edit Assignment'}
-                </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>BHT *</label>
-                    <select
-                      value={assignmentForm.bhtUserId}
-                      onChange={(e) => setAssignmentForm({ ...assignmentForm, bhtUserId: e.target.value })}
-                      disabled={editingAssignment !== 'new'}
-                      style={selectStyle}
-                    >
-                      <option value="">Select BHT...</option>
-                      {bhtUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Location *</label>
-                    <select
-                      value={assignmentForm.locationId}
-                      onChange={(e) => {
-                        const nextLocationId = e.target.value
-                        const allowedVanIds = getAllowedVanIdsForLocationId(nextLocationId)
-                        setAssignmentForm({
-                          ...assignmentForm,
-                          locationId: nextLocationId,
-                          vanIds: assignmentForm.vanIds.filter(vanId => allowedVanIds.includes(vanId))
-                        })
-                      }}
-                      style={selectStyle}
-                    >
-                      <option value="">Select Location...</option>
-                      {LOCATIONS
-                        .filter(locationOption => isAdmin || managedMainLocations.includes(locationIdToMainLocation(locationOption.id)))
-                        .map(locationOption => <option key={locationOption.id} value={locationOption.id}>{locationOption.label}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Shift *</label>
-                    <select
-                      value={assignmentForm.shiftId}
-                      onChange={(e) => setAssignmentForm({ ...assignmentForm, shiftId: e.target.value })}
-                      style={selectStyle}
-                    >
-                      <option value="">Select Shift...</option>
-                      {SHIFTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>House Primary</label>
-                    <select
-                      value={assignmentForm.isHousePrimary ? 'true' : 'false'}
-                      onChange={(e) => setAssignmentForm({ ...assignmentForm, isHousePrimary: e.target.value === 'true' })}
-                      style={selectStyle}
-                    >
-                      <option value="false">No</option>
-                      <option value="true">Yes</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Active</label>
-                    <select
-                      value={assignmentForm.active ? 'true' : 'false'}
-                      onChange={(e) => setAssignmentForm({ ...assignmentForm, active: e.target.value === 'true' })}
-                      style={selectStyle}
-                    >
-                      <option value="true">Active</option>
-                      <option value="false">Inactive</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div style={{ marginTop: '12px' }}>
-                  <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Assigned Vans (multi-select)</label>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {VANS
-                      .filter(v => getAllowedVanIdsForLocationId(assignmentForm.locationId).includes(v.id))
-                      .map(v => (
-                      <button
-                        key={v.id}
-                        className={`chip ${assignmentForm.vanIds.includes(v.id) ? 'chip-selected' : 'chip-unselected'}`}
-                        onClick={() => toggleVanId(v.id)}
-                      >
-                        {v.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-                  <button
-                    onClick={handleSaveAssignment}
-                    style={{
-                      padding: '10px 20px',
-                      backgroundColor: '#4CAF50',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      fontWeight: 'bold',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => setEditingAssignment(null)}
-                    style={{
-                      padding: '10px 20px',
-                      backgroundColor: '#999',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      fontWeight: 'bold',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {shiftAssignments.map(a => (
-                <div
-                  key={a.id}
-                  style={{
-                    padding: '16px',
-                    borderRadius: '8px',
-                    border: a.active ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(255,255,255,0.04)',
-                    backgroundColor: a.active ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.01)',
-                    opacity: a.active ? 1 : 0.6,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>
-                      {a.bhtUserName}
-                      {!a.active && <span style={{ color: '#999', fontSize: '11px', marginLeft: '8px' }}>INACTIVE</span>}
-                    </div>
-                    <div style={{ fontSize: '13px', color: '#8899aa' }}>
-                      {LOCATIONS.find(l => l.id === a.locationId)?.label || a.locationId}
-                      {' '}&bull;{' '}
-                      {SHIFTS.find(s => s.id === a.shiftId)?.label || a.shiftId}
-                      {a.vanIds?.length > 0 && (
-                        <span> &bull; {a.vanIds.map(v => VANS.find(van => van.id === v)?.label || v).join(', ')}</span>
-                      )}
-                      {a.isHousePrimary && (
-                        <span style={{ color: '#4CAF50', marginLeft: '8px' }}>House Primary</span>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      onClick={() => handleEditAssignment(a)}
-                      style={{
-                        padding: '8px 16px',
-                        backgroundColor: '#E53935',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDeleteAssignment(a.id)}
-                      style={{
-                        padding: '8px 16px',
-                        backgroundColor: '#f44336',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Soft Delete
-                    </button>
-                    {isAdmin && (
-                      <button
-                        onClick={() => handleHardDeleteAssignment(a.id)}
-                        style={{
-                          padding: '8px 16px',
-                          backgroundColor: '#7B1FA2',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          fontSize: '12px',
-                          fontWeight: 'bold',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Hard Delete
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {shiftAssignments.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>
-                  No assignments yet. Create one to assign a BHT to a location, shift, and van(s).
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* User Management Tab */}
       {activeTab === 'users' && (
         <div>
@@ -2731,11 +2140,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
                         </div>
                         {isBhtRole(managedUser.role) && (
                           <div>
-                            <div style={{ fontSize: '11px', color: '#8899aa' }}>House / Van</div>
+                            <div style={{ fontSize: '11px', color: '#8899aa' }}>House / Shift / Van</div>
                             <div style={{ fontSize: '14px' }}>
                               {managedUserLocation === MAIN_LOCATION_OTC
                                 ? `${managedUserHouse === 'MESQUITE' ? 'Mesquite House' : (managedUserHouse === 'LONE_MOUNTAIN' ? 'Lone Mountain' : '--')}`
                                 : 'N/A'}
+                              {' '} - {' '}
+                              {(SHIFTS.find(s => s.id === managedUser.shiftId)?.label || managedUser.shiftId || '--')}
                               {' '} - {' '}
                               {(VANS.find(v => v.id === managedUser.vanId)?.label || managedUser.vanId || '--')}
                             </div>
@@ -3083,24 +2494,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
                       {LOCATIONS.find(l => l.id === task.locationId)?.label || task.locationId}
                       {' '} &bull; {SHIFTS.find(s => s.id === task.shiftId)?.label || task.shiftId}
                       {' '} &bull; Due {task.dueDate}
-                      {' '} &bull; Assigned {task.assigneeUserName || task.assigneeUserId || 'Unassigned'}
+                      {' '} &bull; Eligible {Array.isArray(task.eligibleUserIds) ? task.eligibleUserIds.length : (task.assigneeUserId ? 1 : 0)}
                     </div>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      <button
-                        onClick={() => openOverdueTaskReassign(task)}
-                        style={{
-                          padding: '6px 14px',
-                          backgroundColor: 'rgba(255,255,255,0.06)',
-                          color: '#e8e8e8',
-                          border: 'none',
-                          borderRadius: '6px',
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Reassign Task
-                      </button>
                       <button
                         onClick={() => openOverdueTaskIgnore(task)}
                         style={{
@@ -3117,7 +2513,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                         Ignore Task
                       </button>
                       <button
-                        onClick={() => handleQueueReassign(task)}
+                        onClick={() => setActiveTab('users')}
                         style={{
                           padding: '6px 14px',
                           backgroundColor: 'rgba(33,150,243,0.15)',
@@ -3129,77 +2525,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
                           cursor: 'pointer'
                         }}
                       >
-                        Assignment Panel
+                        Manage Users
                       </button>
                     </div>
-
-                    {overdueTaskActionId === task.id && overdueTaskActionMode === 'reassign' && (
-                      <div style={{
-                        marginTop: '10px',
-                        padding: '10px',
-                        borderRadius: '8px',
-                        border: '1px solid rgba(33,150,243,0.35)',
-                        backgroundColor: 'rgba(33,150,243,0.08)'
-                      }}>
-                        <div style={{ fontSize: '12px', color: '#90CAF9', marginBottom: '8px', fontWeight: 700 }}>
-                          Reassign overdue task
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 240px) 1fr', gap: '8px' }}>
-                          <select
-                            value={overdueTaskAssigneeUserId}
-                            onChange={(event) => setOverdueTaskAssigneeUserId(event.target.value)}
-                            style={selectStyle}
-                          >
-                            <option value="">Select assignee...</option>
-                            {getAssignableBhtUsersForTask(task).map(candidate => (
-                              <option key={candidate.id} value={candidate.id}>
-                                {candidate.name} ({candidate.id})
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            className="input"
-                            value={overdueTaskActionReason}
-                            onChange={(event) => setOverdueTaskActionReason(event.target.value)}
-                            placeholder="Reason for reassignment (required)"
-                            style={{ padding: '8px 10px', fontSize: '13px' }}
-                          />
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-                          <button
-                            onClick={() => handleOverdueTaskReassign(task)}
-                            disabled={overdueTaskActionSubmitting}
-                            style={{
-                              padding: '6px 14px',
-                              backgroundColor: overdueTaskActionSubmitting ? 'rgba(255,255,255,0.08)' : '#4CAF50',
-                              color: overdueTaskActionSubmitting ? '#8899aa' : 'white',
-                              border: 'none',
-                              borderRadius: '6px',
-                              fontSize: '13px',
-                              fontWeight: 600,
-                              cursor: overdueTaskActionSubmitting ? 'not-allowed' : 'pointer'
-                            }}
-                          >
-                            Save Reassign
-                          </button>
-                          <button
-                            onClick={resetOverdueTaskActionState}
-                            disabled={overdueTaskActionSubmitting}
-                            style={{
-                              padding: '6px 14px',
-                              backgroundColor: 'rgba(255,255,255,0.06)',
-                              color: '#8899aa',
-                              border: 'none',
-                              borderRadius: '6px',
-                              fontSize: '13px',
-                              cursor: overdueTaskActionSubmitting ? 'not-allowed' : 'pointer'
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
 
                     {overdueTaskActionId === task.id && overdueTaskActionMode === 'ignore' && (
                       <div style={{
@@ -3959,3 +3287,5 @@ function SupervisorDashboard({ user, isOffline = false }) {
 }
 
 export default SupervisorDashboard
+
+

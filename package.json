@@ -15,6 +15,7 @@
     "claims:provision": "node scripts/provisionAuthClaims.js",
     "claims:verify": "node scripts/verifyAuthClaims.js",
     "migrate:org-model": "node scripts/migrateOrgModel.js",
+    "migrate:derived-assignments": "node scripts/migrateDerivedAssignments.js",
     "migrate-clients": "node scripts/migrateExistingClients.js",
     "cleanup-clients": "node scripts/deactivateStaleClients.js"
   },

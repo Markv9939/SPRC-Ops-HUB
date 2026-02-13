@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { collection, query, where, getDocs } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore'
 
 /**
  * Hook to load active BHT assignment for a user.
@@ -19,19 +19,30 @@ export default function useEocAssignments(user) {
 
     async function loadAssignment() {
       try {
+        const canonicalRef = doc(db, 'shiftAssignments', `asg_${user.id}`)
+        const canonicalSnap = await getDoc(canonicalRef)
+
+        if (canonicalSnap.exists()) {
+          const canonicalData = canonicalSnap.data()
+          if (canonicalData.active === true && canonicalData.deleted !== true) {
+            setAssignment({ id: canonicalSnap.id, ...canonicalData })
+            return
+          }
+        }
+
         const q = query(
           collection(db, 'shiftAssignments'),
           where('bhtUserId', '==', user.id),
           where('active', '==', true)
         )
         const snap = await getDocs(q)
-
-        if (!snap.empty) {
-          const doc = snap.docs[0]
-          setAssignment({ id: doc.id, ...doc.data() })
-        } else {
+        if (snap.empty) {
           setAssignment(null)
+          return
         }
+
+        const fallback = snap.docs[0]
+        setAssignment({ id: fallback.id, ...fallback.data() })
       } catch (err) {
         console.error('Error loading BHT assignment:', err)
         setAssignment(null)
