@@ -29,6 +29,7 @@ const COMPLIANCE_SITES = new Set(['RTC', 'OTC'])
 function SupervisorDashboard({ user, isOffline = false }) {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
+  const [headerOffset, setHeaderOffset] = useState(64)
   const [transports, setTransports] = useState([])
   const [filteredTransports, setFilteredTransports] = useState([])
 
@@ -127,6 +128,19 @@ function SupervisorDashboard({ user, isOffline = false }) {
     const handler = (e) => setIsMobile(e.matches)
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
+  }, [])
+
+  useEffect(() => {
+    const readHeaderHeight = () => {
+      const headerEl = document.querySelector('.header')
+      if (!headerEl) return
+      const measuredHeight = Math.max(56, Math.ceil(headerEl.getBoundingClientRect().height))
+      setHeaderOffset(prev => (prev === measuredHeight ? prev : measuredHeight))
+    }
+
+    readHeaderHeight()
+    window.addEventListener('resize', readHeaderHeight)
+    return () => window.removeEventListener('resize', readHeaderHeight)
   }, [])
 
   useEffect(() => {
@@ -1432,6 +1446,16 @@ function SupervisorDashboard({ user, isOffline = false }) {
     background: 'rgba(255,255,255,0.06)',
     color: '#e8e8e8'
   }
+  const tabRailStyle = {
+    position: 'sticky',
+    top: `${headerOffset}px`,
+    zIndex: 95,
+    marginBottom: '20px',
+    paddingTop: '8px',
+    paddingBottom: '6px',
+    background: 'linear-gradient(180deg, rgba(15,25,35,0.98) 0%, rgba(15,25,35,0.9) 72%, rgba(15,25,35,0) 100%)',
+    backdropFilter: 'blur(8px)'
+  }
 
   return (
     <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
@@ -1503,64 +1527,65 @@ function SupervisorDashboard({ user, isOffline = false }) {
       )}
 
       {/* Tabs - dropdown on mobile, button strip on desktop */}
-      {isMobile ? (
-        <div style={{ marginBottom: '20px' }}>
-          <select
-            value={activeTab}
-            onChange={(e) => setActiveTab(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '12px 16px',
-              backgroundColor: 'rgba(229,57,53,0.15)',
-              color: '#e8e8e8',
-              border: '2px solid #E53935',
-              borderRadius: '10px',
-              fontSize: '15px',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              appearance: 'none',
-              WebkitAppearance: 'none',
-              backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%278%27 viewBox=%270 0 12 8%27%3E%3Cpath fill=%27%23E53935%27 d=%27M6 8L0 0h12z%27/%3E%3C/svg%3E")',
-              backgroundRepeat: 'no-repeat',
-              backgroundPosition: 'right 14px center',
-              backgroundSize: '12px'
-            }}
-          >
-            {availableTabKeys.map(tab => (
-              <option key={tab} value={tab}>{TAB_LABELS[tab]}</option>
-            ))}
-          </select>
-        </div>
-      ) : (
-        <div style={{
-          display: 'flex',
-          gap: '8px',
-          marginBottom: '20px',
-          borderBottom: '2px solid rgba(255,255,255,0.08)',
-          flexWrap: 'wrap'
-        }}>
-          {availableTabKeys.map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
+      <div style={tabRailStyle}>
+        {isMobile ? (
+          <div>
+            <select
+              value={activeTab}
+              onChange={(e) => setActiveTab(e.target.value)}
               style={{
-                padding: '12px 24px',
-                backgroundColor: activeTab === tab ? '#E53935' : 'transparent',
-                color: activeTab === tab ? 'white' : '#8899aa',
-                border: 'none',
-                borderBottom: activeTab === tab ? '3px solid #E53935' : 'none',
-                borderRadius: '8px 8px 0 0',
-                fontSize: '14px',
+                width: '100%',
+                padding: '12px 16px',
+                backgroundColor: 'rgba(229,57,53,0.15)',
+                color: '#e8e8e8',
+                border: '2px solid #E53935',
+                borderRadius: '10px',
+                fontSize: '15px',
                 fontWeight: 'bold',
                 cursor: 'pointer',
-                marginBottom: '-2px'
+                appearance: 'none',
+                WebkitAppearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%278%27 viewBox=%270 0 12 8%27%3E%3Cpath fill=%27%23E53935%27 d=%27M6 8L0 0h12z%27/%3E%3C/svg%3E")',
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 14px center',
+                backgroundSize: '12px'
               }}
             >
-              {TAB_LABELS[tab]}
-            </button>
-          ))}
-        </div>
-      )}
+              {availableTabKeys.map(tab => (
+                <option key={tab} value={tab}>{TAB_LABELS[tab]}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            borderBottom: '2px solid rgba(255,255,255,0.08)',
+            flexWrap: 'wrap'
+          }}>
+            {availableTabKeys.map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: activeTab === tab ? '#E53935' : 'transparent',
+                  color: activeTab === tab ? 'white' : '#8899aa',
+                  border: 'none',
+                  borderBottom: activeTab === tab ? '3px solid #E53935' : 'none',
+                  borderRadius: '8px 8px 0 0',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  marginBottom: '-2px'
+                }}
+              >
+                {TAB_LABELS[tab]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* EOC Tab */}
       {activeTab === 'eoc' && <SupervisorEocPanel user={user} isOffline={isOffline} />}
