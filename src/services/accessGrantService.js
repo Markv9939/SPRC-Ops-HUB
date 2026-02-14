@@ -133,6 +133,9 @@ export async function getScopedSessionUser(userId, userData) {
     locationId: userData.locationId || null,
     shiftId: userData.shiftId || null,
     vanId: userData.vanId || null,
+    vanIds: Array.isArray(userData.vanIds)
+      ? userData.vanIds.map(v => String(v || '').trim().toLowerCase()).filter(Boolean)
+      : (userData.vanId ? [String(userData.vanId).trim().toLowerCase()] : []),
     authorizedLocations: mergedScopes,
     primaryScopes: baseScopes,
     activeBackupGrants,

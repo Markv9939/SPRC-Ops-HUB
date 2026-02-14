@@ -139,12 +139,13 @@ function buildDesiredTasks(assignments) {
 }
 
 function getAccessibleGroupKeys(user, normalizedAssignments) {
-  if (!user?.id) return new Set()
+  const normalizedUserId = String(user?.id || '').trim()
+  if (!normalizedUserId) return new Set()
 
   if (isBhtRole(user.role)) {
     return new Set(
       normalizedAssignments
-        .filter(assignment => assignment.active && assignment.bhtUserId === user.id)
+        .filter(assignment => assignment.active && String(assignment.bhtUserId || '').trim() === normalizedUserId)
         .map(assignment => buildGroupKey(assignment.locationId, assignment.shiftId))
     )
   }

@@ -17,8 +17,11 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [activeField, setActiveField] = useState('address')
+  const nameRef = useRef(null)
   const addressRef = useRef(null)
-  let debounceTimer = null
+  const debounceRef = useRef(null)
+  const searchSeqRef = useRef(0)
 
   const normalize = (text) => text.toLowerCase().trim().replace(/\s+/g, ' ')
 
@@ -29,7 +32,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
 
   // Search destinations in Firestore
   const searchDestinations = async (searchTerm, searchType) => {
-    if (debounceTimer) clearTimeout(debounceTimer)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
 
     if (!searchTerm.trim()) {
       setSuggestions([])
@@ -37,7 +40,8 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
       return
     }
 
-    debounceTimer = setTimeout(async () => {
+    const searchSeq = ++searchSeqRef.current
+    debounceRef.current = setTimeout(async () => {
       setIsLoading(true)
       try {
         const normalizedTerm = normalize(searchTerm)
@@ -75,14 +79,20 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
           }
         })
 
-        setSuggestions(results)
-        setShowSuggestions(results.length > 0)
+        if (searchSeq === searchSeqRef.current) {
+          setSuggestions(results)
+          setShowSuggestions(results.length > 0)
+        }
       } catch (error) {
         console.error('Destination search error:', error)
-        setSuggestions([])
-        setShowSuggestions(false)
+        if (searchSeq === searchSeqRef.current) {
+          setSuggestions([])
+          setShowSuggestions(false)
+        }
       } finally {
-        setIsLoading(false)
+        if (searchSeq === searchSeqRef.current) {
+          setIsLoading(false)
+        }
       }
     }, 150)
   }
@@ -160,12 +170,14 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
 
   const handleNameChange = (e) => {
     const value = e.target.value
+    setActiveField('name')
     setNameInput(value)
     searchDestinations(value, 'name')
   }
 
   const handleAddressChange = (e) => {
     const value = e.target.value
+    setActiveField('address')
     setAddressInput(value)
     searchDestinations(value, 'address')
   }
@@ -180,11 +192,13 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
   return (
     <div style={{ marginTop: existingDestinations.length > 0 ? '10px' : '0' }}>
       <input
+        ref={nameRef}
         className="input"
         type="text"
         value={nameInput}
         onChange={handleNameChange}
         onFocus={() => {
+          setActiveField('name')
           if (nameInput.trim()) setShowSuggestions(suggestions.length > 0)
         }}
         onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
@@ -203,6 +217,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
         onChange={handleAddressChange}
         onKeyDown={handleKeyDown}
         onFocus={() => {
+          setActiveField('address')
           if (addressInput.trim()) setShowSuggestions(suggestions.length > 0)
         }}
         onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
@@ -239,7 +254,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
         isVisible={showSuggestions}
         onSelect={selectSuggestion}
         loading={isLoading}
-        inputRef={addressRef}
+        inputRef={activeField === 'name' ? nameRef : addressRef}
         renderItem={(suggestion) => (
           <div style={{ width: '100%' }}>
             <div style={{

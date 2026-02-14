@@ -16,10 +16,15 @@ export default function useEocAssignments(user) {
       setLoading(false)
       return
     }
+    const normalizedUserId = String(user.id || '').trim()
+    if (!normalizedUserId) {
+      setLoading(false)
+      return
+    }
 
     async function loadAssignment() {
       try {
-        const canonicalRef = doc(db, 'shiftAssignments', `asg_${user.id}`)
+        const canonicalRef = doc(db, 'shiftAssignments', `asg_${normalizedUserId}`)
         const canonicalSnap = await getDoc(canonicalRef)
 
         if (canonicalSnap.exists()) {
@@ -32,7 +37,7 @@ export default function useEocAssignments(user) {
 
         const q = query(
           collection(db, 'shiftAssignments'),
-          where('bhtUserId', '==', user.id),
+          where('bhtUserId', '==', normalizedUserId),
           where('active', '==', true)
         )
         const snap = await getDocs(q)

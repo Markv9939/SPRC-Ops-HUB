@@ -123,6 +123,15 @@ service cloud.firestore {
         && request.auth.token.locations is list;
     }
 
+    function authScopeEnforced() {
+      return exists(/databases/$(database)/documents/appSettings/authPolicy)
+        && get(/databases/$(database)/documents/appSettings/authPolicy).data.authScopeEnforced == true;
+    }
+
+    function hasLegacyAuthSession() {
+      return !authScopeEnforced();
+    }
+
     function authRole() {
       return hasAuthScopeClaims() ? request.auth.token.role : '';
     }
@@ -132,7 +141,8 @@ service cloud.firestore {
     }
 
     function authRoleAllowed(roles) {
-      return hasAuthScopeClaims() && authRole() in roles;
+      return (hasAuthScopeClaims() && authRole() in roles)
+        || hasLegacyAuthSession();
     }
 
     // Map house location IDs to supervisor site scopes used in auth claims.
@@ -160,13 +170,15 @@ service cloud.firestore {
         (normalizedLocation == 'OTC' && ('PHP' in authLocations() || 'RTC' in authLocations()))
         || (normalizedLocation == 'RES' && ('PHP' in authLocations()))
       );
-      return hasAuthScopeClaims()
+      return (
+        hasAuthScopeClaims()
         && (
           authRole() == 'admin'
           || locationId in authLocations()
           || normalizedLocation in authLocations()
           || legacyLocationAllowed
-        );
+        )
+      ) || hasLegacyAuthSession();
     }
 
     function authRoleAndLocationAllowed(roles, locationId) {

@@ -104,6 +104,16 @@ function getComplianceItemDueMs(item) {
   return Number.isFinite(ms) ? ms : Number.POSITIVE_INFINITY
 }
 
+function normalizeVanIdList(values, fallbackVanId = '') {
+  const base = Array.isArray(values) ? values : []
+  const normalized = base
+    .map(value => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+  const fallback = String(fallbackVanId || '').trim().toLowerCase()
+  const merged = fallback ? [...normalized, fallback] : normalized
+  return [...new Set(merged)]
+}
+
 function SupervisorDashboard({ user, isOffline = false }) {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
@@ -160,6 +170,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
     house: '',
     shiftId: '',
     vanId: '',
+    vanIds: [],
     active: true
   })
 
@@ -502,6 +513,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           ? GLOBAL_SCOPE
           : (normalizeMainLocation(loadedUser.location || loadedUser.site || loadedUser.locationId) || '')
         const normalizedHouse = normalizeHouseId(loadedUser.house || loadedUser.locationId)
+        const normalizedVanIds = normalizeVanIdList(loadedUser.vanIds, loadedUser.vanId)
         return {
           ...loadedUser,
           role: normalizedRole,
@@ -509,7 +521,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
           site: normalizedLocation,
           house: normalizedHouse || '',
           shiftId: String(loadedUser.shiftId || '').trim(),
-          vanId: loadedUser.vanId || ''
+          vanIds: normalizedVanIds,
+          vanId: normalizedVanIds[0] || ''
         }
       })
       .filter(loadedUser => !loadedUser.deletedAt && loadedUser.deleted !== true)
@@ -650,6 +663,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
     house: '',
     shiftId: '',
     vanId: '',
+    vanIds: [],
     active: true
   }), [])
 
@@ -681,7 +695,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
       site: normalizedLocation,
       house: normalizeHouseId(managedUser?.house || managedUser?.locationId),
       shiftId: String(managedUser?.shiftId || '').trim(),
-      vanId: String(managedUser?.vanId || '').trim().toLowerCase(),
+      vanIds: normalizeVanIdList(managedUser?.vanIds, managedUser?.vanId),
+      vanId: normalizeVanIdList(managedUser?.vanIds, managedUser?.vanId)[0] || '',
       pin: ''
     })
     setEditingUser(managedUser.id)
@@ -690,18 +705,23 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const handleSaveUser = async () => {
     if (blockIfOffline('saving users')) return
 
-    if (!userForm.id || !userForm.name || !userForm.pin) {
-      alert('Please fill in all required fields (ID, Name, PIN)')
+    const isNewUser = editingUser === 'new'
+    const hasPinInput = String(userForm.pin || '').trim().length > 0
+
+    if (!userForm.id || !userForm.name || (isNewUser && !hasPinInput)) {
+      alert(isNewUser
+        ? 'Please fill in all required fields (ID, Name, PIN)'
+        : 'Please fill in all required fields (ID, Name)')
       return
     }
 
-    if (userForm.pin.length !== 4 || !/^\d+$/.test(userForm.pin)) {
+    if (hasPinInput && (userForm.pin.length !== 4 || !/^\d+$/.test(userForm.pin))) {
       alert('PIN must be exactly 4 digits')
       return
     }
 
     try {
-      const pinHash = await hashPin(userForm.pin)
+      const pinHash = hasPinInput ? await hashPin(userForm.pin) : null
       const normalizedRole = normalizeRole(userForm.role || '')
 
       if (!normalizedRole) {
@@ -729,7 +749,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
       }
 
       let normalizedHouse = ''
-      let normalizedVanId = ''
+      let normalizedVanIds = []
+      let primaryVanId = ''
       let normalizedLocationId = null
       let normalizedShiftId = ''
 
@@ -745,12 +766,18 @@ function SupervisorDashboard({ user, isOffline = false }) {
           return
         }
 
-        normalizedVanId = String(userForm.vanId || '').trim().toLowerCase()
+        normalizedVanIds = normalizeVanIdList(userForm.vanIds, userForm.vanId)
         const allowedVans = getAllowedVanIdsForMainLocation(normalizedLocation)
-        if (!normalizedVanId || !allowedVans.includes(normalizedVanId)) {
-          alert(`Please select a valid van for ${normalizedLocation}.`)
+        if (normalizedVanIds.length === 0) {
+          alert(`Please select at least one van for ${normalizedLocation}.`)
           return
         }
+        const hasInvalidVan = normalizedVanIds.some(vanId => !allowedVans.includes(vanId))
+        if (hasInvalidVan) {
+          alert(`One or more selected vans are invalid for ${normalizedLocation}.`)
+          return
+        }
+        primaryVanId = normalizedVanIds[0]
 
         normalizedShiftId = String(userForm.shiftId || '').trim()
         if (!normalizedShiftId || !SHIFTS.some(shiftOption => shiftOption.id === normalizedShiftId)) {
@@ -773,19 +800,22 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
       const payload = {
         name: userForm.name,
-        pinHash,
-        pinVersion: 'v1_sha256',
-        pinUpdatedAt: serverTimestamp(),
         role: normalizedRole,
         site: normalizedRole === 'admin' ? GLOBAL_SCOPE : normalizedLocation,
         location: normalizedRole === 'admin' ? GLOBAL_SCOPE : normalizedLocation,
         house: isBhtRole(normalizedRole) ? normalizedHouse || null : null,
         locationId: isBhtRole(normalizedRole) ? normalizedLocationId : null,
         shiftId: isBhtRole(normalizedRole) ? normalizedShiftId : null,
-        vanId: isBhtRole(normalizedRole) ? normalizedVanId : null,
+        vanId: isBhtRole(normalizedRole) ? primaryVanId : null,
+        vanIds: isBhtRole(normalizedRole) ? normalizedVanIds : [],
         active: userForm.active === true,
         authorizedLocations,
         updatedAt: serverTimestamp()
+      }
+      if (pinHash) {
+        payload.pinHash = pinHash
+        payload.pinVersion = 'v1_sha256'
+        payload.pinUpdatedAt = serverTimestamp()
       }
       const persistUserAndAssignment = async () => {
         if (editingUser === 'new') {
@@ -802,7 +832,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
           role: normalizedRole,
           locationId: normalizedLocationId,
           shiftId: normalizedShiftId,
-          vanId: normalizedVanId,
+          vanId: primaryVanId,
+          vanIds: normalizedVanIds,
           active: userForm.active === true
         })
       }
@@ -869,6 +900,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         locationId: targetUser?.locationId || null,
         shiftId: targetUser?.shiftId || '',
         vanId: targetUser?.vanId || '',
+        vanIds: normalizeVanIdList(targetUser?.vanIds, targetUser?.vanId),
         active: false
       })
       await writeAuditLog({
@@ -1034,7 +1066,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 location: nextLocation,
                 house: nextRole === ROLE_BHT ? prev.house : '',
                 shiftId: nextRole === ROLE_BHT ? prev.shiftId : '',
-                vanId: nextRole === ROLE_BHT ? prev.vanId : ''
+                vanId: nextRole === ROLE_BHT ? prev.vanId : '',
+                vanIds: nextRole === ROLE_BHT ? normalizeVanIdList(prev.vanIds, prev.vanId) : []
               }))
             }}
             style={{
@@ -1067,7 +1100,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 ...prev,
                 location: nextLocation,
                 house: requiresHouseSelection(nextLocation) ? prev.house : '',
-                vanId: allowedVans.includes(prev.vanId) ? prev.vanId : ''
+                vanIds: normalizeVanIdList(prev.vanIds, prev.vanId).filter(vanId => allowedVans.includes(vanId)),
+                vanId: normalizeVanIdList(prev.vanIds, prev.vanId).find(vanId => allowedVans.includes(vanId)) || ''
               }))
             }}
             disabled={locationSelectDisabled}
@@ -1128,27 +1162,44 @@ function SupervisorDashboard({ user, isOffline = false }) {
         {isBhtRole(normalizedFormRole) && (
           <div>
             <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
-              Van *
+              Vans * (select one or more)
             </label>
-            <select
-              value={userForm.vanId}
-              onChange={(e) => setUserForm({ ...userForm, vanId: String(e.target.value || '').trim().toLowerCase() })}
-              style={{
-                width: '100%',
-                padding: '8px',
-                border: '2px solid rgba(255,255,255,0.1)',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box',
-                backgroundColor: 'rgba(255,255,255,0.06)',
-                color: '#e8e8e8'
-              }}
-            >
-              <option value="">Select Van...</option>
-              {vanOptions.map(vanOption => (
-                <option key={vanOption.id} value={vanOption.id}>{vanOption.label}</option>
-              ))}
-            </select>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '8px', border: '2px solid rgba(255,255,255,0.1)', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.06)' }}>
+              {vanOptions.length === 0 ? (
+                <span style={{ fontSize: '13px', color: '#8899aa' }}>Select location first</span>
+              ) : vanOptions.map(vanOption => {
+                const normalizedCurrentVanIds = normalizeVanIdList(userForm.vanIds, userForm.vanId)
+                const selected = normalizedCurrentVanIds.includes(vanOption.id)
+                return (
+                  <button
+                    key={vanOption.id}
+                    type="button"
+                    onClick={() => {
+                      const nextVanIds = selected
+                        ? normalizedCurrentVanIds.filter(vanId => vanId !== vanOption.id)
+                        : [...normalizedCurrentVanIds, vanOption.id]
+                      setUserForm(prev => ({
+                        ...prev,
+                        vanIds: nextVanIds,
+                        vanId: nextVanIds[0] || ''
+                      }))
+                    }}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '999px',
+                      border: selected ? '1px solid #4CAF50' : '1px solid rgba(255,255,255,0.2)',
+                      backgroundColor: selected ? 'rgba(76,175,80,0.18)' : 'rgba(255,255,255,0.03)',
+                      color: selected ? '#81C784' : '#e8e8e8',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {selected ? '\u2713 ' : ''}{vanOption.label}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         )}
         {isBhtRole(normalizedFormRole) && (
@@ -1983,6 +2034,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 const isEditingThisUser = editingUser === managedUser.id
                 const managedUserLocation = normalizeMainLocation(managedUser.location || managedUser.site || managedUser.locationId)
                 const managedUserHouse = normalizeHouseId(managedUser.house || managedUser.locationId)
+                const managedUserVanIds = normalizeVanIdList(managedUser.vanIds, managedUser.vanId)
                 return (
                   <div
                     key={managedUser.id}
@@ -2029,7 +2081,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
                               {' '} - {' '}
                               {(SHIFTS.find(s => s.id === managedUser.shiftId)?.label || managedUser.shiftId || '--')}
                               {' '} - {' '}
-                              {(VANS.find(v => v.id === managedUser.vanId)?.label || managedUser.vanId || '--')}
+                              {(managedUserVanIds.length > 0
+                                ? managedUserVanIds.map(vanId => (VANS.find(v => v.id === vanId)?.label || vanId)).join(', ')
+                                : '--')}
                             </div>
                           </div>
                         )}

@@ -166,6 +166,7 @@ function PinLogin({ onLogin }) {
         const policy = await getAuthPolicy()
         const authScopeEnforced = policy?.authScopeEnforced === true
         const authSession = await ensureAuthSession()
+        const normalizedRole = normalizeRole(userData.role)
 
         // When claim enforcement is on, prevent stale claim sessions from constraining PIN identity.
         if (authScopeEnforced && !claimsMatchPinUser(authSession, userData)) {
@@ -189,7 +190,6 @@ function PinLogin({ onLogin }) {
             ...(userData.site ? [userData.site] : []),
             ...(Array.isArray(userData.authorizedLocations) ? userData.authorizedLocations : [])
           ])]
-          const normalizedRole = normalizeRole(userData.role)
           const normalizedSite = isAdminRole(normalizedRole)
             ? GLOBAL_SCOPE
             : (normalizeMainLocation(userData.site) || normalizeMainLocation(baseScopes[0]) || '')
@@ -201,6 +201,9 @@ function PinLogin({ onLogin }) {
             locationId: userData.locationId || null,
             shiftId: userData.shiftId || null,
             vanId: userData.vanId || null,
+            vanIds: Array.isArray(userData.vanIds)
+              ? userData.vanIds.map(v => String(v || '').trim().toLowerCase()).filter(Boolean)
+              : (userData.vanId ? [String(userData.vanId).trim().toLowerCase()] : []),
             authorizedLocations: normalizeScopeValues(baseScopes),
             primaryScopes: normalizeScopeValues(baseScopes),
             activeBackupGrants: [],

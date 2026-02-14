@@ -6,12 +6,12 @@ import PinLogin from './components/PinLogin'
 import Header from './components/Header'
 import BhtHub from './components/BhtHub'
 import TransportCard from './components/TransportCard'
-import CloseChecklist from './components/CloseChecklist'
 import EocChecklist from './components/EocChecklist'
 import SupervisorDashboard from './components/SupervisorDashboard'
 import ToastHost from './components/ToastHost'
 import DialogHost from './components/DialogHost'
 import { syncEocTasksForUserScope } from './services/eocTaskEngine'
+import { syncDerivedAssignmentForUser } from './services/assignmentService'
 import { refreshScopedSessionUser } from './services/accessGrantService'
 import { getAuthPolicy } from './services/authPolicyService'
 import { requireOnline } from './utils/networkGuard'
@@ -28,7 +28,7 @@ import {
 
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
 const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
-const ACTIVE_TRANSPORT_STATUSES = new Set(['open', 'arrived', 'returned'])
+const ACTIVE_TRANSPORT_STATUSES = new Set(['open', 'arrived'])
 
 function getLastTransportSiteKey(userId) {
   return `lastTransportSite:${userId || 'unknown'}`
@@ -131,10 +131,6 @@ function App() {
   const resumeActiveTransport = useCallback((transport) => {
     if (!transport?.id) return
     setCurrentTransportId(transport.id)
-    if (transport.status === 'returned') {
-      setPage('closeChecklist')
-      return
-    }
     setPage('transport')
   }, [])
 
@@ -332,6 +328,20 @@ function App() {
     let cancelled = false
     ;(async () => {
       try {
+        if (isBhtRole(user.role)) {
+          await syncDerivedAssignmentForUser(user.id, {
+            name: user.name,
+            role: user.role,
+            locationId: user.locationId,
+            location: user.location || user.site || '',
+            site: user.site || user.location || '',
+            house: user.house || '',
+            shiftId: user.shiftId,
+            vanId: user.vanId,
+            vanIds: Array.isArray(user.vanIds) ? user.vanIds : [],
+            active: user.active !== false
+          })
+        }
         const result = await syncEocTasksForUserScope(user)
         if (!cancelled && (result.created > 0 || result.updated > 0)) {
           console.info('EOC task engine sync complete:', result)
@@ -439,15 +449,17 @@ function App() {
       if (!TRANSPORT_SITES.has(transportSite)) return
 
       // Write-layer guard (client-enforced in free-tier v1): prevent duplicate active transport creation.
-      const activeSnapshot = await getDocs(
+      const userTransportSnapshot = await getDocs(
         query(
           collection(db, 'transports'),
-          where('createdByUserId', '==', user.id),
-          where('status', 'in', ['open', 'arrived', 'returned'])
+          where('createdByUserId', '==', user.id)
         )
       )
-      if (!activeSnapshot.empty) {
-        const existing = activeSnapshot.docs[0]
+      const existing = userTransportSnapshot.docs.find((docSnap) => {
+        const status = String(docSnap.data()?.status || '').toLowerCase()
+        return ACTIVE_TRANSPORT_STATUSES.has(status)
+      })
+      if (existing) {
         alert('Active transport already exists. Redirecting to continue it.')
         resumeActiveTransport({ id: existing.id, ...existing.data() })
         return
@@ -476,24 +488,15 @@ function App() {
       notifySuccess('Transport created')
     } catch (error) {
       console.error('Error creating transport:', error)
-      alert('Failed to create transport. Please try again.')
+      if (error?.code === 'permission-denied' || /insufficient permissions/i.test(String(error?.message || ''))) {
+        alert('Missing permissions for transport write. Re-login with the correct account, or disable auth-claims enforcement mismatch in rules/policy.')
+      } else {
+        alert(error?.message || 'Failed to create transport. Please try again.')
+      }
     }
   }
 
-  function handleReturn() {
-    setPage('closeChecklist')
-  }
-
   function handleCloseTransportCard() {
-    setCurrentTransportId(null)
-    setPage('home')
-  }
-
-  function handleCloseChecklistBack() {
-    setPage('transport')
-  }
-
-  function handleCloseChecklistComplete() {
     setCurrentTransportId(null)
     setPage('home')
   }
@@ -521,25 +524,7 @@ function App() {
           transportId={currentTransportId}
           user={user}
           isOffline={isOffline}
-          onReturn={handleReturn}
           onClose={handleCloseTransportCard}
-        />
-        <DialogHost />
-        <ToastHost />
-      </div>
-    )
-  }
-
-  if (page === 'closeChecklist') {
-    return (
-      <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
-        <CloseChecklist
-          transportId={currentTransportId}
-          user={user}
-          isOffline={isOffline}
-          onClose={handleCloseChecklistBack}
-          onComplete={handleCloseChecklistComplete}
         />
         <DialogHost />
         <ToastHost />

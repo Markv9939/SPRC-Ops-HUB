@@ -19,6 +19,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   const [answers, setAnswers] = useState({})
   const [repairDetails, setRepairDetails] = useState({})
   const [error, setError] = useState('')
+  const normalizedUserId = String(user?.id || '').trim()
 
   useEffect(() => {
     async function loadTask() {
@@ -45,8 +46,8 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
         const eligibleUserIds = Array.isArray(data.eligibleUserIds) ? data.eligibleUserIds : []
         const canCurrentUserComplete = eligibleUserIds.length > 0
-          ? eligibleUserIds.includes(user?.id)
-          : (!data.assigneeUserId || data.assigneeUserId === user?.id)
+          ? eligibleUserIds.map(v => String(v || '').trim()).includes(normalizedUserId)
+          : (!data.assigneeUserId || String(data.assigneeUserId || '').trim() === normalizedUserId)
         if (!canCurrentUserComplete) {
           setError('You are not eligible to complete this EOC task.')
           setLoading(false)
@@ -75,7 +76,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     }
 
     loadTask()
-  }, [taskId, user?.id, user?.name])
+  }, [normalizedUserId, taskId, user?.id, user?.name])
 
   useEffect(() => {
     if (!eocType) return
@@ -174,16 +175,6 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     return null
   }
 
-  const handleMarkAllOk = () => {
-    const nextAnswers = {}
-    for (const item of activeTemplate) {
-      nextAnswers[item.id] = 'ok'
-    }
-    setAnswers(nextAnswers)
-    setRepairDetails({})
-    setError('')
-  }
-
   const handleSubmit = async () => {
     if (isOffline) {
       requireOnline('submitting EOC')
@@ -231,8 +222,8 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
         const latestEligibleUserIds = Array.isArray(latestTask.eligibleUserIds) ? latestTask.eligibleUserIds : []
         const canCurrentUserComplete = latestEligibleUserIds.length > 0
-          ? latestEligibleUserIds.includes(user?.id)
-          : (!latestTask.assigneeUserId || latestTask.assigneeUserId === user?.id)
+          ? latestEligibleUserIds.map(v => String(v || '').trim()).includes(normalizedUserId)
+          : (!latestTask.assigneeUserId || String(latestTask.assigneeUserId || '').trim() === normalizedUserId)
         if (!canCurrentUserComplete) {
           throw new Error('You are not eligible to complete this EOC task.')
         }
@@ -259,7 +250,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           odometerReading: eocType === 'van' ? odometerReading.trim() : '',
           answers: answersData,
           issueCount: issueItems.length,
-          submittedByUserId: user.id,
+          submittedByUserId: normalizedUserId,
           submittedByName: user.name,
           version: 1,
           submittedAt: serverTimestamp(),
@@ -271,7 +262,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           status: 'completed',
           submissionId: submissionRef.id,
           completedAt: serverTimestamp(),
-          completedByUserId: user.id,
+          completedByUserId: normalizedUserId,
           completedByName: user.name,
           version: nextVersion,
           updatedAt: serverTimestamp()
@@ -292,7 +283,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
             description: issue.description,
             severity: 'medium',
             status: 'open',
-            reportedByUserId: user.id,
+            reportedByUserId: normalizedUserId,
             reportedByName: user.name,
             version: 1,
             createdAt: serverTimestamp(),
@@ -362,9 +353,13 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   }
 
   const allAnswered = activeTemplate.every(item => answers[item.id])
+  const answeredCount = activeTemplate.filter(item => Boolean(answers[item.id])).length
+  const repairCount = activeTemplate.filter(item => answers[item.id] === 'repair').length
+  const remainingCount = activeTemplate.length - answeredCount
+  const firstMissingItem = activeTemplate.find(item => !answers[item.id])
 
   return (
-    <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', paddingBottom: '100px' }}>
+    <div className="eoc-checklist-page" style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', paddingBottom: '100px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
         <button
           onClick={onBack}
@@ -389,7 +384,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         </div>
       </div>
 
-      <div className="glass-card" style={{ padding: '14px', marginBottom: '16px' }}>
+      <div className="glass-card eoc-shell-card" style={{ padding: '14px', marginBottom: '16px' }}>
         <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>Staff Completing EOC</div>
         <input
           className="input"
@@ -424,48 +419,53 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         )}
       </div>
 
-      <div style={{ marginBottom: '14px' }}>
-        <button
-          className="btn btn-eoc"
-          onClick={handleMarkAllOk}
-          style={{ width: '100%', fontSize: '14px', borderRadius: '8px' }}
-        >
-          Mark All OK
-        </button>
+      <div className="glass-card eoc-shell-card" style={{ padding: '12px 14px', marginBottom: '14px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: firstMissingItem ? '8px' : '0' }}>
+          <span className="badge badge-eoc-pending">Answered {answeredCount}/{activeTemplate.length}</span>
+          <span className="badge badge-eoc-completed">Repair Items {repairCount}</span>
+          <span className="badge badge-eoc-missed">Remaining {remainingCount}</span>
+        </div>
+        {firstMissingItem ? (
+          <div style={{ fontSize: '12px', color: '#FFB74D' }}>
+            Next required: {firstMissingItem.label}
+          </div>
+        ) : null}
       </div>
 
       {categories.map(cat => (
         <div key={cat} style={{ marginBottom: '20px' }}>
           <div className="eoc-category-header">{cat}</div>
-          <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: '#8899aa', margin: '6px 0 10px' }}>
-            <span style={{ minWidth: '52px' }}>OK</span>
-            <span style={{ minWidth: '72px' }}>REPAIR</span>
-            <span>If repair, add details</span>
-          </div>
           {activeTemplate.filter(i => i.category === cat).map((item, idx) => (
             <div
               key={item.id}
               className="eoc-item"
               style={{
-                background: idx % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)',
+                background: idx % 2 === 0 ? 'rgba(22,36,52,0.96)' : 'rgba(19,31,46,0.96)',
                 borderRadius: '10px',
                 padding: '12px',
-                border: '1px solid rgba(255,255,255,0.06)'
+                border: '1px solid rgba(255,255,255,0.16)'
               }}
             >
-              <div style={{ marginBottom: '8px', fontSize: '14px', color: '#e8e8e8' }}>
-                {item.label}
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+                <div style={{ fontSize: '14px', color: '#e8e8e8', fontWeight: 600 }}>
+                  {idx + 1}. {item.label}
+                </div>
+                <span className={`badge ${answers[item.id] ? (answers[item.id] === 'repair' ? 'badge-overdue' : 'badge-eoc-completed') : 'badge-eoc-pending'}`}>
+                  {answers[item.id] ? answers[item.id].toUpperCase() : 'UNANSWERED'}
+                </span>
               </div>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: answers[item.id] === 'repair' ? '10px' : '0' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: answers[item.id] === 'repair' ? '10px' : '0' }}>
                 <button
                   className={`chip ${answers[item.id] === 'ok' ? 'chip-ok' : 'chip-unselected'}`}
                   onClick={() => setAnswer(item.id, 'ok')}
+                  style={{ justifyContent: 'center', minHeight: '40px' }}
                 >
                   OK
                 </button>
                 <button
                   className={`chip ${answers[item.id] === 'repair' ? 'chip-attention' : 'chip-unselected'}`}
                   onClick={() => setAnswer(item.id, 'repair')}
+                  style={{ justifyContent: 'center', minHeight: '40px' }}
                 >
                   Repair
                 </button>
@@ -473,6 +473,9 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
               {answers[item.id] === 'repair' && (
                 <div className="eoc-item-attention">
+                  <div style={{ fontSize: '12px', color: '#FFB74D', marginBottom: '6px' }}>
+                    Repair note required
+                  </div>
                   <input
                     className="input"
                     placeholder="If repair, note changes needed..."

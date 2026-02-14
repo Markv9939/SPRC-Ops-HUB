@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { db } from '../firebase'
 import { doc, getDoc, updateDoc, serverTimestamp, setDoc, increment } from 'firebase/firestore'
 import DCPaperworkModal from './DCCheckModal'
@@ -7,7 +7,7 @@ import DestinationAutocomplete from './DestinationAutocomplete'
 import { requireOnline } from '../utils/networkGuard'
 import { notifySuccess } from '../utils/toast'
 
-function TransportCard({ transportId, onReturn, onClose, isOffline = false }) {
+function TransportCard({ transportId, onClose, isOffline = false }) {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('open')
   const [departedAt, setDepartedAt] = useState(null)
@@ -34,28 +34,32 @@ function TransportCard({ transportId, onReturn, onClose, isOffline = false }) {
     'Other'
   ]
 
-  useEffect(() => {
-    async function loadTransport() {
-      if (!transportId) { setLoading(false); return }
-      try {
-        const docSnap = await getDoc(doc(db, 'transports', transportId))
-        if (docSnap.exists()) {
-          const d = docSnap.data()
-          setStatus(d.status || 'open')
-          setDepartedAt(d.departedAt)
-          setClients(d.clients || [])
-          setReasons(d.reasons || [])
-          setStops(d.stops || [])
-          setDestinations(d.destinations || [])
-          setNotes(d.notes || '')
-          setDcPaperworkStatus(d.dcPaperworkStatus || null)
-          setDcPaperworkOtherNote(d.dcPaperworkOtherNote || '')
-        }
-      } catch (err) { console.error('Error loading transport:', err) }
-      finally { setLoading(false) }
+  const loadTransport = useCallback(async () => {
+    if (!transportId) { setLoading(false); return }
+    try {
+      const docSnap = await getDoc(doc(db, 'transports', transportId))
+      if (docSnap.exists()) {
+        const d = docSnap.data()
+        setStatus(d.status || 'open')
+        setDepartedAt(d.departedAt)
+        setClients(d.clients || [])
+        setReasons(d.reasons || [])
+        setStops(d.stops || [])
+        setDestinations(d.destinations || [])
+        setNotes(d.notes || '')
+        setDcPaperworkStatus(d.dcPaperworkStatus || null)
+        setDcPaperworkOtherNote(d.dcPaperworkOtherNote || '')
+      }
+    } catch (err) {
+      console.error('Error loading transport:', err)
+    } finally {
+      setLoading(false)
     }
-    loadTransport()
   }, [transportId])
+
+  useEffect(() => {
+    loadTransport()
+  }, [loadTransport])
 
   // --- helpers ---
   const fmt = (ts) => {
@@ -75,7 +79,13 @@ function TransportCard({ transportId, onReturn, onClose, isOffline = false }) {
         version: increment(1),
         updatedAt: serverTimestamp()
       })
-    } catch (err) { console.error('Save error:', err) }
+    } catch (err) {
+      console.error('Save error:', err)
+      const message = err?.message || 'Failed to save transport changes.'
+      alert(message)
+      await loadTransport()
+      throw err
+    }
   }
 
   const blockIfLocked = () => {
@@ -113,22 +123,27 @@ function TransportCard({ transportId, onReturn, onClose, isOffline = false }) {
     if (blockIfLocked()) return
     const updated = [...clients, clientName]
     setClients(updated)
-    await touchClientUsage(clientName) // Update lastUsedAt
-    await save({ clients: updated })
+    try {
+      await touchClientUsage(clientName) // Update lastUsedAt
+      await save({ clients: updated })
+    } catch {
+      // Error already handled in save()
+    }
   }
 
   const removeClient = (i) => {
     if (blockIfLocked()) return
     const updated = clients.filter((_, idx) => idx !== i)
     setClients(updated)
-    save({ clients: updated })
+    save({ clients: updated }).catch(() => {})
   }
 
   // --- reasons ---
   const toggleReason = (r) => {
     if (blockIfLocked()) return
     const updated = reasons.includes(r) ? reasons.filter(x => x !== r) : [...reasons, r]
-    setReasons(updated); save({ reasons: updated })
+    setReasons(updated)
+    save({ reasons: updated }).catch(() => {})
   }
 
   // --- destinations ---
@@ -136,14 +151,18 @@ function TransportCard({ transportId, onReturn, onClose, isOffline = false }) {
     if (blockIfLocked()) return
     const updated = [...destinations, destination]
     setDestinations(updated)
-    await save({ destinations: updated })
+    try {
+      await save({ destinations: updated })
+    } catch {
+      // Error already handled in save()
+    }
   }
 
   const removeDest = (i) => {
     if (blockIfLocked()) return
     const updated = destinations.filter((_, idx) => idx !== i)
     setDestinations(updated)
-    save({ destinations: updated })
+    save({ destinations: updated }).catch(() => {})
   }
 
   // --- arrive (logs time, shows DC reminder) ---
@@ -159,7 +178,7 @@ function TransportCard({ transportId, onReturn, onClose, isOffline = false }) {
     const updated = [...stops, stop]
     setStops(updated)
     setStatus('arrived')
-    save({ stops: updated, status: 'arrived' })
+    save({ stops: updated, status: 'arrived' }).catch(() => {})
   }
 
   // --- finish ---
@@ -188,15 +207,20 @@ function TransportCard({ transportId, onReturn, onClose, isOffline = false }) {
     setShowDCPaperwork(false)
     setDcPaperworkStatus(result.status)
     setDcPaperworkOtherNote(result.otherNote || '')
-    await save({
-      status: 'returned',
-      returnedAt: serverTimestamp(),
-      destinations,
-      dcPaperworkStatus: result.status,
-      dcPaperworkOtherNote: result.otherNote || ''
-    })
-    notifySuccess('Transport submitted for close')
-    onReturn()
+    try {
+      await save({
+        status: 'closed',
+        returnedAt: serverTimestamp(),
+        closedAt: serverTimestamp(),
+        destinations,
+        dcPaperworkStatus: result.status,
+        dcPaperworkOtherNote: result.otherNote || ''
+      })
+      notifySuccess('Transport closed')
+      onClose()
+    } catch {
+      // Error already handled in save()
+    }
   }
 
   const dcStatusLabel = (s) => {
@@ -354,7 +378,7 @@ function TransportCard({ transportId, onReturn, onClose, isOffline = false }) {
           className="input"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          onBlur={() => { if (!writeLocked) save({ notes }) }}
+          onBlur={() => { if (!writeLocked) save({ notes }).catch(() => {}) }}
           readOnly={writeLocked}
           placeholder="Any additional notes..."
           rows={3}

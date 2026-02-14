@@ -1,23 +1,39 @@
 import { db } from '../firebase'
 import { doc, runTransaction, serverTimestamp } from 'firebase/firestore'
 import { getVersionNumber } from './versioning'
-import { isBhtRole } from '../utils/orgModel'
+import { buildBhtLocationId, isBhtRole, normalizeHouseId, normalizeMainLocation } from '../utils/orgModel'
 
 function assignmentDocIdForUserId(userId) {
   return `asg_${String(userId || '').trim()}`
 }
 
-function normalizeVanIds(vanId) {
-  const normalized = String(vanId || '').trim().toLowerCase()
-  return normalized ? [normalized] : []
+function normalizeVanIds(vanIds, vanId) {
+  const list = Array.isArray(vanIds) ? vanIds : []
+  const normalizedList = list
+    .map(value => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+  const normalizedPrimary = String(vanId || '').trim().toLowerCase()
+  const merged = normalizedPrimary ? [...normalizedList, normalizedPrimary] : normalizedList
+  return [...new Set(merged)]
+}
+
+function resolveLocationId(userRecord) {
+  const explicitLocationId = String(userRecord?.locationId || '').trim().toLowerCase()
+  if (explicitLocationId) return explicitLocationId
+
+  const mainLocation = normalizeMainLocation(userRecord?.location || userRecord?.site)
+  const houseId = normalizeHouseId(userRecord?.house)
+  return String(buildBhtLocationId(mainLocation, houseId) || '').trim().toLowerCase()
 }
 
 function shouldHaveActiveAssignment(userRecord) {
+  const locationId = resolveLocationId(userRecord)
+  const normalizedVanIds = normalizeVanIds(userRecord?.vanIds, userRecord?.vanId)
   return isBhtRole(userRecord?.role)
     && userRecord?.active === true
-    && String(userRecord?.locationId || '').trim().length > 0
+    && String(locationId || '').trim().length > 0
     && String(userRecord?.shiftId || '').trim().length > 0
-    && String(userRecord?.vanId || '').trim().length > 0
+    && normalizedVanIds.length > 0
 }
 
 /**
@@ -30,6 +46,8 @@ export async function syncDerivedAssignmentForUser(userId, userRecord) {
 
   const assignmentRef = doc(db, 'shiftAssignments', assignmentDocIdForUserId(normalizedUserId))
   const shouldActivate = shouldHaveActiveAssignment(userRecord)
+  const resolvedLocationId = resolveLocationId(userRecord)
+  const normalizedVanIds = normalizeVanIds(userRecord?.vanIds, userRecord?.vanId)
 
   return runTransaction(db, async (transaction) => {
     const assignmentSnap = await transaction.get(assignmentRef)
@@ -58,9 +76,9 @@ export async function syncDerivedAssignmentForUser(userId, userRecord) {
     const nextPayload = {
       bhtUserId: normalizedUserId,
       bhtUserName: String(userRecord?.name || normalizedUserId).trim(),
-      locationId: String(userRecord.locationId || '').trim().toLowerCase(),
+      locationId: resolvedLocationId,
       shiftId: String(userRecord.shiftId || '').trim(),
-      vanIds: normalizeVanIds(userRecord.vanId),
+      vanIds: normalizedVanIds,
       active: true,
       source: 'user_profile',
       deleted: false,

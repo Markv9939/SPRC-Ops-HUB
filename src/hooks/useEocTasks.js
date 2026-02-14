@@ -20,6 +20,7 @@ function sortTasks(items) {
 
 export default function useEocTasks(user, assignment) {
   const hasUserId = Boolean(user?.id)
+  const normalizedUserId = String(user?.id || '').trim()
   const hasAssignmentScope = Boolean(assignment?.locationId && assignment?.shiftId)
   const scopeKey = hasAssignmentScope ? `${assignment.locationId}::${assignment.shiftId}` : ''
   const [tasks, setTasks] = useState([])
@@ -43,27 +44,27 @@ export default function useEocTasks(user, assignment) {
           .filter((taskRow) => {
             const eligibleUserIds = Array.isArray(taskRow.eligibleUserIds) ? taskRow.eligibleUserIds : []
             if (eligibleUserIds.length === 0) {
-              return taskRow.assigneeUserId === user.id
+              return String(taskRow.assigneeUserId || '').trim() === normalizedUserId
             }
-            return eligibleUserIds.includes(user.id)
+            return eligibleUserIds.map(v => String(v || '').trim()).includes(normalizedUserId)
           })
         setTasks(sortTasks(scoped))
-        setLoadedUserId(user.id)
+        setLoadedUserId(normalizedUserId)
         setLoadedScopeKey(scopeKey)
       },
       (err) => {
         console.error('Error loading EOC tasks:', err)
         setTasks([])
-        setLoadedUserId(user.id)
+        setLoadedUserId(normalizedUserId)
         setLoadedScopeKey(scopeKey)
       }
     )
 
     return () => unsubscribe()
-  }, [assignment?.locationId, assignment?.shiftId, hasAssignmentScope, hasUserId, scopeKey, user?.id])
+  }, [assignment?.locationId, assignment?.shiftId, hasAssignmentScope, hasUserId, normalizedUserId, scopeKey, user?.id])
 
   return {
-    tasks: hasUserId && hasAssignmentScope && loadedUserId === user.id && loadedScopeKey === scopeKey ? tasks : [],
-    loading: hasUserId && hasAssignmentScope ? !(loadedUserId === user.id && loadedScopeKey === scopeKey) : false
+    tasks: hasUserId && hasAssignmentScope && loadedUserId === normalizedUserId && loadedScopeKey === scopeKey ? tasks : [],
+    loading: hasUserId && hasAssignmentScope ? !(loadedUserId === normalizedUserId && loadedScopeKey === scopeKey) : false
   }
 }
