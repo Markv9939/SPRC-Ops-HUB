@@ -3,6 +3,26 @@
 All notable changes to SPRC Ops Hub are tracked here in chronological order.
 
 ## [Unreleased]
+### Added
+- EOC checklist autosave drafts in Firestore (`eocSubmissionDrafts`) with automatic restore on task reopen.
+- EOC draft access controls in Firestore rules, including auth UID ownership checks for draft read/write/delete paths.
+
+### Changed
+- EOC checklist completer identity is now read-only and always sourced from the authenticated user.
+- EOC checklist interaction flow optimized for faster completion on mobile and desktop:
+  - sticky bottom actions
+  - improved keyboard progression (`1`/`2` answer shortcuts and `Enter` next navigation)
+  - clearer repair-note flow and focus behavior
+- EOC categories no longer auto-collapse and no longer expose manual hide/show toggles.
+- Removed top checklist progress summary strip (`Answered / Repair Items / Remaining / Next required`) on both House and Van EOC forms.
+
+### Fixed
+- Resolved EOC submit permission failures caused by draft cleanup edge cases when draft ownership metadata does not match active auth UID.
+
+### Verification
+- `npm run lint` passed.
+- `npm run build` passed.
+
 ### Documentation
 - Rebuilt `plan.md` as a clean V2 Core operating blueprint aligned to current runtime state.
 - Added continuous-truth sections for current behavior, delivered work, and upcoming updates.

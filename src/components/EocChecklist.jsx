@@ -1,16 +1,33 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, collection, serverTimestamp, query, orderBy, onSnapshot, where, getDocs, runTransaction } from 'firebase/firestore'
-import { EOC_VAN_TEMPLATE, EOC_HOUSE_TEMPLATE, VANS, LOCATIONS } from '../data/eocConstants'
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  runTransaction,
+  serverTimestamp,
+  setDoc,
+  where
+} from 'firebase/firestore'
+import { EOC_HOUSE_TEMPLATE, EOC_VAN_TEMPLATE, LOCATIONS, VANS } from '../data/eocConstants'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { requireOnline } from '../utils/networkGuard'
+
+const DRAFT_SAVE_DEBOUNCE_MS = 700
+
+function getDraftDocId(taskId, userId) {
+  return `${String(taskId || '').trim()}__${String(userId || '').trim()}`
+}
 
 function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   const [task, setTask] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [templateItems, setTemplateItems] = useState([])
-  const [staffCompleting, setStaffCompleting] = useState('')
   const [vehicleName, setVehicleName] = useState('')
   const [vinNumber, setVinNumber] = useState('')
   const [odometerReading, setOdometerReading] = useState('')
@@ -19,7 +36,19 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   const [answers, setAnswers] = useState({})
   const [repairDetails, setRepairDetails] = useState({})
   const [error, setError] = useState('')
+  const [draftReady, setDraftReady] = useState(false)
+  const [draftStatus, setDraftStatus] = useState('idle')
+  const [draftRestoredNotice, setDraftRestoredNotice] = useState('')
+  const [focusedItemId, setFocusedItemId] = useState('')
+
   const normalizedUserId = String(user?.id || '').trim()
+  const normalizedAuthUid = String(user?.authUid || '').trim()
+  const orderedItemsRef = useRef([])
+  const draftTimerRef = useRef(null)
+  const lastSavedPayloadRef = useRef('')
+  const isDraftLoadedRef = useRef(false)
+  const itemRefs = useRef({})
+  const repairInputRefs = useRef({})
 
   useEffect(() => {
     async function loadTask() {
@@ -56,6 +85,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
         const nextType = data.taskType || data.eocType || ''
         setEocType(nextType)
+        setTask({ id: snap.id, ...data, version: getVersionNumber(data) })
 
         if (nextType === 'van') {
           const vanLabel = VANS.find(v => v.id === data.vanId)?.label || ''
@@ -63,10 +93,8 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         } else {
           setVehicleName('')
           setVinNumber('')
+          setOdometerReading('')
         }
-
-        setStaffCompleting(user?.name || '')
-        setTask({ id: snap.id, ...data, version: getVersionNumber(data) })
       } catch (err) {
         console.error('Error loading task:', err)
         setError('Failed to load task')
@@ -76,7 +104,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     }
 
     loadTask()
-  }, [normalizedUserId, taskId, user?.id, user?.name])
+  }, [normalizedUserId, taskId])
 
   useEffect(() => {
     if (!eocType) return
@@ -133,41 +161,56 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     loadVehicle()
   }, [task, eocType])
 
-  const setAnswer = (itemId, value) => {
-    setAnswers(prev => ({ ...prev, [itemId]: value }))
-    if (value === 'ok') {
-      setRepairDetails(prev => {
-        const next = { ...prev }
-        delete next[itemId]
-        return next
-      })
-    }
-  }
-
-  const setRepairField = (itemId, value) => {
-    setRepairDetails(prev => ({
-      ...prev,
-      [itemId]: { description: value }
-    }))
-  }
-
-  const activeTemplate = (() => {
+  const activeTemplate = useMemo(() => {
     const fallback = eocType === 'van' ? EOC_VAN_TEMPLATE : EOC_HOUSE_TEMPLATE
     if (templateItems.length === 0) return fallback
     const filtered = templateItems.filter(i => i.active !== false)
     return filtered.length > 0 ? filtered : fallback
-  })()
+  }, [eocType, templateItems])
 
-  const validate = () => {
-    if (!staffCompleting.trim()) return 'Please enter staff completing EOC'
-    if (eocType === 'van' && !odometerReading.trim()) return 'Please enter odometer reading'
+  useEffect(() => {
+    orderedItemsRef.current = activeTemplate
+  }, [activeTemplate])
+
+  const itemsByCategory = useMemo(() => {
+    const map = new Map()
+    for (const item of activeTemplate) {
+      if (!map.has(item.category)) map.set(item.category, [])
+      map.get(item.category).push(item)
+    }
+    return map
+  }, [activeTemplate])
+
+  const categories = useMemo(() => Array.from(itemsByCategory.keys()), [itemsByCategory])
+
+  const isRepairMissing = (itemId) => {
+    if (answers[itemId] !== 'repair') return false
+    return !String(repairDetails[itemId]?.description || '').trim()
+  }
+
+  const isRepairMissingWithState = (itemId, nextAnswers, nextRepairDetails) => {
+    if (nextAnswers[itemId] !== 'repair') return false
+    return !String(nextRepairDetails[itemId]?.description || '').trim()
+  }
+
+  const findFirstInvalid = () => {
+    if (eocType === 'van' && !odometerReading.trim()) {
+      return { type: 'odometer', message: 'Please enter odometer reading' }
+    }
 
     for (const item of activeTemplate) {
-      if (!answers[item.id]) return `Please complete all checklist items (missing: ${item.label})`
-      if (answers[item.id] === 'repair') {
-        const detail = repairDetails[item.id]
-        if (!detail || !detail.description.trim()) {
-          return `Please describe the repair for: ${item.label}`
+      if (!answers[item.id]) {
+        return {
+          type: 'missing-answer',
+          itemId: item.id,
+          message: `Please complete all checklist items (missing: ${item.label})`
+        }
+      }
+      if (answers[item.id] === 'repair' && isRepairMissing(item.id)) {
+        return {
+          type: 'missing-repair-note',
+          itemId: item.id,
+          message: `Please describe the repair for: ${item.label}`
         }
       }
     }
@@ -175,15 +218,210 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     return null
   }
 
+  const jumpToItem = (itemId, focusRepairInput = false) => {
+    const node = itemRefs.current[itemId]
+    if (!node) return
+
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    window.setTimeout(() => {
+      if (focusRepairInput) {
+        repairInputRefs.current[itemId]?.focus()
+      } else {
+        node.focus()
+      }
+    }, 160)
+  }
+
+  const getNextOutstandingItem = (fromItemId = '') => {
+    const ordered = orderedItemsRef.current
+    if (ordered.length === 0) return null
+
+    const outstanding = ordered.filter(item => !answers[item.id] || isRepairMissing(item.id))
+    if (outstanding.length === 0) return null
+    if (!fromItemId) return outstanding[0]
+
+    const fromIndex = ordered.findIndex(item => item.id === fromItemId)
+    if (fromIndex < 0) return outstanding[0]
+
+    for (let idx = fromIndex + 1; idx < ordered.length; idx += 1) {
+      const item = ordered[idx]
+      if (!answers[item.id] || isRepairMissing(item.id)) return item
+    }
+
+    return outstanding[0]
+  }
+
+  const getNextOutstandingItemWithState = (fromItemId, nextAnswers, nextRepairDetails) => {
+    const ordered = orderedItemsRef.current
+    if (ordered.length === 0) return null
+
+    const outstanding = ordered.filter(item => !nextAnswers[item.id] || isRepairMissingWithState(item.id, nextAnswers, nextRepairDetails))
+    if (outstanding.length === 0) return null
+    if (!fromItemId) return outstanding[0]
+
+    const fromIndex = ordered.findIndex(item => item.id === fromItemId)
+    if (fromIndex < 0) return outstanding[0]
+
+    for (let idx = fromIndex + 1; idx < ordered.length; idx += 1) {
+      const item = ordered[idx]
+      if (!nextAnswers[item.id] || isRepairMissingWithState(item.id, nextAnswers, nextRepairDetails)) return item
+    }
+
+    return outstanding[0]
+  }
+
+  const firstOutstandingItem = getNextOutstandingItem('')
+
+  useEffect(() => {
+    if (!task?.id || !normalizedUserId) return
+    let cancelled = false
+
+    async function loadDraft() {
+      setDraftReady(false)
+      isDraftLoadedRef.current = false
+      setDraftStatus('idle')
+
+      try {
+        const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
+        const snap = await getDoc(draftRef)
+
+        if (cancelled) return
+        if (snap.exists()) {
+          const data = snap.data()
+          if (data.answers && typeof data.answers === 'object') setAnswers(data.answers)
+          if (data.repairDetails && typeof data.repairDetails === 'object') setRepairDetails(data.repairDetails)
+          if (typeof data.odometerReading === 'string') setOdometerReading(data.odometerReading)
+          if (typeof data.vehicleName === 'string' && data.vehicleName.trim()) setVehicleName(data.vehicleName)
+          if (typeof data.vinNumber === 'string' && data.vinNumber.trim()) setVinNumber(data.vinNumber)
+          if (typeof data.vehicleId === 'string' && data.vehicleId.trim()) setVehicleId(data.vehicleId)
+          setDraftRestoredNotice('Draft restored')
+          setDraftStatus('saved')
+        }
+      } catch (err) {
+        console.error('Error loading EOC draft:', err)
+      } finally {
+        if (!cancelled) {
+          isDraftLoadedRef.current = true
+          setDraftReady(true)
+        }
+      }
+    }
+
+    loadDraft()
+    return () => { cancelled = true }
+  }, [task?.id, normalizedUserId])
+
+  useEffect(() => {
+    if (!draftRestoredNotice) return undefined
+    const timer = window.setTimeout(() => setDraftRestoredNotice(''), 2200)
+    return () => window.clearTimeout(timer)
+  }, [draftRestoredNotice])
+
+  useEffect(() => {
+    if (!task?.id || !normalizedUserId || !draftReady || !isDraftLoadedRef.current) return undefined
+    if (submitting || isOffline) return undefined
+
+    const payload = {
+      taskId: task.id,
+      locationId: task.locationId,
+      shiftId: task.shiftId,
+      vanId: task.vanId || null,
+      eocType,
+      draftByUserId: normalizedUserId,
+      draftByAuthUid: normalizedAuthUid || null,
+      draftByName: user?.name || '',
+      vehicleId: vehicleId || null,
+      vehicleName: vehicleName || '',
+      vinNumber: vinNumber || '',
+      odometerReading: eocType === 'van' ? odometerReading : '',
+      answers,
+      repairDetails
+    }
+
+    const serialized = JSON.stringify(payload)
+    if (serialized === lastSavedPayloadRef.current) return undefined
+
+    if (draftTimerRef.current) {
+      window.clearTimeout(draftTimerRef.current)
+    }
+
+    setDraftStatus('saving')
+    draftTimerRef.current = window.setTimeout(async () => {
+      try {
+        const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
+        await setDoc(draftRef, {
+          ...payload,
+          version: 1,
+          lastTouchedAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, { merge: true })
+        lastSavedPayloadRef.current = serialized
+        setDraftStatus('saved')
+      } catch (err) {
+        console.error('Error autosaving EOC draft:', err)
+        setDraftStatus('error')
+      }
+    }, DRAFT_SAVE_DEBOUNCE_MS)
+
+    return () => {
+      if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current)
+    }
+  }, [answers, draftReady, eocType, isOffline, normalizedAuthUid, normalizedUserId, odometerReading, repairDetails, submitting, task?.id, task?.locationId, task?.shiftId, task?.vanId, user?.name, vehicleId, vehicleName, vinNumber])
+
+  const setAnswer = (itemId, value) => {
+    setError('')
+    let nextAnswers = answers
+    let nextRepairDetails = repairDetails
+
+    nextAnswers = { ...answers, [itemId]: value }
+    setAnswers(nextAnswers)
+
+    if (value === 'ok') {
+      nextRepairDetails = { ...repairDetails }
+      delete nextRepairDetails[itemId]
+      setRepairDetails(nextRepairDetails)
+    } else {
+      nextRepairDetails = { ...repairDetails }
+      window.setTimeout(() => {
+        repairInputRefs.current[itemId]?.focus()
+      }, 80)
+    }
+
+    const currentItem = activeTemplate.find(item => item.id === itemId)
+    if (!currentItem) return
+
+    const currentCategoryItems = activeTemplate.filter(item => item.category === currentItem.category)
+    const categoryIsNowComplete = currentCategoryItems.every(item => nextAnswers[item.id] && !isRepairMissingWithState(item.id, nextAnswers, nextRepairDetails))
+    if (!categoryIsNowComplete) return
+
+    const nextItem = getNextOutstandingItemWithState(itemId, nextAnswers, nextRepairDetails)
+    if (!nextItem) return
+    window.setTimeout(() => jumpToItem(nextItem.id, isRepairMissingWithState(nextItem.id, nextAnswers, nextRepairDetails)), 140)
+  }
+
+  const setRepairField = (itemId, value) => {
+    setError('')
+    setRepairDetails(prev => ({
+      ...prev,
+      [itemId]: { description: value }
+    }))
+  }
+
+  const allAnswered = activeTemplate.every(item => Boolean(answers[item.id]))
+
   const handleSubmit = async () => {
     if (isOffline) {
       requireOnline('submitting EOC')
       return
     }
 
-    const validationError = validate()
-    if (validationError) {
-      setError(validationError)
+    const invalid = findFirstInvalid()
+    if (invalid) {
+      setError(invalid.message)
+      if (invalid.itemId) {
+        jumpToItem(invalid.itemId, invalid.type === 'missing-repair-note')
+      }
       return
     }
 
@@ -242,7 +480,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           shiftId: task.shiftId,
           vanId: task.vanId || null,
           dueDate: task.dueDate,
-          staffCompleting: staffCompleting.trim(),
+          staffCompleting: user.name,
           eocType,
           vehicleId: vehicleId || null,
           vehicleName: vehicleName.trim(),
@@ -267,6 +505,17 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           version: nextVersion,
           updatedAt: serverTimestamp()
         })
+
+        if (normalizedAuthUid) {
+          const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
+          const draftSnap = await transaction.get(draftRef)
+          if (draftSnap.exists()) {
+            const draftData = draftSnap.data()
+            if (String(draftData?.draftByAuthUid || '').trim() === normalizedAuthUid) {
+              transaction.delete(draftRef)
+            }
+          }
+        }
 
         for (const issue of issueItems) {
           const issueRef = doc(collection(db, 'eocIssues'))
@@ -322,6 +571,35 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     }
   }
 
+  const jumpToNextOutstanding = () => {
+    const nextItem = getNextOutstandingItem(focusedItemId)
+    if (!nextItem) return
+    jumpToItem(nextItem.id, isRepairMissing(nextItem.id))
+  }
+
+  const handleItemKeyDown = (event, item) => {
+    const key = event.key
+    const targetTag = String(event.target?.tagName || '').toLowerCase()
+    const inTextInput = targetTag === 'input' || targetTag === 'textarea'
+
+    if (!inTextInput && key === '1') {
+      event.preventDefault()
+      setAnswer(item.id, 'ok')
+      return
+    }
+
+    if (!inTextInput && key === '2') {
+      event.preventDefault()
+      setAnswer(item.id, 'repair')
+      return
+    }
+
+    if (key === 'Enter') {
+      event.preventDefault()
+      jumpToNextOutstanding()
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: '#556677' }}>
@@ -332,7 +610,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
   if (error && !task) {
     return (
-      <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
+      <div style={{ padding: '20px', maxWidth: '700px', margin: '0 auto' }}>
         <div className="glass-card" style={{ textAlign: 'center', padding: '40px 20px' }}>
           <p style={{ color: '#C94A3F', marginBottom: '16px' }}>{error}</p>
           <button className="btn" onClick={onBack} style={{ background: 'rgba(255,255,255,0.06)', color: '#e8e8e8' }}>
@@ -343,25 +621,22 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     )
   }
 
-  const categories = []
-  const seen = new Set()
-  for (const item of activeTemplate) {
-    if (!seen.has(item.category)) {
-      seen.add(item.category)
-      categories.push(item.category)
-    }
-  }
+  const draftStatusText = (() => {
+    if (isOffline) return 'Offline: draft autosave paused'
+    if (!draftReady) return 'Preparing draft...'
+    if (draftStatus === 'saving') return 'Saving...'
+    if (draftStatus === 'saved') return 'Saved just now'
+    if (draftStatus === 'error') return 'Draft save failed. Retrying on next change.'
+    return 'Draft ready'
+  })()
 
-  const allAnswered = activeTemplate.every(item => answers[item.id])
-  const answeredCount = activeTemplate.filter(item => Boolean(answers[item.id])).length
-  const repairCount = activeTemplate.filter(item => answers[item.id] === 'repair').length
-  const remainingCount = activeTemplate.length - answeredCount
-  const firstMissingItem = activeTemplate.find(item => !answers[item.id])
+  const locationLabel = LOCATIONS.find(l => l.id === task?.locationId)?.label || task?.locationId
 
   return (
-    <div className="eoc-checklist-page" style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', paddingBottom: '100px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+    <div className="eoc-checklist-page" style={{ padding: '18px', maxWidth: '760px', margin: '0 auto', paddingBottom: '150px' }}>
+      <div className="eoc-header-row">
         <button
+          aria-label="Back to BHT hub"
           onClick={onBack}
           style={{
             background: 'none',
@@ -375,34 +650,47 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           {'<-'}
         </button>
         <div>
-          <h2 style={{ margin: 0, fontSize: '18px', color: '#e8e8e8' }}>
+          <h2 style={{ margin: 0, fontSize: '32px', lineHeight: 1.1, color: '#e8e8e8', fontWeight: 700 }}>
             {eocType === 'van' ? 'Van EOC Checklist' : 'House EOC Checklist'}
           </h2>
-          <div style={{ fontSize: '13px', color: '#8899aa' }}>
-            Due: {task?.dueDate} - {task?.locationId}
+          <div style={{ fontSize: '14px', color: '#9eb0c2', marginTop: '4px' }}>
+            Due: {task?.dueDate} - {locationLabel}
           </div>
         </div>
       </div>
 
       <div className="glass-card eoc-shell-card" style={{ padding: '14px', marginBottom: '16px' }}>
-        <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>Staff Completing EOC</div>
-        <input
-          className="input"
-          value={staffCompleting}
-          onChange={(e) => setStaffCompleting(e.target.value)}
-          placeholder="Staff name(s)"
-          style={{ marginBottom: '10px' }}
-        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
+          <div>
+            <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '4px' }}>Completed by</div>
+            <div className="badge badge-eoc-completed" style={{ fontSize: '12px' }}>{user?.name || 'Unknown User'}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '4px' }}>Draft status</div>
+            <div className="eoc-inline-note">{draftStatusText}</div>
+          </div>
+        </div>
+
+        {draftRestoredNotice && (
+          <div className="eoc-inline-note" style={{ marginBottom: '10px' }}>
+            {draftRestoredNotice}
+          </div>
+        )}
+
         {eocType === 'van' ? (
           <>
             <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>Vehicle Receiving Inspection</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
-              <input className="input" value={vehicleName} readOnly placeholder="Vehicle name" />
-              <input className="input" value={vinNumber} readOnly placeholder="VIN number" />
+            <div className="eoc-meta-grid">
+              <input className="input" value={vehicleName} readOnly aria-label="Vehicle name" placeholder="Vehicle name" />
+              <input className="input" value={vinNumber} readOnly aria-label="VIN number" placeholder="VIN number" />
               <input
-                className="input"
+                className={`input ${!odometerReading.trim() && error ? 'input-warn' : ''}`}
                 value={odometerReading}
-                onChange={(e) => setOdometerReading(e.target.value)}
+                onChange={(e) => {
+                  setError('')
+                  setOdometerReading(e.target.value)
+                }}
+                aria-label="Odometer reading"
                 placeholder="Odometer reading"
               />
             </div>
@@ -414,81 +702,85 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           </>
         ) : (
           <div style={{ fontSize: '13px', color: '#8899aa' }}>
-            House: {LOCATIONS.find(l => l.id === task?.locationId)?.label || task?.locationId}
+            House: {locationLabel}
           </div>
         )}
       </div>
 
-      <div className="glass-card eoc-shell-card" style={{ padding: '12px 14px', marginBottom: '14px' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: firstMissingItem ? '8px' : '0' }}>
-          <span className="badge badge-eoc-pending">Answered {answeredCount}/{activeTemplate.length}</span>
-          <span className="badge badge-eoc-completed">Repair Items {repairCount}</span>
-          <span className="badge badge-eoc-missed">Remaining {remainingCount}</span>
-        </div>
-        {firstMissingItem ? (
-          <div style={{ fontSize: '12px', color: '#FFB74D' }}>
-            Next required: {firstMissingItem.label}
-          </div>
-        ) : null}
-      </div>
+      {categories.map(cat => {
+        const categoryItems = itemsByCategory.get(cat) || []
 
-      {categories.map(cat => (
-        <div key={cat} style={{ marginBottom: '20px' }}>
-          <div className="eoc-category-header">{cat}</div>
-          {activeTemplate.filter(i => i.category === cat).map((item, idx) => (
-            <div
-              key={item.id}
-              className="eoc-item"
-              style={{
-                background: idx % 2 === 0 ? 'rgba(22,36,52,0.96)' : 'rgba(19,31,46,0.96)',
-                borderRadius: '10px',
-                padding: '12px',
-                border: '1px solid rgba(255,255,255,0.16)'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
-                <div style={{ fontSize: '14px', color: '#e8e8e8', fontWeight: 600 }}>
-                  {idx + 1}. {item.label}
-                </div>
-                <span className={`badge ${answers[item.id] ? (answers[item.id] === 'repair' ? 'badge-overdue' : 'badge-eoc-completed') : 'badge-eoc-pending'}`}>
-                  {answers[item.id] ? answers[item.id].toUpperCase() : 'UNANSWERED'}
-                </span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: answers[item.id] === 'repair' ? '10px' : '0' }}>
-                <button
-                  className={`chip ${answers[item.id] === 'ok' ? 'chip-ok' : 'chip-unselected'}`}
-                  onClick={() => setAnswer(item.id, 'ok')}
-                  style={{ justifyContent: 'center', minHeight: '40px' }}
-                >
-                  OK
-                </button>
-                <button
-                  className={`chip ${answers[item.id] === 'repair' ? 'chip-attention' : 'chip-unselected'}`}
-                  onClick={() => setAnswer(item.id, 'repair')}
-                  style={{ justifyContent: 'center', minHeight: '40px' }}
-                >
-                  Repair
-                </button>
-              </div>
-
-              {answers[item.id] === 'repair' && (
-                <div className="eoc-item-attention">
-                  <div style={{ fontSize: '12px', color: '#FFB74D', marginBottom: '6px' }}>
-                    Repair note required
+        return (
+          <div key={cat} style={{ marginBottom: '18px' }}>
+            <div className="eoc-category-header">{cat}</div>
+            {categoryItems.map((item, idx) => (
+              <div
+                key={item.id}
+                ref={(node) => { itemRefs.current[item.id] = node }}
+                tabIndex={0}
+                onFocus={() => setFocusedItemId(item.id)}
+                onKeyDown={(event) => handleItemKeyDown(event, item)}
+                className="eoc-item"
+                style={{
+                  background: idx % 2 === 0 ? 'rgba(22,36,52,0.96)' : 'rgba(19,31,46,0.96)',
+                  borderRadius: '10px',
+                  padding: '12px',
+                  border: '1px solid rgba(255,255,255,0.16)'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '16px', color: '#e8e8e8', fontWeight: 600 }}>
+                    {idx + 1}. {item.label}
                   </div>
-                  <input
-                    className="input"
-                    placeholder="If repair, note changes needed..."
-                    value={repairDetails[item.id]?.description || ''}
-                    onChange={(e) => setRepairField(item.id, e.target.value)}
-                    style={{ marginBottom: '8px' }}
-                  />
+                  <span className={`badge ${answers[item.id] ? (answers[item.id] === 'repair' ? 'badge-overdue' : 'badge-eoc-completed') : 'badge-eoc-pending'}`}>
+                    {answers[item.id] ? answers[item.id].toUpperCase() : 'UNANSWERED'}
+                  </span>
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
-      ))}
+                <div className="eoc-answer-grid" style={{ marginBottom: answers[item.id] === 'repair' ? '10px' : '0' }}>
+                  <button
+                    className={`chip ${answers[item.id] === 'ok' ? 'chip-ok' : 'chip-unselected'}`}
+                    onClick={() => setAnswer(item.id, 'ok')}
+                    aria-label={`Set ${item.label} to OK`}
+                    style={{ justifyContent: 'center', minHeight: '46px', fontSize: '16px' }}
+                  >
+                    OK
+                  </button>
+                  <button
+                    className={`chip ${answers[item.id] === 'repair' ? 'chip-attention' : 'chip-unselected'}`}
+                    onClick={() => setAnswer(item.id, 'repair')}
+                    aria-label={`Set ${item.label} to repair`}
+                    style={{ justifyContent: 'center', minHeight: '46px', fontSize: '16px' }}
+                  >
+                    Repair
+                  </button>
+                </div>
+
+                {answers[item.id] === 'repair' && (
+                  <div className="eoc-item-attention">
+                    <div style={{ fontSize: '12px', color: '#FFB74D', marginBottom: '6px' }}>
+                      Repair note required
+                    </div>
+                    <input
+                      ref={(node) => { repairInputRefs.current[item.id] = node }}
+                      className={`input ${isRepairMissing(item.id) ? 'input-warn' : ''}`}
+                      aria-label={`Repair note for ${item.label}`}
+                      placeholder="If repair, note changes needed..."
+                      value={repairDetails[item.id]?.description || ''}
+                      onChange={(e) => setRepairField(item.id, e.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          jumpToNextOutstanding()
+                        }
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      })}
 
       <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '16px' }}>
         Checklist must be completed on a weekly basis by staff on the first day of each shift. To be turned in to Supervisor following day.
@@ -505,17 +797,27 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         </div>
       )}
 
-      <button
-        className={`btn ${allAnswered ? 'btn-finish' : 'btn-disabled'}`}
-        onClick={handleSubmit}
-        disabled={submitting || !allAnswered || isOffline}
-        style={{ width: '100%', fontSize: '18px', borderRadius: 'var(--radius)' }}
-      >
-        {submitting ? 'Submitting...' : 'Submit EOC'}
-      </button>
+      <div className="eoc-sticky-actions">
+        <button
+          type="button"
+          className="btn"
+          onClick={jumpToNextOutstanding}
+          disabled={!firstOutstandingItem}
+          style={{ width: '48%', fontSize: '16px', borderRadius: 'var(--radius)', background: 'rgba(255,255,255,0.08)', color: '#d8e2ec' }}
+        >
+          Next Unanswered
+        </button>
+        <button
+          className={`btn ${allAnswered ? 'btn-finish' : 'btn-disabled'}`}
+          onClick={handleSubmit}
+          disabled={submitting || !allAnswered || isOffline}
+          style={{ width: '50%', fontSize: '18px', borderRadius: 'var(--radius)' }}
+        >
+          {submitting ? 'Submitting...' : 'Submit EOC'}
+        </button>
+      </div>
     </div>
   )
 }
 
 export default EocChecklist
-

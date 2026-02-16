@@ -363,6 +363,34 @@ service cloud.firestore {
       allow delete: if authRoleAndLocationAllowed(['admin'], resource.data.locationId);
     }
 
+    // EOC Submission Drafts (autosave while checklist is in progress)
+    match /eocSubmissionDrafts/{docId} {
+      allow read: if true
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId)
+        && request.auth != null
+        && resource.data.draftByAuthUid == request.auth.uid;
+
+      allow create: if request.resource.data.keys().hasAll([
+        'taskId', 'locationId', 'shiftId', 'eocType', 'draftByUserId', 'draftByAuthUid'
+      ])
+        && request.auth != null
+        && request.resource.data.draftByAuthUid == request.auth.uid
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data);
+
+      allow update: if request.auth != null
+        && resource.data.draftByAuthUid == request.auth.uid
+        && request.resource.data.draftByAuthUid == request.auth.uid
+        && request.resource.data.draftByUserId == resource.data.draftByUserId
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+
+      allow delete: if request.auth != null
+        && resource.data.draftByAuthUid == request.auth.uid
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
+    }
+
     // EOC Issues
     match /eocIssues/{docId} {
       allow read: if true;

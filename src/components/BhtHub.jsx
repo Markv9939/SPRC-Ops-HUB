@@ -33,12 +33,6 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
     return acc
   }, {})
 
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '--:--'
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-  }
-
   const formatDateTime = (timestamp) => {
     if (!timestamp) return 'Unknown time'
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
@@ -76,26 +70,6 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
     </div>
   )
 
-  const getClientDisplay = (t) => {
-    if (!t.clients || t.clients.length === 0) return 'No client entered'
-    return t.clients.join(', ')
-  }
-
-  const getDestinationDisplay = (t) => {
-    if (t.destinations && t.destinations.length > 0) {
-      return t.destinations.map(d => d.name || d.address).join(', ')
-    }
-    if (t.stops && t.stops.length > 0) {
-      return t.stops[0].destinationAddress || t.stops[0].destinationName || 'No destination'
-    }
-    return 'No destination entered'
-  }
-
-  const badgeClass = (status) => {
-    const map = { open: 'badge-open', arrived: 'badge-arrived', returned: 'badge-returned', closed: 'badge-closed' }
-    return `badge ${map[status] || ''}`
-  }
-
   const taskTitle = (task) => {
     if (task.taskType === 'house') return 'House EOC'
     const vanLabel = VANS.find(v => v.id === task.vanId)?.label || task.vanId || 'Van'
@@ -131,8 +105,6 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
   const dueCount = currentCycleTasks.filter(t => t.status === 'pending').length
   const overdueCount = currentCycleTasks.filter(t => t.status === 'overdue').length
   const completedCount = currentCycleTasks.filter(t => t.status === 'completed').length
-  const expectedTaskCount = currentCycleTasks.length
-  const notDueCount = Math.max(0, expectedTaskCount - (dueCount + overdueCount + completedCount))
 
   if (assignmentLoading || tasksLoading) {
     return (
@@ -191,11 +163,10 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
       {/* Assignment-driven EOC tasks */}
       {hasAssignment && (
         <div className="glass-card" style={{ marginBottom: '20px', padding: '16px' }}>
-          <div className="section-label" style={{ marginBottom: '8px' }}>Due EOCs</div>
+          <div className="section-label" style={{ marginBottom: '8px' }}>EOCs</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
-            <button className="chip chip-unselected" disabled>Not Due ({notDueCount})</button>
-            <button className="chip chip-unselected" disabled>Due ({dueCount})</button>
-            <button className="chip chip-attention" disabled>Overdue ({overdueCount})</button>
+            <button className="chip chip-due" disabled>Due ({dueCount})</button>
+            <button className="chip chip-overdue" disabled>Overdue ({overdueCount})</button>
             <button className="chip chip-ok" disabled>Completed ({completedCount})</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: actionableTasks.length > 0 ? '8px' : '0' }}>
@@ -314,68 +285,6 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
               ))}
             </div>
           )}
-        </div>
-      )}
-
-      {/* Status cards */}
-      <div className="hub-status-grid" style={{ marginBottom: '20px' }}>
-        <div className="glass-card" style={{ padding: '14px' }}>
-          <div className="section-label" style={{ marginBottom: '6px' }}>Assignment</div>
-          {hasAssignment ? (
-            <span className="badge badge-eoc-completed">Active</span>
-          ) : (
-            <span className="badge badge-eoc-missed">None</span>
-          )}
-        </div>
-        <div className="glass-card" style={{ padding: '14px' }}>
-          <div className="section-label" style={{ marginBottom: '6px' }}>Due EOCs</div>
-          <span style={{ fontSize: '22px', fontWeight: 700, color: actionableTasks.length > 0 ? '#FF9800' : '#556677' }}>
-            {actionableTasks.length}
-          </span>
-        </div>
-      </div>
-
-      {/* Recent transports */}
-      <div className="section-label" style={{ marginBottom: '12px' }}>Recent Transports</div>
-
-      {transports.length === 0 ? (
-        <div className="glass-card" style={{ textAlign: 'center', padding: '40px 20px', color: '#556677' }}>
-          <p style={{ fontSize: '16px', marginBottom: '4px' }}>No transports yet</p>
-          <p style={{ fontSize: '13px' }}>Tap "+ New Transport" to get started</p>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {transports.map((t) => {
-            const isClickable = t.status !== 'closed'
-            return (
-              <div
-                key={t.id}
-                className={`transport-item animate-in`}
-                onClick={() => isClickable && onContinueTransport(t.id)}
-                style={{ cursor: isClickable ? 'pointer' : 'default' }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontWeight: 700, fontSize: '15px', color: '#e8e8e8' }}>
-                    {getClientDisplay(t)}
-                  </span>
-                  <span className={badgeClass(t.status)}>
-                    {t.status || 'open'}
-                  </span>
-                </div>
-                <div style={{ fontSize: '13px', color: '#8899aa' }}>
-                  {getDestinationDisplay(t)}
-                </div>
-                <div style={{ fontSize: '12px', color: '#556677', marginTop: '6px' }}>
-                  Departed: {formatTime(t.departedAt)}
-                </div>
-                {isClickable && (
-                  <div style={{ fontSize: '11px', color: '#E53935', marginTop: '8px', fontWeight: 600 }}>
-                    Tap to continue {'->'}
-                  </div>
-                )}
-              </div>
-            )
-          })}
         </div>
       )}
     </div>

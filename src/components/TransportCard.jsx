@@ -20,7 +20,8 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
   const [showArriveReminder, setShowArriveReminder] = useState(false)
   const [dcPaperworkStatus, setDcPaperworkStatus] = useState(null)
   const [dcPaperworkOtherNote, setDcPaperworkOtherNote] = useState('')
-  const submitLocked = status === 'returned' || status === 'closed'
+  const normalizedStatus = String(status || '').trim().toLowerCase()
+  const submitLocked = normalizedStatus === 'returned' || normalizedStatus === 'closed'
   const writeLocked = submitLocked || isOffline
 
   const reasonOptions = [
@@ -40,7 +41,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
       const docSnap = await getDoc(doc(db, 'transports', transportId))
       if (docSnap.exists()) {
         const d = docSnap.data()
-        setStatus(d.status || 'open')
+        setStatus(String(d.status || 'open').trim().toLowerCase())
         setDepartedAt(d.departedAt)
         setClients(d.clients || [])
         setReasons(d.reasons || [])
@@ -94,7 +95,11 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
       return true
     }
     if (!submitLocked) return false
-    alert('This transport has been submitted and is locked from further edits.')
+    if (normalizedStatus === 'closed') {
+      alert('This transport is finished and locked from further edits.')
+      return true
+    }
+    alert('This transport is returned and locked from further edits.')
     return true
   }
 
@@ -271,7 +276,9 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
 
       {submitLocked && (
         <div style={{ marginBottom: '16px', fontSize: '12px', color: '#FF9800', textAlign: 'center' }}>
-          Transport is submitted and locked. You can review details, but editing is disabled.
+          {normalizedStatus === 'closed'
+            ? 'Transport is finished and locked. You can review details, but editing is disabled.'
+            : 'Transport is returned and locked. You can review details, but editing is disabled.'}
         </div>
       )}
 

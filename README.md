@@ -5,6 +5,13 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Supervisor oversight: queues, assignments, issue resolution
 - Admin governance: scope control, templates, audit, access
 
+## Recent EOC Behavior (Current)
+- EOC completer identity is read-only and uses the logged-in user.
+- EOC drafts autosave during completion and auto-restore when reopening the same task.
+- House/Van EOC sections stay expanded (no collapse/hide toggles).
+- Keyboard flow supports rapid answering (`1` = OK, `2` = Repair, `Enter` = next unresolved).
+- Sticky bottom actions keep `Next Unanswered` and `Submit EOC` accessible on mobile and desktop.
+
 ## Source of Truth
 - Blueprint: `plan.md`
 - Change history: `CHANGELOG.md`

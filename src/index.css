@@ -475,6 +475,13 @@ body {
 }
 
 /* EOC checklist items */
+.eoc-header-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
 .eoc-category-header {
   font-size: 13px;
   font-weight: 700;
@@ -489,12 +496,17 @@ body {
 }
 
 .eoc-item {
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding: 12px;
+  margin-bottom: 8px;
 }
 
 .eoc-item:last-child {
-  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.eoc-item:focus {
+  outline: 2px solid rgba(255,255,255,0.5);
+  outline-offset: 2px;
 }
 
 .eoc-item-attention {
@@ -512,9 +524,61 @@ body {
   box-shadow: 0 8px 24px rgba(0,0,0,0.35);
 }
 
+.eoc-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
 .eoc-shell-card {
   background: rgba(18,31,46,0.96) !important;
   border-color: rgba(255,255,255,0.18) !important;
+}
+
+.eoc-inline-note {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  padding: 4px 10px;
+  color: #d9e4ef;
+  font-size: 12px;
+}
+
+.eoc-clickable-badge {
+  border: none;
+  cursor: pointer;
+}
+
+.eoc-next-required {
+  border: none;
+  background: transparent;
+  color: #FFB74D;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+
+.eoc-answer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.eoc-sticky-actions {
+  position: sticky;
+  bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 12px;
+  background: rgba(16,28,42,0.96);
+  backdrop-filter: blur(8px);
+  z-index: 5;
 }
 
 /* Chip variants for EOC */
@@ -530,10 +594,40 @@ body {
   color: #FFB74D;
 }
 
+.chip-due {
+  background: rgba(255,193,7,0.15);
+  border-color: #FFC107;
+  color: #FFD54F;
+}
+
+.chip-overdue {
+  background: rgba(229,57,53,0.15);
+  border-color: var(--sprc-red);
+  color: #EF9A9A;
+}
+
 /* EOC status badges */
 .badge-eoc-pending  { background: rgba(255,193,7,0.15); color: #FFD54F; }
 .badge-eoc-completed { background: rgba(76,175,80,0.15); color: #66BB6A; }
 .badge-eoc-missed   { background: rgba(229,57,53,0.15); color: #EF9A9A; }
+
+@media (max-width: 680px) {
+  .eoc-checklist-page {
+    border-radius: 10px;
+  }
+
+  .eoc-header-row h2 {
+    font-size: 25px !important;
+  }
+
+  .eoc-answer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .eoc-sticky-actions {
+    flex-direction: column;
+  }
+}
 
 /* Severity chips */
 .severity-low {

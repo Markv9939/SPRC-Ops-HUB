@@ -30,6 +30,14 @@ const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
 const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
 const ACTIVE_TRANSPORT_STATUSES = new Set(['open', 'arrived'])
 
+function normalizeTransportStatus(status) {
+  return String(status || '').trim().toLowerCase()
+}
+
+function isActiveTransportStatus(status) {
+  return ACTIVE_TRANSPORT_STATUSES.has(normalizeTransportStatus(status))
+}
+
 function getLastTransportSiteKey(userId) {
   return `lastTransportSite:${userId || 'unknown'}`
 }
@@ -125,8 +133,20 @@ function App() {
 
   const getActiveTransport = useCallback(() => {
     if (!user || !isBhtRole(user.role)) return null
-    return transports.find(t => ACTIVE_TRANSPORT_STATUSES.has(String(t.status || '').toLowerCase())) || null
+    return transports.find(t => isActiveTransportStatus(t.status)) || null
   }, [transports, user])
+
+  const fetchActiveTransportLive = useCallback(async () => {
+    if (!user || !isBhtRole(user.role)) return null
+    const userTransportSnapshot = await getDocs(
+      query(
+        collection(db, 'transports'),
+        where('createdByUserId', '==', user.id)
+      )
+    )
+    const existing = userTransportSnapshot.docs.find((docSnap) => isActiveTransportStatus(docSnap.data()?.status))
+    return existing ? { id: existing.id, ...existing.data() } : null
+  }, [user])
 
   const resumeActiveTransport = useCallback((transport) => {
     if (!transport?.id) return
@@ -144,8 +164,20 @@ function App() {
     localStorage.setItem('lastActivity', Date.now().toString())
   }
 
-  const handleLogout = useCallback(() => {
-    const activeTransport = getActiveTransport()
+  const handleLogout = useCallback(async () => {
+    const localActiveTransport = getActiveTransport()
+    let activeTransport = null
+    try {
+      activeTransport = await fetchActiveTransportLive()
+    } catch (err) {
+      console.error('Live active transport check failed during logout:', err)
+      activeTransport = localActiveTransport
+    }
+    console.info('Logout transport guard:', {
+      localActiveTransportId: localActiveTransport?.id || null,
+      liveActiveTransportId: activeTransport?.id || null
+    })
+
     if (activeTransport) {
       alert('You cannot lock/logout while a transport is active. Close the transport first.')
       resumeActiveTransport(activeTransport)
@@ -163,7 +195,7 @@ function App() {
     signOut(auth).catch((err) => {
       console.warn('Auth signOut skipped:', err)
     })
-  }, [getActiveTransport, resumeActiveTransport])
+  }, [fetchActiveTransportLive, getActiveTransport, resumeActiveTransport])
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false)
@@ -456,8 +488,7 @@ function App() {
         )
       )
       const existing = userTransportSnapshot.docs.find((docSnap) => {
-        const status = String(docSnap.data()?.status || '').toLowerCase()
-        return ACTIVE_TRANSPORT_STATUSES.has(status)
+        return isActiveTransportStatus(docSnap.data()?.status)
       })
       if (existing) {
         alert('Active transport already exists. Redirecting to continue it.')

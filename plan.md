@@ -1,6 +1,6 @@
 # SPRC Ops Hub Blueprint (V2 Core)
 
-Last updated: 2026-02-14
+Last updated: 2026-02-16
 Status: Active
 Primary owner: Product + Engineering
 
@@ -62,6 +62,12 @@ Auth claim contract (enforced by rules/policy):
 - New transport requires valid scoped site.
 - Active transport blocks lock/logout until closed.
 - EOC tasks sync on session start.
+- EOC checklist UX is optimized for rapid completion:
+  - read-only completer identity sourced from active user
+  - sticky bottom actions for next-item navigation and submit
+  - keyboard progression for fast desktop input
+  - repair-note focus guidance when `Repair` is selected
+- EOC draft autosave persists in-progress checklists and restores on reopen for the same user/task.
 - Multi-van BHT support is canonical:
   - User profile supports `vanIds[]`.
   - Assignment sync preserves `vanIds[]` and primary `vanId` compatibility.
@@ -84,6 +90,7 @@ Auth claim contract (enforced by rules/policy):
 - `shiftAssignments`
 - `eocTasks`
 - `eocSubmissions`
+- `eocSubmissionDrafts`
 - `eocIssues`
 - `alerts`
 - `transports`
@@ -108,6 +115,7 @@ Auth claim contract (enforced by rules/policy):
 - Submission blocked unless checklist is complete and valid.
 - Repair/attention paths require notes.
 - Submission creates/updates downstream issue and alert records when required.
+- Draft autosave writes must remain scoped to the authenticated user and allowed location.
 
 ### Supervisor/Admin Writes
 - Out-of-scope mutations blocked.

@@ -1701,6 +1701,11 @@ function SupervisorDashboard({ user, isOffline = false }) {
   }, [transports, transportReasonFilter])
 
   const exportToExcel = () => {
+    const sanitizeForExcelCell = (value) => {
+      const text = typeof value === 'string' ? value : String(value ?? '')
+      return /^[=+\-@]/.test(text.trimStart()) ? `'${text}` : text
+    }
+
     const data = filteredTransports.map(t => {
       const destinationsText = t.destinations && t.destinations.length > 0
         ? t.destinations.map((d, i) => {
@@ -1717,18 +1722,18 @@ function SupervisorDashboard({ user, isOffline = false }) {
         : ''
 
       return {
-        'Date': formatDate(t.departedAt),
-        'Departed': formatTime(t.departedAt),
-        'Returned': formatTime(t.returnedAt),
-        'Driver': t.createdByName || '',
-        'Location': t.site || '',
-        'Clients': t.clients?.join(', ') || '',
-        'Reasons': t.reasons?.join(', ') || '',
-        'Destinations': destinationsText,
+        'Date': sanitizeForExcelCell(formatDate(t.departedAt)),
+        'Departed': sanitizeForExcelCell(formatTime(t.departedAt)),
+        'Returned': sanitizeForExcelCell(formatTime(t.returnedAt)),
+        'Driver': sanitizeForExcelCell(t.createdByName || ''),
+        'Location': sanitizeForExcelCell(t.site || ''),
+        'Clients': sanitizeForExcelCell(t.clients?.join(', ') || ''),
+        'Reasons': sanitizeForExcelCell(t.reasons?.join(', ') || ''),
+        'Destinations': sanitizeForExcelCell(destinationsText),
         'Arrivals': t.stops?.length || 0,
-        'Status': t.status || '',
+        'Status': sanitizeForExcelCell(t.status || ''),
         'Overdue': isOverdue(t) ? 'YES' : 'NO',
-        'Notes': t.notes || ''
+        'Notes': sanitizeForExcelCell(t.notes || '')
       }
     })
 
