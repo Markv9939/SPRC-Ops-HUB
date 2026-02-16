@@ -131,6 +131,22 @@ body {
   background: rgba(229,57,53,0.25);
 }
 
+.btn-secondary-action {
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(4px);
+  color: #d8e2ea;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary-action:hover {
+  background: rgba(255,255,255,0.14);
+}
+
 /* --- Glass card --- */
 .glass-card {
   background: var(--card);

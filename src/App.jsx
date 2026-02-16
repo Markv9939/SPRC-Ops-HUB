@@ -8,11 +8,13 @@ import BhtHub from './components/BhtHub'
 import TransportCard from './components/TransportCard'
 import EocChecklist from './components/EocChecklist'
 import SupervisorDashboard from './components/SupervisorDashboard'
+import ChangePinModal from './components/ChangePinModal'
 import ToastHost from './components/ToastHost'
 import DialogHost from './components/DialogHost'
 import { syncEocTasksForUserScope } from './services/eocTaskEngine'
 import { syncDerivedAssignmentForUser } from './services/assignmentService'
 import { refreshScopedSessionUser } from './services/accessGrantService'
+import { changeOwnPin } from './services/userPinService'
 import { getAuthPolicy } from './services/authPolicyService'
 import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
@@ -125,6 +127,7 @@ function App() {
   const [alertCount, setAlertCount] = useState(0)
   const [issueUpdates, setIssueUpdates] = useState([])
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
+  const [isChangePinOpen, setIsChangePinOpen] = useState(false)
 
   useEffect(() => {
     const restoreAlerts = installAlertDialogBridge()
@@ -162,6 +165,21 @@ function App() {
     }
     setPage('home')
     localStorage.setItem('lastActivity', Date.now().toString())
+  }
+
+  const canChangeOwnPin = Boolean(user) && (isBhtRole(user?.role) || isSupervisorRole(user?.role))
+
+  async function handleChangeOwnPin({ currentPin, newPin, confirmPin }) {
+    if (!requireOnline('changing PIN')) {
+      throw new Error('Offline mode: changing PIN is unavailable. Reconnect and retry.')
+    }
+    await changeOwnPin({
+      sessionUser: user,
+      currentPin,
+      newPin,
+      confirmPin
+    })
+    notifySuccess('PIN updated')
   }
 
   const handleLogout = useCallback(async () => {
@@ -550,12 +568,24 @@ function App() {
   if (page === 'transport') {
     return (
       <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
+        <Header
+          userName={user.name}
+          onLogout={handleLogout}
+          onChangePin={() => setIsChangePinOpen(true)}
+          canChangeOwnPin={canChangeOwnPin}
+          alertCount={alertCount}
+          isOffline={isOffline}
+        />
         <TransportCard
           transportId={currentTransportId}
           user={user}
           isOffline={isOffline}
           onClose={handleCloseTransportCard}
+        />
+        <ChangePinModal
+          isOpen={isChangePinOpen}
+          onClose={() => setIsChangePinOpen(false)}
+          onSubmit={handleChangeOwnPin}
         />
         <DialogHost />
         <ToastHost />
@@ -566,13 +596,25 @@ function App() {
   if (page === 'eocForm') {
     return (
       <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
+        <Header
+          userName={user.name}
+          onLogout={handleLogout}
+          onChangePin={() => setIsChangePinOpen(true)}
+          canChangeOwnPin={canChangeOwnPin}
+          alertCount={alertCount}
+          isOffline={isOffline}
+        />
         <EocChecklist
           taskId={currentTaskId}
           user={user}
           isOffline={isOffline}
           onComplete={handleEocComplete}
           onBack={handleEocBack}
+        />
+        <ChangePinModal
+          isOpen={isChangePinOpen}
+          onClose={() => setIsChangePinOpen(false)}
+          onSubmit={handleChangeOwnPin}
         />
         <DialogHost />
         <ToastHost />
@@ -584,13 +626,25 @@ function App() {
   if (isSupervisorRole(user.role) || isAdminRole(user.role)) {
     return (
       <div className="app-bg">
-        <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
+        <Header
+          userName={user.name}
+          onLogout={handleLogout}
+          onChangePin={() => setIsChangePinOpen(true)}
+          canChangeOwnPin={canChangeOwnPin}
+          alertCount={alertCount}
+          isOffline={isOffline}
+        />
         <SupervisorDashboard
           user={user}
           isOffline={isOffline}
           onNewTransport={handleNewTransport}
           onLogout={handleLogout}
           userName={user.name}
+        />
+        <ChangePinModal
+          isOpen={isChangePinOpen}
+          onClose={() => setIsChangePinOpen(false)}
+          onSubmit={handleChangeOwnPin}
         />
         <DialogHost />
         <ToastHost />
@@ -604,7 +658,14 @@ function App() {
       minHeight: '100vh',
       backgroundColor: 'var(--bg)'
     }}>
-      <Header userName={user.name} onLogout={handleLogout} alertCount={alertCount} isOffline={isOffline} />
+      <Header
+        userName={user.name}
+        onLogout={handleLogout}
+        onChangePin={() => setIsChangePinOpen(true)}
+        canChangeOwnPin={canChangeOwnPin}
+        alertCount={alertCount}
+        isOffline={isOffline}
+      />
       <BhtHub
         user={user}
         transports={transports}
@@ -612,6 +673,11 @@ function App() {
         onNewTransport={handleNewTransport}
         onContinueTransport={handleContinueTransport}
         onStartEoc={handleStartEoc}
+      />
+      <ChangePinModal
+        isOpen={isChangePinOpen}
+        onClose={() => setIsChangePinOpen(false)}
+        onSubmit={handleChangeOwnPin}
       />
       <DialogHost />
       <ToastHost />

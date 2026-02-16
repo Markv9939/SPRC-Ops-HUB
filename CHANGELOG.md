@@ -6,6 +6,8 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 ### Added
 - EOC checklist autosave drafts in Firestore (`eocSubmissionDrafts`) with automatic restore on task reopen.
 - EOC draft access controls in Firestore rules, including auth UID ownership checks for draft read/write/delete paths.
+- Self-service PIN rotation UI for BHT and Supervisor users via Header action (`Change PIN`).
+- Dedicated PIN rotation modal and service flow with current-PIN verification before update.
 
 ### Changed
 - EOC checklist completer identity is now read-only and always sourced from the authenticated user.
@@ -15,13 +17,18 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
   - clearer repair-note flow and focus behavior
 - EOC categories no longer auto-collapse and no longer expose manual hide/show toggles.
 - Removed top checklist progress summary strip (`Answered / Repair Items / Remaining / Next required`) on both House and Van EOC forms.
+- Firestore `users` update rules now include a strict self-PIN update path:
+  - requires authenticated identity match (`request.auth.uid == users.authUid`)
+  - limits self-updates to PIN/version/timestamp fields only
+  - keeps existing supervisor/admin managed-user PIN update permissions intact
 
 ### Fixed
 - Resolved EOC submit permission failures caused by draft cleanup edge cases when draft ownership metadata does not match active auth UID.
+- Prevented cross-user PIN change risk on self-service flow by enforcing field-level and identity-level rule checks.
 
 ### Verification
 - `npm run lint` passed.
-- `npm run build` passed.
+- `npm run build` could not complete in sandbox due to local process spawn restriction (`esbuild` `spawn EPERM`).
 
 ### Documentation
 - Rebuilt `plan.md` as a clean V2 Core operating blueprint aligned to current runtime state.

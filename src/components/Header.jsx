@@ -1,4 +1,4 @@
-function Header({ userName, onLogout, alertCount = 0, isOffline = false }) {
+function Header({ userName, onLogout, onChangePin, canChangeOwnPin = false, alertCount = 0, isOffline = false }) {
   return (
     <div className="header">
       <div className="header-brand">
@@ -23,6 +23,11 @@ function Header({ userName, onLogout, alertCount = 0, isOffline = false }) {
           </span>
         )}
         <span className="header-user">{userName}</span>
+        {canChangeOwnPin && (
+          <button className="btn-secondary-action" onClick={onChangePin}>
+            Change PIN
+          </button>
+        )}
         <button className="btn-lock" onClick={onLogout}>
           Lock
         </button>

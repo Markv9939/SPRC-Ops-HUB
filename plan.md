@@ -72,12 +72,17 @@ Auth claim contract (enforced by rules/policy):
   - User profile supports `vanIds[]`.
   - Assignment sync preserves `vanIds[]` and primary `vanId` compatibility.
   - Van EOC picker supports selecting targeted van tasks.
+- Self-service PIN rotation is available from Header (`Change PIN`) for eligible roles.
+  - Requires current PIN + new PIN + confirm PIN.
+  - New PIN must be exactly 4 digits and different from current PIN.
 
 ### 5.3 Supervisor
 - Queue-first operations for issues, overdue tasks, and alerts.
 - Issue lifecycle: `open -> in_progress -> resolved`.
 - Transition notes required on lifecycle actions.
 - Assignment/user management is scope-limited.
+- Supervisors can self-rotate their own PIN from Header.
+- Supervisors retain managed-user PIN reset authority for BHT users in their allowed facility scope.
 
 ### 5.4 Admin
 - Full user lifecycle management.
@@ -105,6 +110,8 @@ Auth claim contract (enforced by rules/policy):
 ### Auth/Policy
 - Claim-enabled role/scope enforcement for protected writes.
 - Unauthorized scope writes must fail server-side.
+- Self-service PIN writes require strict identity match to target user (`users.authUid` vs `request.auth.uid`).
+- Self-service PIN writes are restricted to PIN/version/timestamp fields; profile/role/scope fields are immutable via this path.
 
 ### Transports
 - BHT cannot start second active transport.
@@ -138,6 +145,10 @@ Latest local verification (2026-02-14):
 - `npm run lint`: PASS
 - `npm run smoke:phase9:full`: PASS
 
+Latest local verification (2026-02-16, self-service PIN update):
+- `npm run lint`: PASS
+- `npm run build`: BLOCKED in this environment (`esbuild` `spawn EPERM` during Vite config bundling).
+
 ## 9. Delivery Status
 Completed:
 - Role/scope model in app + Firestore rules.
@@ -147,6 +158,8 @@ Completed:
 - Supervisor issue lifecycle and queue actions.
 - Access grant lifecycle wiring.
 - Multi-van create/edit/save support in supervisor user management.
+- Self-service PIN rotation for BHT/Supervisor with current PIN verification.
+- Firestore strict self-PIN rule path (identity + field-level restrictions) while preserving supervisor/admin managed PIN updates.
 
 In progress:
 - Final UAT signoff capture in `docs/REGRESSION_UAT_PHASE9.md`.

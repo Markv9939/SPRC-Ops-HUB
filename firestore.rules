@@ -216,6 +216,39 @@ service cloud.firestore {
         );
     }
 
+    function roleCanSelfRotatePin(role) {
+      return roleIsBht(role) || role == 'supervisor';
+    }
+
+    function authUidMatchesTargetUser() {
+      return request.auth != null
+        && resource.data.authUid is string
+        && resource.data.authUid.size() > 0
+        && request.auth.uid == resource.data.authUid
+        && (!('authUid' in request.resource.data) || request.resource.data.authUid == resource.data.authUid);
+    }
+
+    function selfPinOnlyMutation() {
+      return request.resource.data
+        .diff(resource.data)
+        .affectedKeys()
+        .hasOnly(['pinHash', 'pinVersion', 'pinUpdatedAt', 'updatedAt', 'version']);
+    }
+
+    function validSelfPinRotateData(data) {
+      return roleCanSelfRotatePin(data.role)
+        && data.active == true
+        && data.pinHash is string
+        && data.pinHash.size() >= 32
+        && (!('pinVersion' in data) || data.pinVersion == 'v1_sha256');
+    }
+
+    function requesterCanSelfRotatePin(data) {
+      return authUidMatchesTargetUser()
+        && selfPinOnlyMutation()
+        && validSelfPinRotateData(data);
+    }
+
     function validAccessGrantWriteData(data) {
       return data.keys().hasAll([
         'userId', 'userName', 'locationId', 'startsAt', 'expiresAt',
@@ -266,7 +299,10 @@ service cloud.firestore {
         && validVersionField(request.resource.data);
 
       allow update: if validUserWriteData(request.resource.data)
-        && requesterCanManageUser(request.resource.data)
+        && (
+          requesterCanManageUser(request.resource.data)
+          || requesterCanSelfRotatePin(request.resource.data)
+        )
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
