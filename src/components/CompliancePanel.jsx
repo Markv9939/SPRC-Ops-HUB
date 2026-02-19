@@ -856,21 +856,23 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
           <div style={{
             width: '100%',
             maxWidth: '620px',
-            borderRadius: '12px',
-            border: '2px solid rgba(229,57,53,0.6)',
-            backgroundColor: 'rgba(12,22,35,0.95)',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.45)',
-            padding: '20px'
+            borderRadius: '14px',
+            border: '1px solid #D8D1C6',
+            backgroundColor: '#FFFFFF',
+            boxShadow: '0 14px 30px rgba(17,47,82,0.16)',
+            padding: '22px'
           }}>
-            <h4 style={{ margin: '0 0 6px 0', color: '#EAF0F6' }}>Add Compliance Item</h4>
+            <h4 style={{ margin: '0 0 6px 0', color: '#1F2C3A', fontSize: '28px', fontWeight: 700 }}>Add Compliance Item</h4>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 style={{
-                  ...btnSecondary,
+                  ...wizardSecondaryButtonStyle,
                   padding: '6px 10px',
                   fontSize: '12px',
-                  backgroundColor: addMode === 'single' ? '#CD4E42' : 'rgba(180,197,215,0.25)'
+                  backgroundColor: addMode === 'single' ? '#CD4E42' : '#F1EFEA',
+                  color: addMode === 'single' ? '#FFFFFF' : '#465367',
+                  border: addMode === 'single' ? 'none' : '1px solid #D8D1C6'
                 }}
                 onClick={() => {
                   resetAddWizard()
@@ -882,10 +884,12 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
               <button
                 type="button"
                 style={{
-                  ...btnSecondary,
+                  ...wizardSecondaryButtonStyle,
                   padding: '6px 10px',
                   fontSize: '12px',
-                  backgroundColor: addMode === 'multi' ? '#CD4E42' : 'rgba(180,197,215,0.25)'
+                  backgroundColor: addMode === 'multi' ? '#CD4E42' : '#F1EFEA',
+                  color: addMode === 'multi' ? '#FFFFFF' : '#465367',
+                  border: addMode === 'multi' ? 'none' : '1px solid #D8D1C6'
                 }}
                 onClick={() => {
                   resetAddWizard()
@@ -895,15 +899,15 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
                 Multiple Items (Employee)
               </button>
             </div>
-            <div style={{ fontSize: '12px', color: '#B8C7D8', marginBottom: '14px' }}>
+            <div style={{ fontSize: '12px', color: '#465367', marginBottom: '14px' }}>
               Step {wizardStep} of {maxWizardStep}
             </div>
 
             {addMode === 'single' && wizardStep === 1 && (
               <div>
-                <label style={darkModalLabelStyle}>Which item are you adding?</label>
+                <label style={lightModalLabelStyle}>Which item are you adding?</label>
                 <select
-                  style={darkModalInputStyle}
+                  style={lightModalInputStyle}
                   value={addDraft.category}
                   onChange={e => setAddDraft(prev => ({
                     ...prev,
@@ -923,9 +927,9 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
 
             {addMode === 'single' && wizardStep === 2 && categoryNeedsEmployee && (
               <div>
-                <label style={darkModalLabelStyle}>Select employee *</label>
+                <label style={lightModalLabelStyle}>Select employee *</label>
                 <select
-                  style={darkModalInputStyle}
+                  style={lightModalInputStyle}
                   value={addDraft.employeeId}
                   onChange={e => setAddDraft(prev => ({ ...prev, employeeId: e.target.value }))}
                 >
@@ -941,9 +945,9 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
 
             {addMode === 'single' && wizardStep === 2 && !categoryNeedsEmployee && (
               <div>
-                <label style={darkModalLabelStyle}>Select location *</label>
+                <label style={lightModalLabelStyle}>Select location *</label>
                 <select
-                  style={darkModalInputStyle}
+                  style={lightModalInputStyle}
                   value={addDraft.locationId}
                   onChange={e => setAddDraft(prev => ({ ...prev, locationId: e.target.value }))}
                 >
@@ -955,9 +959,9 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
 
             {addMode === 'single' && wizardStep === 3 && (
               <div>
-                <label style={darkModalLabelStyle}>Subtype (optional)</label>
+                <label style={lightModalLabelStyle}>Subtype (optional)</label>
                 <input
-                  style={darkModalInputStyle}
+                  style={lightModalInputStyle}
                   value={addDraft.subtype}
                   onChange={e => setAddDraft(prev => ({ ...prev, subtype: e.target.value }))}
                   placeholder="e.g., 90_day"
@@ -967,10 +971,10 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
 
             {addMode === 'single' && wizardStep === 4 && (
               <div>
-                <label style={darkModalLabelStyle}>Last Completed (optional)</label>
+                <label style={lightModalLabelStyle}>Last Completed (optional)</label>
                 <input
                   type="date"
-                  style={darkModalInputStyle}
+                  style={lightModalInputStyle}
                   value={addDraft.lastCompleted}
                   onChange={e => setAddDraft(prev => ({ ...prev, lastCompleted: e.target.value }))}
                 />
@@ -979,10 +983,10 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
 
             {addMode === 'single' && wizardStep === 5 && (
               <div>
-                <label style={darkModalLabelStyle}>Due Date (optional)</label>
+                <label style={lightModalLabelStyle}>Due Date (optional)</label>
                 <input
                   type="date"
-                  style={darkModalInputStyle}
+                  style={lightModalInputStyle}
                   value={addDraft.dueDate}
                   onChange={e => setAddDraft(prev => ({ ...prev, dueDate: e.target.value }))}
                 />
@@ -991,9 +995,9 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
 
             {addMode === 'single' && wizardStep === 6 && (
               <div>
-                <label style={darkModalLabelStyle}>Notes (optional)</label>
+                <label style={lightModalLabelStyle}>Notes (optional)</label>
                 <input
-                  style={darkModalInputStyle}
+                  style={lightModalInputStyle}
                   value={addDraft.notes}
                   onChange={e => setAddDraft(prev => ({ ...prev, notes: e.target.value }))}
                   placeholder="Optional"
@@ -1002,7 +1006,7 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
             )}
 
             {addMode === 'single' && wizardStep === 7 && (
-              <div style={{ display: 'grid', gap: '8px', color: '#d6dbe1', fontSize: '13px' }}>
+              <div style={{ display: 'grid', gap: '8px', color: '#1F2C3A', fontSize: '13px' }}>
                 <div><strong>Category:</strong> {COMPLIANCE_CATEGORIES[addDraft.category]?.label || addDraft.category}</div>
                 <div>
                   <strong>Target:</strong>{' '}
@@ -1018,9 +1022,9 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
             )}
             {addMode === 'multi' && wizardStep === 1 && (
               <div>
-                <label style={darkModalLabelStyle}>Select employee *</label>
+                <label style={lightModalLabelStyle}>Select employee *</label>
                 <select
-                  style={darkModalInputStyle}
+                  style={lightModalInputStyle}
                   value={addDraft.employeeId}
                   onChange={e => setAddDraft(prev => ({ ...prev, employeeId: e.target.value }))}
                 >
@@ -1035,18 +1039,18 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
             )}
             {addMode === 'multi' && wizardStep === 2 && (
               <div>
-                <label style={darkModalLabelStyle}>Select compliance items *</label>
+                <label style={lightModalLabelStyle}>Select compliance items *</label>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
                   <button
                     type="button"
-                    style={{ ...btnCancel, padding: '6px 10px', fontSize: '12px' }}
+                    style={{ ...wizardSecondaryButtonStyle, padding: '6px 10px', fontSize: '12px' }}
                     onClick={() => setAddDraft(prev => ({ ...prev, selectedCategories: [...EMPLOYEE_CATEGORY_KEYS] }))}
                   >
                     Select All
                   </button>
                   <button
                     type="button"
-                    style={{ ...btnCancel, padding: '6px 10px', fontSize: '12px' }}
+                    style={{ ...wizardSecondaryButtonStyle, padding: '6px 10px', fontSize: '12px' }}
                     onClick={() => setAddDraft(prev => ({ ...prev, selectedCategories: [] }))}
                   >
                     Clear All
@@ -1060,7 +1064,7 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
                         display: 'flex',
                         alignItems: 'center',
                         gap: '8px',
-                        border: '1px solid rgba(180,197,215,0.28)',
+                        border: '1px solid #D8D1C6',
                         borderRadius: '8px',
                         padding: '8px'
                       }}
@@ -1070,7 +1074,7 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
                         checked={addDraft.selectedCategories.includes(key)}
                         onChange={() => toggleBulkCategory(key)}
                       />
-                      <span style={{ color: '#EAF0F6', fontSize: '13px' }}>
+                      <span style={{ color: '#1F2C3A', fontSize: '13px' }}>
                         {COMPLIANCE_CATEGORIES[key].icon} {COMPLIANCE_CATEGORIES[key].label}
                       </span>
                     </label>
@@ -1081,36 +1085,36 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
             {addMode === 'multi' && wizardStep === 3 && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
                 <div>
-                  <label style={darkModalLabelStyle}>Subtype (optional)</label>
+                  <label style={lightModalLabelStyle}>Subtype (optional)</label>
                   <input
-                    style={darkModalInputStyle}
+                    style={lightModalInputStyle}
                     value={addDraft.subtype}
                     onChange={e => setAddDraft(prev => ({ ...prev, subtype: e.target.value }))}
                     placeholder="e.g., 90_day"
                   />
                 </div>
                 <div>
-                  <label style={darkModalLabelStyle}>Last Completed (optional)</label>
+                  <label style={lightModalLabelStyle}>Last Completed (optional)</label>
                   <input
                     type="date"
-                    style={darkModalInputStyle}
+                    style={lightModalInputStyle}
                     value={addDraft.lastCompleted}
                     onChange={e => setAddDraft(prev => ({ ...prev, lastCompleted: e.target.value }))}
                   />
                 </div>
                 <div>
-                  <label style={darkModalLabelStyle}>Due Date (optional)</label>
+                  <label style={lightModalLabelStyle}>Due Date (optional)</label>
                   <input
                     type="date"
-                    style={darkModalInputStyle}
+                    style={lightModalInputStyle}
                     value={addDraft.dueDate}
                     onChange={e => setAddDraft(prev => ({ ...prev, dueDate: e.target.value }))}
                   />
                 </div>
                 <div>
-                  <label style={darkModalLabelStyle}>Notes (optional)</label>
+                  <label style={lightModalLabelStyle}>Notes (optional)</label>
                   <input
-                    style={darkModalInputStyle}
+                    style={lightModalInputStyle}
                     value={addDraft.notes}
                     onChange={e => setAddDraft(prev => ({ ...prev, notes: e.target.value }))}
                     placeholder="Optional"
@@ -1119,7 +1123,7 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
               </div>
             )}
             {addMode === 'multi' && wizardStep === 4 && (
-              <div style={{ display: 'grid', gap: '8px', color: '#d6dbe1', fontSize: '13px' }}>
+              <div style={{ display: 'grid', gap: '8px', color: '#1F2C3A', fontSize: '13px' }}>
                 <div><strong>Employee:</strong> {employeeMap[addDraft.employeeId]?.name || 'Not selected'}</div>
                 <div><strong>Items Selected:</strong> {addDraft.selectedCategories.length}</div>
                 {addDraft.selectedCategories.length > 0 && (
@@ -1133,11 +1137,11 @@ function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '18px' }}>
-              <button onClick={closeAddWizard} style={btnCancel}>Cancel</button>
+              <button onClick={closeAddWizard} style={wizardSecondaryButtonStyle}>Cancel</button>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   onClick={() => setWizardStep(prev => Math.max(1, prev - 1))}
-                  style={btnCancel}
+                  style={wizardSecondaryButtonStyle}
                   disabled={wizardStep === 1}
                 >
                   Back
