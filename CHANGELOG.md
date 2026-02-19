@@ -8,6 +8,8 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - EOC draft access controls in Firestore rules, including auth UID ownership checks for draft read/write/delete paths.
 - Self-service PIN rotation UI for BHT and Supervisor users via Header action (`Change PIN`).
 - Dedicated PIN rotation modal and service flow with current-PIN verification before update.
+- Shared modal foundation for app dialogs (`AppModal`, `modalStyles`) to keep overlay/card/button contrast consistent.
+- Dashboard compliance queue `Quick Update` action for inline due-date resolution directly from warning cards (overdue + due soon), including audit logging.
 
 ### Changed
 - EOC checklist completer identity is now read-only and always sourced from the authenticated user.
@@ -23,14 +25,25 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
   - keeps existing supervisor/admin managed-user PIN update permissions intact
 - Global UI token/theme layer in `src/index.css` aligned to healthcare-focused brand direction (deep navy, terracotta, warm neutral backgrounds) while preserving existing layout and workflows.
 - Restored warm-neutral app background direction and replaced legacy hardcoded inline dark-theme color literals across major components with readable semantic contrast values.
+- EOC task engine now scopes Van EOC eligibility per van assignment (house remains location+shift scoped), preventing cross-van task visibility for BHTs.
+- PIN login now applies bounded timeout guards to critical auth/data fetch steps so the login button does not remain indefinitely on `Checking...` when backend requests hang.
+- Transport reminder popup (`REMIND THE CLIENT ABOUT DC PAPERWORK`) now uses the same high-contrast modal pattern as other updated dialogs.
+- Compliance warning queue action buttons now use high-contrast neutral styling for readable text on tinted warning cards.
 
 ### Fixed
 - Resolved EOC submit permission failures caused by draft cleanup edge cases when draft ownership metadata does not match active auth UID.
 - Prevented cross-user PIN change risk on self-service flow by enforcing field-level and identity-level rule checks.
+- Fixed BHT Hub showing unassigned van EOCs (example: Van 4 appearing for a Van 2-only assignment) by aligning task generation and client filtering with canonical `vanIds`.
+- Fixed stuck login UX where PIN submit could appear frozen on `Checking...` under degraded connectivity/backend request hangs.
+- Fixed low-contrast text on transport reminder modal cancel action.
+- Fixed low-contrast `Open Compliance Tab` button text on compliance warning cards.
 
 ### Verification
 - `npm run lint` passed.
 - `npm run build` passed.
+- `npm run build` passed after van-scope + login-timeout updates (2026-02-19).
+- `npm run build` passed after modal consistency + compliance warning quick-update changes (2026-02-19).
+- Firebase Hosting deploy passed to `sprc-tx-l` after dashboard warning workflow updates (2026-02-19).
 
 ### Documentation
 - Rebuilt `plan.md` as a clean V2 Core operating blueprint aligned to current runtime state.
@@ -40,6 +53,7 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - Updated `README.md` with daily logical-batch deploy/testing workflow and hosting standard.
 - Updated `docs/CUTOVER_RUNBOOK.md` with repeatable per-batch deploy + mobile validation steps.
 - Updated `docs/REGRESSION_UAT_PHASE9.md` with explicit iPhone/iPad validation checklist rows.
+- Updated `README.md`, `plan.md`, and `docs/REGRESSION_UAT_PHASE9.md` to document warning-card quick resolution flow and visibility/contrast fixes.
 
 ## [2026-02-13]
 ### Added

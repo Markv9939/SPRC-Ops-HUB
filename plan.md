@@ -1,6 +1,6 @@
 # SPRC Ops Hub Blueprint (V2 Core)
 
-Last updated: 2026-02-17
+Last updated: 2026-02-19
 Status: Active
 Primary owner: Product + Engineering
 
@@ -78,6 +78,7 @@ Auth claim contract (enforced by rules/policy):
 - PIN storage is hashed (`pinHash`), no plaintext authority.
 - Lockout after repeated failed attempts.
 - Login session validates claim/role/scope compatibility.
+- Login network/auth steps use explicit timeout guards so degraded backend calls fail with actionable error text instead of indefinite `Checking...` state.
 
 ### 5.2 BHT
 - One active transport max per BHT (`open|arrived`).
@@ -94,6 +95,8 @@ Auth claim contract (enforced by rules/policy):
   - User profile supports `vanIds[]`.
   - Assignment sync preserves `vanIds[]` and primary `vanId` compatibility.
   - Van EOC picker supports selecting targeted van tasks.
+  - Van EOC visibility is constrained to vans the BHT is actually assigned to (`vanIds`) for the active scope.
+  - House EOC remains shared per location+shift.
 - Self-service PIN rotation is available from Header (`Change PIN`) for eligible roles.
   - Requires current PIN + new PIN + confirm PIN.
   - New PIN must be exactly 4 digits and different from current PIN.
@@ -105,6 +108,10 @@ Auth claim contract (enforced by rules/policy):
 - Assignment/user management is scope-limited.
 - Supervisors can self-rotate their own PIN from Header.
 - Supervisors retain managed-user PIN reset authority for BHT users in their allowed facility scope.
+- Compliance warnings in dashboard queues can be resolved inline without tab switching:
+  - `Quick Update` on warning cards updates `lastCompleted`, `dueDate`, and `notes`
+  - due date is required for quick resolution
+  - update writes generate audit log entries for traceability
 
 ### 5.4 Admin
 - Full user lifecycle management.
@@ -185,6 +192,10 @@ Completed:
 - Master-instruction alignment baseline added (`docs/PROJECT_ALIGNMENT.md`) with explicit project exceptions and workflow contract.
 - Project-local session/startup instruction contract added (`PROJECT_INSTRUCTIONS.md`).
 - UI token layer aligned to healthcare palette direction in `src/index.css` while preserving existing workflow behavior.
+- Van EOC task eligibility corrected to per-van assignee scope, including stale in-scope task deactivation for no-longer-desired pending/overdue rows.
+- PIN login resilience updated with timeout-bounded auth/policy/scope lookup to prevent frozen `Checking...` UX.
+- Shared modal styling primitives added and applied to transport reminder + dialog surfaces to enforce readable contrast consistency.
+- Compliance warning queue actions now include inline quick-update workflow so overdue/due-soon items can be handled directly from dashboard warning cards.
 
 In progress:
 - Final UAT signoff capture in `docs/REGRESSION_UAT_PHASE9.md`.

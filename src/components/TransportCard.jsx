@@ -4,8 +4,10 @@ import { doc, getDoc, updateDoc, serverTimestamp, setDoc, increment } from 'fire
 import DCPaperworkModal from './DCCheckModal'
 import ClientAutocomplete from './ClientAutocomplete'
 import DestinationAutocomplete from './DestinationAutocomplete'
+import AppModal from './AppModal'
 import { requireOnline } from '../utils/networkGuard'
 import { notifySuccess } from '../utils/toast'
+import { MODAL_CANCEL_BUTTON_STYLE } from './modalStyles'
 
 function TransportCard({ transportId, onClose, isOffline = false }) {
   const [loading, setLoading] = useState(true)
@@ -410,74 +412,38 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
       )}
 
       {/* Arrive DC Reminder Modal */}
-      {showArriveReminder && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '20px'
-        }}>
-          <div style={{
-            backgroundColor: '#1a2332',
-            borderRadius: '16px',
-            padding: '24px',
-            maxWidth: '400px',
-            width: '100%',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
-            border: '1px solid rgba(229,57,53,0.3)'
-          }}>
-            <h2 style={{
-              margin: '0 0 24px 0',
-              fontSize: '20px',
-              color: '#CD4E42',
-              textAlign: 'center'
-            }}>
-              REMIND THE CLIENT ABOUT DC PAPERWORK
-            </h2>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => setShowArriveReminder(false)}
-                style={{
-                  flex: 1,
-                  padding: '14px',
-                  backgroundColor: 'rgba(17,47,82,0.10)',
-                  color: 'var(--text-secondary)',
-                  border: 'none',
-                  borderRadius: '10px',
-                  fontSize: '16px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleArriveConfirm}
-                style={{
-                  flex: 1,
-                  padding: '14px',
-                  backgroundColor: '#CD4E42',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '10px',
-                  fontSize: '16px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer'
-                }}
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AppModal
+        isOpen={showArriveReminder}
+        title="REMIND THE CLIENT ABOUT DC PAPERWORK"
+        tone="danger"
+        maxWidth="430px"
+        footer={(
+          <>
+            <button
+              onClick={() => setShowArriveReminder(false)}
+              style={MODAL_CANCEL_BUTTON_STYLE}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleArriveConfirm}
+              style={{
+                flex: 1,
+                padding: '12px 14px',
+                backgroundColor: '#CD4E42',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '15px',
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+            >
+              OK
+            </button>
+          </>
+        )}
+      />
 
       {/* DC Paperwork Modal */}
       {showDCPaperwork && (

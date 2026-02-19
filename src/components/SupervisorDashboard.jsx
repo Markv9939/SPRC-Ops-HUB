@@ -104,6 +104,13 @@ function getComplianceItemDueMs(item) {
   return Number.isFinite(ms) ? ms : Number.POSITIVE_INFINITY
 }
 
+function tsToInputDate(ts) {
+  if (!ts) return ''
+  const dateValue = ts?.toDate ? ts.toDate() : new Date(ts)
+  if (Number.isNaN(dateValue.getTime())) return ''
+  return dateValue.toISOString().split('T')[0]
+}
+
 function normalizeVanIdList(values, fallbackVanId = '') {
   const base = Array.isArray(values) ? values : []
   const normalized = base
@@ -153,6 +160,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const [overdueTaskActionMode, setOverdueTaskActionMode] = useState(null)
   const [overdueTaskActionReason, setOverdueTaskActionReason] = useState('')
   const [overdueTaskActionSubmitting, setOverdueTaskActionSubmitting] = useState(false)
+  const [complianceQuickEditId, setComplianceQuickEditId] = useState(null)
+  const [complianceQuickEditForm, setComplianceQuickEditForm] = useState({
+    lastCompleted: '',
+    dueDate: '',
+    notes: ''
+  })
+  const [complianceQuickEditSaving, setComplianceQuickEditSaving] = useState(false)
 
   // Compliance dashboard summary
   const [complianceItems, setComplianceItems] = useState([])
@@ -274,6 +288,17 @@ function SupervisorDashboard({ user, isOffline = false }) {
     setOverdueTaskActionMode(null)
     setOverdueTaskActionReason('')
     setOverdueTaskActionSubmitting(false)
+  }, [queueView])
+
+  useEffect(() => {
+    if (queueView === 'overdue' || queueView === 'compliance_upcoming') return
+    setComplianceQuickEditId(null)
+    setComplianceQuickEditForm({
+      lastCompleted: '',
+      dueDate: '',
+      notes: ''
+    })
+    setComplianceQuickEditSaving(false)
   }, [queueView])
 
   // Real-time EOC issues + overdue tasks for dashboard summary
@@ -1332,6 +1357,73 @@ function SupervisorDashboard({ user, isOffline = false }) {
     }
 
     setOverdueTaskActionSubmitting(false)
+  }
+
+  const openComplianceQuickEdit = (item) => {
+    setComplianceQuickEditId(item.id)
+    setComplianceQuickEditForm({
+      lastCompleted: tsToInputDate(item.lastCompleted),
+      dueDate: tsToInputDate(item.dueDate),
+      notes: String(item.notes || '')
+    })
+    setComplianceQuickEditSaving(false)
+  }
+
+  const cancelComplianceQuickEdit = () => {
+    setComplianceQuickEditId(null)
+    setComplianceQuickEditForm({
+      lastCompleted: '',
+      dueDate: '',
+      notes: ''
+    })
+    setComplianceQuickEditSaving(false)
+  }
+
+  const handleComplianceQuickSave = async (item) => {
+    if (blockIfOffline('updating compliance items')) return
+    if (!item?.id) return
+
+    const dueDateValue = String(complianceQuickEditForm.dueDate || '').trim()
+    if (!dueDateValue) {
+      alert('Next due date is required.')
+      return
+    }
+
+    const dueDate = new Date(dueDateValue)
+    if (Number.isNaN(dueDate.getTime())) {
+      alert('Enter a valid next due date.')
+      return
+    }
+
+    setComplianceQuickEditSaving(true)
+    try {
+      const updates = { updatedAt: serverTimestamp() }
+      updates.lastCompleted = complianceQuickEditForm.lastCompleted
+        ? Timestamp.fromDate(new Date(complianceQuickEditForm.lastCompleted))
+        : null
+      updates.dueDate = Timestamp.fromDate(dueDate)
+      updates.notes = String(complianceQuickEditForm.notes || '').trim()
+
+      await updateDoc(doc(db, 'complianceItems', item.id), updates)
+      await writeAuditLog({
+        action: 'compliance_item_quick_update',
+        collectionPath: 'complianceItems',
+        documentId: item.id,
+        reason: 'Updated directly from dashboard warning card.',
+        extra: {
+          category: String(item.category || ''),
+          employeeName: String(item.employeeName || ''),
+          site: String(getComplianceItemSite(item) || ''),
+          dueDate: dueDateValue
+        }
+      })
+      notifySuccess('Compliance item updated')
+      cancelComplianceQuickEdit()
+    } catch (error) {
+      console.error('Failed to update compliance item from warning card:', error)
+      alert(error?.message || 'Failed to update compliance item.')
+      setComplianceQuickEditSaving(false)
+    }
   }
 
   const toDateInputValue = (value) => {
@@ -2563,21 +2655,130 @@ function SupervisorDashboard({ user, isOffline = false }) {
                         Notes: {item.notes}
                       </div>
                     )}
-                    <button
-                      onClick={() => setActiveTab('compliance')}
-                      style={{
-                        padding: '6px 14px',
-                        backgroundColor: 'rgba(244,67,54,0.16)',
-                        color: '#ffcdd2',
-                        border: '1px solid rgba(244,67,54,0.35)',
-                        borderRadius: '6px',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Open Compliance Tab
-                    </button>
+                    {complianceQuickEditId === item.id ? (
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(150px, 1fr))',
+                        gap: '8px',
+                        marginTop: '8px'
+                      }}>
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#556677', display: 'block', marginBottom: '4px' }}>Last Completed</label>
+                          <input
+                            type="date"
+                            value={complianceQuickEditForm.lastCompleted}
+                            onChange={(event) => setComplianceQuickEditForm(prev => ({ ...prev, lastCompleted: event.target.value }))}
+                            style={{
+                              width: '100%',
+                              padding: '8px',
+                              border: '1px solid #C9D3DD',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#556677', display: 'block', marginBottom: '4px' }}>Next Due Date *</label>
+                          <input
+                            type="date"
+                            value={complianceQuickEditForm.dueDate}
+                            onChange={(event) => setComplianceQuickEditForm(prev => ({ ...prev, dueDate: event.target.value }))}
+                            style={{
+                              width: '100%',
+                              padding: '8px',
+                              border: '1px solid #C9D3DD',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#556677', display: 'block', marginBottom: '4px' }}>Notes</label>
+                          <input
+                            value={complianceQuickEditForm.notes}
+                            onChange={(event) => setComplianceQuickEditForm(prev => ({ ...prev, notes: event.target.value }))}
+                            placeholder="Optional"
+                            style={{
+                              width: '100%',
+                              padding: '8px',
+                              border: '1px solid #C9D3DD',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => handleComplianceQuickSave(item)}
+                            disabled={complianceQuickEditSaving}
+                            style={{
+                              padding: '6px 14px',
+                              backgroundColor: complianceQuickEditSaving ? '#E6E9ED' : '#2F7D57',
+                              color: complianceQuickEditSaving ? '#7A8795' : '#FFFFFF',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              fontWeight: 700,
+                              cursor: complianceQuickEditSaving ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            {complianceQuickEditSaving ? 'Saving...' : 'Save Update'}
+                          </button>
+                          <button
+                            onClick={cancelComplianceQuickEdit}
+                            disabled={complianceQuickEditSaving}
+                            style={{
+                              padding: '6px 14px',
+                              backgroundColor: '#F1EFEA',
+                              color: '#1F3A52',
+                              border: '1px solid #C9D3DD',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              fontWeight: 700,
+                              cursor: complianceQuickEditSaving ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={() => openComplianceQuickEdit(item)}
+                          style={{
+                            padding: '6px 14px',
+                            backgroundColor: '#2F7D57',
+                            color: '#FFFFFF',
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Quick Update
+                        </button>
+                        <button
+                          onClick={() => setActiveTab('compliance')}
+                          style={{
+                            padding: '6px 14px',
+                            backgroundColor: '#F1EFEA',
+                            color: '#1F3A52',
+                            border: '1px solid #C9D3DD',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Open Compliance Tab
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
 
@@ -2614,21 +2815,130 @@ function SupervisorDashboard({ user, isOffline = false }) {
                         Notes: {item.notes}
                       </div>
                     )}
-                    <button
-                      onClick={() => setActiveTab('compliance')}
-                      style={{
-                        padding: '6px 14px',
-                        backgroundColor: 'rgba(76,175,80,0.16)',
-                        color: '#c8e6c9',
-                        border: '1px solid rgba(76,175,80,0.35)',
-                        borderRadius: '6px',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Open Compliance Tab
-                    </button>
+                    {complianceQuickEditId === item.id ? (
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(150px, 1fr))',
+                        gap: '8px',
+                        marginTop: '8px'
+                      }}>
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#556677', display: 'block', marginBottom: '4px' }}>Last Completed</label>
+                          <input
+                            type="date"
+                            value={complianceQuickEditForm.lastCompleted}
+                            onChange={(event) => setComplianceQuickEditForm(prev => ({ ...prev, lastCompleted: event.target.value }))}
+                            style={{
+                              width: '100%',
+                              padding: '8px',
+                              border: '1px solid #C9D3DD',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#556677', display: 'block', marginBottom: '4px' }}>Next Due Date *</label>
+                          <input
+                            type="date"
+                            value={complianceQuickEditForm.dueDate}
+                            onChange={(event) => setComplianceQuickEditForm(prev => ({ ...prev, dueDate: event.target.value }))}
+                            style={{
+                              width: '100%',
+                              padding: '8px',
+                              border: '1px solid #C9D3DD',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#556677', display: 'block', marginBottom: '4px' }}>Notes</label>
+                          <input
+                            value={complianceQuickEditForm.notes}
+                            onChange={(event) => setComplianceQuickEditForm(prev => ({ ...prev, notes: event.target.value }))}
+                            placeholder="Optional"
+                            style={{
+                              width: '100%',
+                              padding: '8px',
+                              border: '1px solid #C9D3DD',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => handleComplianceQuickSave(item)}
+                            disabled={complianceQuickEditSaving}
+                            style={{
+                              padding: '6px 14px',
+                              backgroundColor: complianceQuickEditSaving ? '#E6E9ED' : '#2F7D57',
+                              color: complianceQuickEditSaving ? '#7A8795' : '#FFFFFF',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              fontWeight: 700,
+                              cursor: complianceQuickEditSaving ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            {complianceQuickEditSaving ? 'Saving...' : 'Save Update'}
+                          </button>
+                          <button
+                            onClick={cancelComplianceQuickEdit}
+                            disabled={complianceQuickEditSaving}
+                            style={{
+                              padding: '6px 14px',
+                              backgroundColor: '#F1EFEA',
+                              color: '#1F3A52',
+                              border: '1px solid #C9D3DD',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              fontWeight: 700,
+                              cursor: complianceQuickEditSaving ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={() => openComplianceQuickEdit(item)}
+                          style={{
+                            padding: '6px 14px',
+                            backgroundColor: '#2F7D57',
+                            color: '#FFFFFF',
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Quick Update
+                        </button>
+                        <button
+                          onClick={() => setActiveTab('compliance')}
+                          style={{
+                            padding: '6px 14px',
+                            backgroundColor: '#F1EFEA',
+                            color: '#1F3A52',
+                            border: '1px solid #C9D3DD',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Open Compliance Tab
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
 

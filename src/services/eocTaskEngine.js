@@ -108,7 +108,7 @@ function buildDesiredTasks(assignments) {
       dueDate: getCurrentCycleDueDate(shift),
       eligibleUserIds: [],
       eligibleUserNames: [],
-      vanIds: []
+      vanAssigneesByVanId: new Map()
     }
 
     if (assignment.bhtUserId) {
@@ -117,7 +117,17 @@ function buildDesiredTasks(assignments) {
     if (assignment.bhtUserName) {
       existingGroup.eligibleUserNames.push(assignment.bhtUserName)
     }
-    existingGroup.vanIds.push(...assignment.vanIds)
+
+    for (const vanId of assignment.vanIds) {
+      const vanAssignees = existingGroup.vanAssigneesByVanId.get(vanId) || {
+        eligibleUserIds: [],
+        eligibleUserNames: []
+      }
+      if (assignment.bhtUserId) vanAssignees.eligibleUserIds.push(assignment.bhtUserId)
+      if (assignment.bhtUserName) vanAssignees.eligibleUserNames.push(assignment.bhtUserName)
+      existingGroup.vanAssigneesByVanId.set(vanId, vanAssignees)
+    }
+
     groups.set(groupKey, existingGroup)
   }
 
@@ -125,13 +135,19 @@ function buildDesiredTasks(assignments) {
   for (const group of groups.values()) {
     group.eligibleUserIds = sortUnique(group.eligibleUserIds)
     group.eligibleUserNames = sortUnique(group.eligibleUserNames)
-    group.vanIds = sortUnique(group.vanIds)
     if (group.eligibleUserIds.length === 0) continue
 
     tasks.push(createTaskRecord(group, 'house'))
 
-    for (const vanId of group.vanIds) {
-      tasks.push(createTaskRecord(group, 'van', vanId))
+    for (const [vanId, vanAssignees] of group.vanAssigneesByVanId.entries()) {
+      const eligibleUserIds = sortUnique(vanAssignees.eligibleUserIds)
+      if (eligibleUserIds.length === 0) continue
+      const eligibleUserNames = sortUnique(vanAssignees.eligibleUserNames)
+      tasks.push(createTaskRecord({
+        ...group,
+        eligibleUserIds,
+        eligibleUserNames
+      }, 'van', vanId))
     }
   }
 
@@ -191,6 +207,7 @@ export async function syncEocTasksForUserScope(user) {
     .filter(assignment => scopedGroupKeys.has(buildGroupKey(assignment.locationId, assignment.shiftId)))
 
   const desiredTasks = buildDesiredTasks(assignmentsForScope)
+  const desiredTaskIds = new Set(desiredTasks.map(task => task.cycleKey))
   const batch = writeBatch(db)
   const touched = new Set()
 
@@ -259,7 +276,25 @@ export async function syncEocTasksForUserScope(user) {
     }
   }
 
+  // Deactivate stale actionable tasks in scope so old van membership does not linger.
   const pendingSnap = await getDocs(query(collection(db, 'eocTasks'), where('status', '==', 'pending')))
+  const overdueSnap = await getDocs(query(collection(db, 'eocTasks'), where('status', '==', 'overdue')))
+  const staleActionableDocs = [...pendingSnap.docs, ...overdueSnap.docs]
+  for (const taskDoc of staleActionableDocs) {
+    const data = taskDoc.data()
+    if (!taskInScope(data, scopedGroupKeys)) continue
+    if (desiredTaskIds.has(taskDoc.id)) continue
+
+    batch.update(taskDoc.ref, {
+      active: false,
+      status: 'ignored',
+      version: getVersionNumber(data) + 1,
+      updatedAt: serverTimestamp()
+    })
+    touched.add(taskDoc.id)
+    updated += 1
+  }
+
   for (const taskDoc of pendingSnap.docs) {
     const data = taskDoc.data()
     if (!taskInScope(data, scopedGroupKeys)) continue

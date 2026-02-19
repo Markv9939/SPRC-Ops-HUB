@@ -1,6 +1,6 @@
 # Phase 9 Regression + UAT Checklist
 
-Last updated: 2026-02-17
+Last updated: 2026-02-19
 Owner: Claude Code (engineering run) + Admin/Supervisor (business signoff)
 
 ## Automated Smoke Checks
@@ -74,6 +74,9 @@ Walkthrough script:
 | DI-5 | Data Integrity | Offline mode write attempt | Writes are blocked with explicit offline feedback | PENDING | Network-off scenario |
 | SC-1 | Scheduler | Sync run with configured due rules | Correct tasks created for assignment scope | PENDING | Requires seeded scenario |
 | SC-2 | Scheduler | Re-run same cycle | No duplicate cycle task creation | PENDING | Determinism check |
+| SC-3 | Scheduler | Van-scoped eligibility (same location+shift, different van assignments) | BHT only sees Van EOC tasks for assigned `vanIds`; unassigned vans do not appear | PENDING | Validate with two BHT users in same shift with different van assignments |
+| SC-4 | Scheduler | Stale van task cleanup after reassignment | Pending/overdue van tasks no longer in desired scope are deactivated (`ignored`) | PENDING | Reassign van mid-cycle and verify old task no longer shows in BHT Hub |
+| AU-1 | Auth/Login | Degraded connectivity/backend request hang during PIN submit | Login exits `Checking...` with clear timeout error and allows retry | PENDING | iPhone + iPad retry test |
 
 ## Mobile/Tablet Validation Checklist (Required Per Deploy Batch)
 
@@ -88,6 +91,10 @@ Status legend: `PASS`, `FAIL`, `PENDING`
 | MT-5 | iPad (landscape) | Dashboard and queue layout | No horizontal overflow or hidden controls | PENDING | |
 | MT-6 | iPhone/iPad | Input focus + keyboard | Focus is clear; keyboard does not block required fields/actions | PENDING | |
 | MT-7 | iPhone/iPad | Status chips/badges | Status colors are visually distinct and understandable | PENDING | |
+| MT-8 | iPhone/iPad | PIN login timeout handling | `Checking...` does not freeze indefinitely; timeout message appears and button recovers | PENDING | |
+| MT-9 | iPhone/iPad | Transport ARRIVE reminder modal readability | `Cancel` and `OK` are clearly readable with high contrast on modal background | PENDING | Deployed 2026-02-19 to `sprc-tx-l`; awaiting owner device validation |
+| MT-10 | iPhone/iPad | Compliance warning card action readability | `Open Compliance Tab` and `Quick Update` buttons remain readable on overdue/upcoming tinted cards | PENDING | Deployed 2026-02-19 to `sprc-tx-l`; awaiting owner device validation |
+| MT-11 | iPhone/iPad | Compliance quick update from warning card | User can update `Next Due Date` inline; item status updates without opening Compliance tab | PENDING | Deployed 2026-02-19 to `sprc-tx-l`; awaiting owner workflow validation |
 
 ## Signoff
 

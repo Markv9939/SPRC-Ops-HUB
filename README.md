@@ -18,6 +18,17 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - House/Van EOC sections stay expanded (no collapse/hide toggles).
 - Keyboard flow supports rapid answering (`1` = OK, `2` = Repair, `Enter` = next unresolved).
 - Sticky bottom actions keep `Next Unanswered` and `Submit EOC` accessible on mobile and desktop.
+- Van EOC visibility is constrained to each BHT's assigned van list (`vanIds`); house EOC stays location+shift scoped.
+
+## Recent Login Behavior (Current)
+- PIN login includes timeout guards on backend/auth lookups so degraded connectivity fails with a clear error instead of staying on `Checking...`.
+
+## Recent Dashboard/Modal Behavior (Current)
+- Compliance warning cards (`Overdue Tasks`, `Upcoming Compliance`) now support direct inline resolution via `Quick Update`:
+  - edit `Last Completed`, `Next Due Date`, and `Notes` directly from the warning card
+  - save writes to `complianceItems` and records an audit log entry
+- `Open Compliance Tab` buttons in compliance warning cards use contrast-safe styling for readability on tinted cards.
+- Transport reminder dialog (`REMIND THE CLIENT ABOUT DC PAPERWORK`) now uses the same shared high-contrast modal style as other app dialogs.
 
 ## Source of Truth
 - Blueprint: `plan.md`

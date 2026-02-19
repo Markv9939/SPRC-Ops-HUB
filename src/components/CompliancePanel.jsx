@@ -88,6 +88,40 @@ const btnCancel = {
 }
 
 const labelStyle = { fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }
+const darkModalLabelStyle = { fontSize: '12px', color: '#B8C7D8', display: 'block', marginBottom: '4px' }
+const darkModalInputStyle = {
+  ...inputStyle,
+  border: '2px solid rgba(180,197,215,0.28)',
+  backgroundColor: 'rgba(255,255,255,0.08)',
+  color: '#EAF0F6'
+}
+const lightModalLabelStyle = { fontSize: '12px', color: '#465367', display: 'block', marginBottom: '6px' }
+const lightModalInputStyle = {
+  ...inputStyle,
+  border: '1px solid #C9D3DD',
+  backgroundColor: '#FFFFFF',
+  color: '#1F2C3A'
+}
+const wizardPrimaryButtonStyle = {
+  padding: '10px 18px',
+  backgroundColor: '#2F7D57',
+  color: '#FFFFFF',
+  border: 'none',
+  borderRadius: '10px',
+  fontSize: '14px',
+  fontWeight: 700,
+  cursor: 'pointer'
+}
+const wizardSecondaryButtonStyle = {
+  padding: '10px 18px',
+  backgroundColor: '#F1EFEA',
+  color: '#465367',
+  border: '1px solid #D8D1C6',
+  borderRadius: '10px',
+  fontSize: '14px',
+  fontWeight: 700,
+  cursor: 'pointer'
+}
 
 function formatDateShort(ts) {
   if (!ts) return '--'
@@ -242,22 +276,22 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
           <div style={{
             width: '100%',
             maxWidth: '540px',
-            borderRadius: '12px',
-            border: '2px solid rgba(229,57,53,0.6)',
-            backgroundColor: 'rgba(12,22,35,0.95)',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.45)',
-            padding: '20px'
+            borderRadius: '14px',
+            border: '1px solid #D8D1C6',
+            backgroundColor: '#FFFFFF',
+            boxShadow: '0 14px 30px rgba(17,47,82,0.16)',
+            padding: '22px'
           }}>
-            <h4 style={{ margin: '0 0 6px 0', color: 'var(--text-primary)' }}>Add Employee</h4>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
+            <h4 style={{ margin: '0 0 6px 0', color: '#1F2C3A', fontSize: '28px', fontWeight: 700 }}>Add Employee</h4>
+            <div style={{ fontSize: '12px', color: '#465367', marginBottom: '16px' }}>
               Step {addWizardStep} of {maxAddWizardStep}
             </div>
 
             {addWizardStep === 1 && (
               <div>
-                <label style={labelStyle}>Employee name *</label>
+                <label style={lightModalLabelStyle}>Employee name *</label>
                 <input
-                  style={inputStyle}
+                  style={lightModalInputStyle}
                   value={addDraft.name}
                   onChange={e => setAddDraft(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="Full Name"
@@ -267,9 +301,9 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
 
             {addWizardStep === 2 && (
               <div>
-                <label style={labelStyle}>Location *</label>
+                <label style={lightModalLabelStyle}>Location *</label>
                 <select
-                  style={inputStyle}
+                  style={lightModalInputStyle}
                   value={addDraft.site}
                   onChange={e => setAddDraft(prev => ({ ...prev, site: e.target.value }))}
                 >
@@ -287,11 +321,11 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '18px' }}>
-              <button onClick={closeAddWizard} style={btnCancel}>Cancel</button>
+              <button onClick={closeAddWizard} style={wizardSecondaryButtonStyle}>Cancel</button>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   onClick={() => setAddWizardStep(prev => Math.max(1, prev - 1))}
-                  style={btnCancel}
+                  style={wizardSecondaryButtonStyle}
                   disabled={addWizardStep === 1}
                 >
                   Back
@@ -299,14 +333,14 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
                 {addWizardStep < maxAddWizardStep && (
                   <button
                     onClick={() => setAddWizardStep(prev => Math.min(maxAddWizardStep, prev + 1))}
-                    style={btnPrimary}
+                    style={wizardPrimaryButtonStyle}
                     disabled={addWizardStep === 1 && !addDraft.name.trim()}
                   >
                     Next
                   </button>
                 )}
                 {addWizardStep === maxAddWizardStep && (
-                  <button onClick={handleAdd} style={btnPrimary}>Save</button>
+                  <button onClick={handleAdd} style={wizardPrimaryButtonStyle}>Save</button>
                 )}
               </div>
             </div>
@@ -608,16 +642,16 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
             boxShadow: '0 20px 40px rgba(0,0,0,0.45)',
             padding: '20px'
           }}>
-            <h4 style={{ margin: '0 0 6px 0', color: 'var(--text-primary)' }}>Add Compliance Item</h4>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
+            <h4 style={{ margin: '0 0 6px 0', color: '#EAF0F6' }}>Add Compliance Item</h4>
+            <div style={{ fontSize: '12px', color: '#B8C7D8', marginBottom: '14px' }}>
               Step {wizardStep} of {maxWizardStep}
             </div>
 
             {wizardStep === 1 && (
               <div>
-                <label style={labelStyle}>Which item are you adding?</label>
+                <label style={darkModalLabelStyle}>Which item are you adding?</label>
                 <select
-                  style={inputStyle}
+                  style={darkModalInputStyle}
                   value={addDraft.category}
                   onChange={e => setAddDraft(prev => ({
                     ...prev,
@@ -637,9 +671,9 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
 
             {wizardStep === 2 && categoryNeedsEmployee && (
               <div>
-                <label style={labelStyle}>Select employee *</label>
+                <label style={darkModalLabelStyle}>Select employee *</label>
                 <select
-                  style={inputStyle}
+                  style={darkModalInputStyle}
                   value={addDraft.employeeId}
                   onChange={e => setAddDraft(prev => ({ ...prev, employeeId: e.target.value }))}
                 >
@@ -655,9 +689,9 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
 
             {wizardStep === 2 && !categoryNeedsEmployee && (
               <div>
-                <label style={labelStyle}>Select location *</label>
+                <label style={darkModalLabelStyle}>Select location *</label>
                 <select
-                  style={inputStyle}
+                  style={darkModalInputStyle}
                   value={addDraft.locationId}
                   onChange={e => setAddDraft(prev => ({ ...prev, locationId: e.target.value }))}
                 >
@@ -669,9 +703,9 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
 
             {wizardStep === 3 && (
               <div>
-                <label style={labelStyle}>Subtype (optional)</label>
+                <label style={darkModalLabelStyle}>Subtype (optional)</label>
                 <input
-                  style={inputStyle}
+                  style={darkModalInputStyle}
                   value={addDraft.subtype}
                   onChange={e => setAddDraft(prev => ({ ...prev, subtype: e.target.value }))}
                   placeholder="e.g., 90_day"
@@ -681,10 +715,10 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
 
             {wizardStep === 4 && (
               <div>
-                <label style={labelStyle}>Last Completed (optional)</label>
+                <label style={darkModalLabelStyle}>Last Completed (optional)</label>
                 <input
                   type="date"
-                  style={inputStyle}
+                  style={darkModalInputStyle}
                   value={addDraft.lastCompleted}
                   onChange={e => setAddDraft(prev => ({ ...prev, lastCompleted: e.target.value }))}
                 />
@@ -693,10 +727,10 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
 
             {wizardStep === 5 && (
               <div>
-                <label style={labelStyle}>Due Date (optional)</label>
+                <label style={darkModalLabelStyle}>Due Date (optional)</label>
                 <input
                   type="date"
-                  style={inputStyle}
+                  style={darkModalInputStyle}
                   value={addDraft.dueDate}
                   onChange={e => setAddDraft(prev => ({ ...prev, dueDate: e.target.value }))}
                 />
@@ -705,9 +739,9 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
 
             {wizardStep === 6 && (
               <div>
-                <label style={labelStyle}>Notes (optional)</label>
+                <label style={darkModalLabelStyle}>Notes (optional)</label>
                 <input
-                  style={inputStyle}
+                  style={darkModalInputStyle}
                   value={addDraft.notes}
                   onChange={e => setAddDraft(prev => ({ ...prev, notes: e.target.value }))}
                   placeholder="Optional"

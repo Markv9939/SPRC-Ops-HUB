@@ -653,7 +653,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           <h2 style={{ margin: 0, fontSize: '32px', lineHeight: 1.1, color: 'var(--text-primary)', fontWeight: 700 }}>
             {eocType === 'van' ? 'Van EOC Checklist' : 'House EOC Checklist'}
           </h2>
-          <div style={{ fontSize: '14px', color: '#9eb0c2', marginTop: '4px' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '4px' }}>
             Due: {task?.dueDate} - {locationLabel}
           </div>
         </div>
@@ -722,10 +722,11 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
                 onKeyDown={(event) => handleItemKeyDown(event, item)}
                 className="eoc-item"
                 style={{
-                  background: idx % 2 === 0 ? 'rgba(22,36,52,0.96)' : 'rgba(19,31,46,0.96)',
+                  background: idx % 2 === 0 ? '#FFFFFF' : '#FCFAF7',
                   borderRadius: '10px',
                   padding: '12px',
-                  border: '1px solid rgba(17,47,82,0.28)'
+                  border: '1px solid rgba(17,47,82,0.16)',
+                  boxShadow: '0 2px 8px rgba(17,47,82,0.08)'
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
@@ -757,7 +758,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
                 {answers[item.id] === 'repair' && (
                   <div className="eoc-item-attention">
-                    <div style={{ fontSize: '12px', color: '#FFB74D', marginBottom: '6px' }}>
+                    <div style={{ fontSize: '12px', color: '#8E611D', marginBottom: '6px' }}>
                       Repair note required
                     </div>
                     <input
@@ -803,7 +804,14 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           className="btn"
           onClick={jumpToNextOutstanding}
           disabled={!firstOutstandingItem}
-          style={{ width: '48%', fontSize: '16px', borderRadius: 'var(--radius)', background: 'rgba(17,47,82,0.14)', color: 'var(--text-secondary)' }}
+          style={{
+            width: '48%',
+            fontSize: '16px',
+            borderRadius: 'var(--radius)',
+            background: '#F1EFEA',
+            color: 'var(--text-secondary)',
+            border: '1px solid #D8D1C6'
+          }}
         >
           Next Unanswered
         </button>

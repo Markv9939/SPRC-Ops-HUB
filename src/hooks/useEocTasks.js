@@ -23,6 +23,14 @@ export default function useEocTasks(user, assignment) {
   const normalizedUserId = String(user?.id || '').trim()
   const hasAssignmentScope = Boolean(assignment?.locationId && assignment?.shiftId)
   const scopeKey = hasAssignmentScope ? `${assignment.locationId}::${assignment.shiftId}` : ''
+  const assignmentVanKey = Array.isArray(assignment?.vanIds)
+    ? assignment.vanIds.map(v => String(v || '').trim().toLowerCase()).filter(Boolean).sort().join('|')
+    : ''
+  const assignedVanIds = new Set(
+    Array.isArray(assignment?.vanIds)
+      ? assignment.vanIds.map(v => String(v || '').trim().toLowerCase()).filter(Boolean)
+      : []
+  )
   const [tasks, setTasks] = useState([])
   const [loadedUserId, setLoadedUserId] = useState(null)
   const [loadedScopeKey, setLoadedScopeKey] = useState('')
@@ -42,6 +50,10 @@ export default function useEocTasks(user, assignment) {
         const scoped = snapshot.docs
           .map(d => ({ id: d.id, ...d.data() }))
           .filter((taskRow) => {
+            if (String(taskRow.taskType || '').trim().toLowerCase() === 'van') {
+              const taskVanId = String(taskRow.vanId || '').trim().toLowerCase()
+              if (!taskVanId || !assignedVanIds.has(taskVanId)) return false
+            }
             const eligibleUserIds = Array.isArray(taskRow.eligibleUserIds) ? taskRow.eligibleUserIds : []
             if (eligibleUserIds.length === 0) {
               return String(taskRow.assigneeUserId || '').trim() === normalizedUserId
@@ -61,7 +73,7 @@ export default function useEocTasks(user, assignment) {
     )
 
     return () => unsubscribe()
-  }, [assignment?.locationId, assignment?.shiftId, hasAssignmentScope, hasUserId, normalizedUserId, scopeKey, user?.id])
+  }, [assignment?.locationId, assignment?.shiftId, assignmentVanKey, hasAssignmentScope, hasUserId, normalizedUserId, scopeKey, user?.id])
 
   return {
     tasks: hasUserId && hasAssignmentScope && loadedUserId === normalizedUserId && loadedScopeKey === scopeKey ? tasks : [],

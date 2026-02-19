@@ -1,6 +1,6 @@
 # SPRC Cutover Runbook (Free-Tier v1)
 
-Last updated: 2026-02-17
+Last updated: 2026-02-19
 Owner: Admin/Owner + Supervisor
 
 ## Goal
@@ -66,6 +66,33 @@ Use this sequence after each meaningful change batch, not only final cutover:
 4. Record verification evidence:
    - `docs/REGRESSION_UAT_PHASE9.md`
    - `CHANGELOG.md`
+
+## Recent Session Updates
+
+### 2026-02-19 - UI Visibility + Direct Warning Resolution
+
+Batch summary:
+- Standardized modal contrast styling across transport reminder and shared dialogs.
+- Fixed low-contrast `Open Compliance Tab` button styling on compliance warning cards.
+- Added `Quick Update` action directly on compliance warning cards (overdue + due soon) so updates can be done without leaving dashboard warning queue.
+
+Direct warning-card update behavior:
+- Open `Quick Update` from warning card.
+- Edit inline fields:
+  - `Last Completed` (optional)
+  - `Next Due Date` (required)
+  - `Notes` (optional)
+- Save writes directly to `complianceItems` and records audit entry (`compliance_item_quick_update`).
+
+Verification/deploy evidence:
+- `npm run build`: PASS
+- `firebase deploy --only hosting --project sprc-tx-l`: PASS
+- Hosting URL: `https://sprc-tx-l.web.app`
+
+Owner validation focus (mobile/tablet):
+1. Transport ARRIVE reminder modal readability (`Cancel` and `OK` clearly visible).
+2. Compliance warning card button readability (`Quick Update`, `Open Compliance Tab`).
+3. Compliance quick update workflow updates warning status directly from dashboard queue.
 
 ## Rollback Approach
 

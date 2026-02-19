@@ -16,6 +16,15 @@ import {
 
 const MAX_FAILED_ATTEMPTS = 5
 const LOCKOUT_DURATION_MS = 5 * 60 * 1000 // 5 minutes
+const LOGIN_STEP_TIMEOUT_MS = 15000
+
+function withTimeout(promise, timeoutMs, timeoutMessage) {
+  let timeoutId
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)
+  })
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId))
+}
 
 function PinLogin({ onLogin }) {
   const [pin, setPin] = useState('')
@@ -114,6 +123,8 @@ function PinLogin({ onLogin }) {
   }
 
   const handleSubmit = async () => {
+    if (isLoading) return
+
     if (lockoutUntil && Date.now() < lockoutUntil) {
       const remainingMinutes = Math.ceil((lockoutUntil - Date.now()) / 60000)
       setError(`Account locked. Try again in ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}`)
@@ -138,7 +149,11 @@ function PinLogin({ onLogin }) {
       const pinHash = await hashPin(pin)
       const usersRef = collection(db, 'users')
       const hashQuery = query(usersRef, where('pinHash', '==', pinHash), where('active', '==', true))
-      const querySnapshot = await getDocs(hashQuery)
+      const querySnapshot = await withTimeout(
+        getDocs(hashQuery),
+        LOGIN_STEP_TIMEOUT_MS,
+        'Login timed out while verifying PIN. Please check connection and try again.'
+      )
 
       if (querySnapshot.empty) {
         const newFailedAttempts = failedAttempts + 1
@@ -163,9 +178,17 @@ function PinLogin({ onLogin }) {
         localStorage.removeItem('lockoutUntil')
         setFailedAttempts(0)
 
-        const policy = await getAuthPolicy()
+        const policy = await withTimeout(
+          getAuthPolicy(),
+          LOGIN_STEP_TIMEOUT_MS,
+          'Login timed out while loading access policy. Please try again.'
+        )
         const authScopeEnforced = policy?.authScopeEnforced === true
-        const authSession = await ensureAuthSession()
+        const authSession = await withTimeout(
+          ensureAuthSession(),
+          LOGIN_STEP_TIMEOUT_MS,
+          'Login timed out while validating auth session. Please try again.'
+        )
         const normalizedRole = normalizeRole(userData.role)
 
         // When claim enforcement is on, prevent stale claim sessions from constraining PIN identity.
@@ -183,7 +206,11 @@ function PinLogin({ onLogin }) {
 
         let scopedSessionUser
         try {
-          scopedSessionUser = await getScopedSessionUser(userDoc.id, userData)
+          scopedSessionUser = await withTimeout(
+            getScopedSessionUser(userDoc.id, userData),
+            LOGIN_STEP_TIMEOUT_MS,
+            'Login timed out while loading access scope. Please try again.'
+          )
         } catch (scopeError) {
           console.warn('Access-grant scope lookup failed. Falling back to base scope:', scopeError)
           const baseScopes = [...new Set([
@@ -232,7 +259,7 @@ function PinLogin({ onLogin }) {
       <div className="login-panel">
         <h1 style={{
           fontSize: '22px',
-          color: '#F8F5F1',
+          color: '#FFFFFF',
           marginBottom: '6px',
           textShadow: '0 1px 0 #000, 1px 0 0 #000, 0 -1px 0 #000, -1px 0 0 #000, 0 2px 8px rgba(10,24,38,0.45)'
         }}>
@@ -240,7 +267,7 @@ function PinLogin({ onLogin }) {
         </h1>
 
         <p style={{
-          color: 'rgba(248,245,241,0.86)',
+          color: 'rgba(255,255,255,0.92)',
           marginBottom: '20px',
           fontSize: '14px',
           textShadow: '0 1px 0 rgba(0,0,0,0.9), 1px 0 0 rgba(0,0,0,0.9), 0 -1px 0 rgba(0,0,0,0.9), -1px 0 0 rgba(0,0,0,0.9), 0 2px 6px rgba(10,24,38,0.40)'
@@ -270,7 +297,7 @@ function PinLogin({ onLogin }) {
             letterSpacing: '8px',
             boxSizing: 'border-box',
             marginBottom: '12px',
-            backgroundColor: 'rgba(17,47,82,0.32)',
+            backgroundColor: 'rgba(248,245,241,0.24)',
             color: '#F8F5F1'
           }}
         />

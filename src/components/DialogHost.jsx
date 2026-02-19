@@ -1,75 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getDialogEventName, resolveDialogRequest } from '../utils/dialogs'
-
-const OVERLAY_STYLE = {
-  position: 'fixed',
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  backgroundColor: 'rgba(0, 0, 0, 0.58)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  zIndex: 2400,
-  padding: '20px'
-}
-
-const DIALOG_STYLE = {
-  width: '100%',
-  maxWidth: '430px',
-  backgroundColor: '#1a2332',
-  borderRadius: '16px',
-  border: '1px solid rgba(229,57,53,0.35)',
-  boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
-  padding: '22px',
-  color: 'var(--text-primary)'
-}
-
-const CANCEL_BUTTON_STYLE = {
-  flex: 1,
-  padding: '12px 14px',
-  backgroundColor: 'rgba(17,47,82,0.12)',
-  color: 'var(--text-secondary)',
-  border: 'none',
-  borderRadius: '10px',
-  fontSize: '15px',
-  fontWeight: 700,
-  cursor: 'pointer'
-}
-
-function toneStyle(tone) {
-  if (tone === 'warning') {
-    return {
-      border: '1px solid rgba(255,152,0,0.45)',
-      heading: '#FFB74D',
-      buttonBg: '#B07A28',
-      buttonText: '#1f2933'
-    }
-  }
-  if (tone === 'success') {
-    return {
-      border: '1px solid rgba(76,175,80,0.45)',
-      heading: '#2F7D57',
-      buttonBg: '#2F7D57',
-      buttonText: '#ffffff'
-    }
-  }
-  if (tone === 'info') {
-    return {
-      border: '1px solid rgba(33,150,243,0.45)',
-      heading: '#90CAF9',
-      buttonBg: '#2196F3',
-      buttonText: '#ffffff'
-    }
-  }
-  return {
-    border: '1px solid rgba(229,57,53,0.45)',
-    heading: '#CD4E42',
-    buttonBg: '#CD4E42',
-    buttonText: '#ffffff'
-  }
-}
+import {
+  MODAL_CANCEL_BUTTON_STYLE,
+  MODAL_CARD_BASE_STYLE,
+  MODAL_OVERLAY_STYLE,
+  getModalToneStyle
+} from './modalStyles'
 
 function DialogHost() {
   const [queue, setQueue] = useState([])
@@ -97,7 +33,7 @@ function DialogHost() {
 
   const activeDialog = queue[0] || null
   const tones = useMemo(
-    () => toneStyle(activeDialog?.tone || 'danger'),
+    () => getModalToneStyle(activeDialog?.tone || 'danger'),
     [activeDialog?.tone]
   )
 
@@ -166,12 +102,12 @@ function DialogHost() {
   if (!activeDialog) return null
 
   return (
-    <div style={OVERLAY_STYLE} role="presentation">
+    <div style={MODAL_OVERLAY_STYLE} role="presentation">
       <div
         role="dialog"
         aria-modal="true"
         style={{
-          ...DIALOG_STYLE,
+          ...MODAL_CARD_BASE_STYLE,
           border: tones.border
         }}
       >
@@ -180,6 +116,8 @@ function DialogHost() {
             margin: '0 0 14px 0',
             textAlign: 'center',
             fontSize: '24px',
+            lineHeight: 1.2,
+            fontWeight: 700,
             letterSpacing: '0.3px',
             color: tones.heading
           }}>
@@ -192,7 +130,7 @@ function DialogHost() {
           whiteSpace: 'pre-wrap',
           lineHeight: 1.4,
           fontSize: '15px',
-          color: 'var(--text-primary)'
+          color: '#465367'
         }}>
           {activeDialog.message || ''}
         </div>
@@ -218,7 +156,7 @@ function DialogHost() {
 
         <div style={{ display: 'flex', gap: '10px' }}>
           {activeDialog.type !== 'alert' && (
-            <button type="button" onClick={handleCancel} style={CANCEL_BUTTON_STYLE}>
+            <button type="button" onClick={handleCancel} style={MODAL_CANCEL_BUTTON_STYLE}>
               {activeDialog.cancelText || 'Cancel'}
             </button>
           )}
