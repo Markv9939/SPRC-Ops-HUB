@@ -10,6 +10,7 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - Dedicated PIN rotation modal and service flow with current-PIN verification before update.
 - Shared modal foundation for app dialogs (`AppModal`, `modalStyles`) to keep overlay/card/button contrast consistent.
 - Dashboard compliance queue `Quick Update` action for inline due-date resolution directly from warning cards (overdue + due soon), including audit logging.
+- Bulk compliance employee import script (`scripts/addComplianceEmployees.js`) and npm command (`npm run compliance:employees:add`) to upsert employee records by `name + site`.
 
 ### Changed
 - EOC checklist completer identity is now read-only and always sourced from the authenticated user.

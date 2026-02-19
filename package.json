@@ -16,6 +16,8 @@
     "claims:verify": "node scripts/verifyAuthClaims.js",
     "migrate:org-model": "node scripts/migrateOrgModel.js",
     "migrate:derived-assignments": "node scripts/migrateDerivedAssignments.js",
+    "compliance:employees:add": "node scripts/addComplianceEmployees.js",
+    "compliance:employees:add:client": "node scripts/addComplianceEmployeesClient.js",
     "migrate-clients": "node scripts/migrateExistingClients.js",
     "cleanup-clients": "node scripts/deactivateStaleClients.js"
   },

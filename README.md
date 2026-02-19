@@ -51,6 +51,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Lint: `npm run lint`
 - Smoke: `npm run smoke:phase9:full`
 - Reset baseline (destructive): `npm run reset:uat`
+- Compliance employee bulk import: `npm run compliance:employees:add`
 - Claims provision: `npm run claims:provision`
 - Claims verify: `npm run claims:verify`
 
