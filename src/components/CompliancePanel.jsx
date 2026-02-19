@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { db } from '../firebase'
 import {
   collection, query, orderBy, onSnapshot,
-  doc, addDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp
+  doc, addDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp, writeBatch
 } from 'firebase/firestore'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
@@ -25,6 +25,7 @@ const COMPLIANCE_CATEGORIES = {
 
 const CATEGORY_KEYS = Object.keys(COMPLIANCE_CATEGORIES)
 const LOCATION_ONLY_CATEGORIES = ['cintas', 'fire_safety']
+const EMPLOYEE_CATEGORY_KEYS = CATEGORY_KEYS.filter(requiresEmployee)
 
 function isLocationCategory(category) {
   return LOCATION_ONLY_CATEGORIES.includes(String(category || '').trim())
@@ -148,14 +149,15 @@ function statusBadge(status) {
 }
 
 // ─── SUB-TAB: EMPLOYEES ────────────────────────────────────────────────────────
-function EmployeesTab({ employees, complianceItems, siteOptions }) {
+function EmployeesTab({ employees, complianceItems, siteOptions, onJumpToItems }) {
   const defaultSite = siteOptions[0] || 'OTC'
   const [search, setSearch] = useState('')
   const [siteFilter, setSiteFilter] = useState('All')
   const [expandedId, setExpandedId] = useState(null)
   const [isAddWizardOpen, setIsAddWizardOpen] = useState(false)
   const [addWizardStep, setAddWizardStep] = useState(1)
-  const [addDraft, setAddDraft] = useState({ name: '', site: defaultSite })
+  const [addDraft, setAddDraft] = useState({ name: '', site: defaultSite, selectedCategories: [] })
+  const [lastAddResult, setLastAddResult] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({ name: '', site: defaultSite, active: true })
 
@@ -168,11 +170,11 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
     }
   }, [addDraft.site, defaultSite, editForm.site, siteOptions])
 
-  const maxAddWizardStep = 3
+  const maxAddWizardStep = 4
 
   const resetAddWizard = () => {
     setAddWizardStep(1)
-    setAddDraft({ name: '', site: defaultSite })
+    setAddDraft({ name: '', site: defaultSite, selectedCategories: [] })
   }
 
   const openAddWizard = () => {
@@ -183,6 +185,18 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
   const closeAddWizard = () => {
     setIsAddWizardOpen(false)
     resetAddWizard()
+  }
+
+  const toggleEmployeeCategory = (categoryKey) => {
+    setAddDraft(prev => {
+      const hasCategory = prev.selectedCategories.includes(categoryKey)
+      return {
+        ...prev,
+        selectedCategories: hasCategory
+          ? prev.selectedCategories.filter(c => c !== categoryKey)
+          : [...prev.selectedCategories, categoryKey]
+      }
+    })
   }
 
   const itemsByEmployee = useMemo(() => {
@@ -202,24 +216,59 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
 
   const handleAdd = async () => {
     const trimmedName = String(addDraft.name || '').trim()
+    const normalizedSite = normalizeMainLocation(addDraft.site) || String(addDraft.site || '').trim().toUpperCase()
+    const selectedCategories = [...new Set((addDraft.selectedCategories || []).filter(requiresEmployee))]
     if (!trimmedName) return alert('Name is required')
     if (!addDraft.site || !siteOptions.includes(addDraft.site)) return alert('Select a valid location')
 
     try {
-      await addDoc(collection(db, 'complianceEmployees'), {
+      const batch = writeBatch(db)
+      const employeeRef = doc(collection(db, 'complianceEmployees'))
+      batch.set(employeeRef, {
         name: trimmedName,
-        site: addDraft.site,
+        site: normalizedSite,
         active: true,
         linkedUserId: null,
         createdAt: serverTimestamp()
       })
+
+      selectedCategories.forEach(category => {
+        const itemRef = doc(collection(db, 'complianceItems'))
+        batch.set(itemRef, {
+          targetType: 'employee',
+          locationId: null,
+          employeeId: employeeRef.id,
+          employeeName: trimmedName,
+          employeeSite: normalizedSite || null,
+          category,
+          subtype: null,
+          lastCompleted: null,
+          dueDate: null,
+          notes: '',
+          source: 'manual',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        })
+      })
+
+      await batch.commit()
       closeAddWizard()
-      notifySuccess('Employee added')
+      setLastAddResult({
+        employeeId: employeeRef.id,
+        employeeName: trimmedName,
+        itemsAdded: selectedCategories.length
+      })
+      notifySuccess(`Employee added (${selectedCategories.length} compliance items)`)
     } catch (err) {
       console.error('Failed to add compliance employee', err)
       alert(`Unable to save employee: ${err?.message || 'Unknown error'}`)
     }
   }
+  const canAdvanceAddWizard = (() => {
+    if (addWizardStep === 1) return Boolean(String(addDraft.name || '').trim())
+    if (addWizardStep === 2) return Boolean(addDraft.site && siteOptions.includes(addDraft.site))
+    return true
+  })()
 
   const handleEdit = async () => {
     if (!editForm.name.trim()) return alert('Name is required')
@@ -260,6 +309,38 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
         </select>
         <button onClick={openAddWizard} style={btnPrimary}>+ Add Employee</button>
       </div>
+      {lastAddResult && (
+        <div style={{
+          marginBottom: '14px',
+          padding: '12px',
+          borderRadius: '8px',
+          border: '1px solid rgba(47,125,87,0.35)',
+          backgroundColor: 'rgba(47,125,87,0.12)',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px'
+        }}>
+          <span style={{ color: '#1F2C3A', fontSize: '13px' }}>
+            {lastAddResult.employeeName} created with {lastAddResult.itemsAdded} compliance items.
+          </span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              style={{ ...btnSecondary, padding: '6px 10px', fontSize: '12px' }}
+              onClick={() => onJumpToItems?.(lastAddResult.employeeId)}
+            >
+              Go To Items For This Employee
+            </button>
+            <button
+              style={{ ...wizardSecondaryButtonStyle, padding: '6px 10px', fontSize: '12px' }}
+              onClick={() => setLastAddResult(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Add employee wizard */}
       {isAddWizardOpen && (
@@ -313,10 +394,66 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
             )}
 
             {addWizardStep === 3 && (
+              <div>
+                <label style={lightModalLabelStyle}>Select compliance items (optional)</label>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    style={{ ...wizardSecondaryButtonStyle, padding: '6px 10px', fontSize: '12px' }}
+                    onClick={() => setAddDraft(prev => ({ ...prev, selectedCategories: [...EMPLOYEE_CATEGORY_KEYS] }))}
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    style={{ ...wizardSecondaryButtonStyle, padding: '6px 10px', fontSize: '12px' }}
+                    onClick={() => setAddDraft(prev => ({ ...prev, selectedCategories: [] }))}
+                  >
+                    Clear All
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' }}>
+                  {EMPLOYEE_CATEGORY_KEYS.map(key => (
+                    <label
+                      key={key}
+                      style={{
+                        display: 'flex',
+                        gap: '8px',
+                        alignItems: 'center',
+                        border: '1px solid #D8D1C6',
+                        borderRadius: '8px',
+                        padding: '8px 10px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={addDraft.selectedCategories.includes(key)}
+                        onChange={() => toggleEmployeeCategory(key)}
+                      />
+                      <span style={{ color: '#1F2C3A', fontSize: '13px' }}>
+                        {COMPLIANCE_CATEGORIES[key].icon} {COMPLIANCE_CATEGORIES[key].label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {addWizardStep === 4 && (
               <div style={{ display: 'grid', gap: '8px', color: '#d6dbe1', fontSize: '13px' }}>
-                <div><strong>Name:</strong> {addDraft.name.trim() || '--'}</div>
-                <div><strong>Location:</strong> {addDraft.site || '--'}</div>
-                <div><strong>Status:</strong> Active</div>
+                <div style={{ color: '#1F2C3A' }}><strong>Name:</strong> {addDraft.name.trim() || '--'}</div>
+                <div style={{ color: '#1F2C3A' }}><strong>Location:</strong> {addDraft.site || '--'}</div>
+                <div style={{ color: '#1F2C3A' }}><strong>Status:</strong> Active</div>
+                <div style={{ color: '#1F2C3A' }}>
+                  <strong>Compliance Items:</strong>{' '}
+                  {addDraft.selectedCategories.length === 0 ? 'None selected' : `${addDraft.selectedCategories.length} selected`}
+                </div>
+                {addDraft.selectedCategories.length > 0 && (
+                  <div style={{ color: '#465367', fontSize: '12px' }}>
+                    {addDraft.selectedCategories.map(key => COMPLIANCE_CATEGORIES[key]?.label || key).join(', ')}
+                  </div>
+                )}
               </div>
             )}
 
@@ -334,7 +471,7 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
                   <button
                     onClick={() => setAddWizardStep(prev => Math.min(maxAddWizardStep, prev + 1))}
                     style={wizardPrimaryButtonStyle}
-                    disabled={addWizardStep === 1 && !addDraft.name.trim()}
+                    disabled={!canAdvanceAddWizard}
                   >
                     Next
                   </button>
@@ -443,10 +580,11 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
 }
 
 // ─── SUB-TAB: ITEMS ────────────────────────────────────────────────────────────
-function ItemsTab({ employees, complianceItems, siteOptions }) {
+function ItemsTab({ employees, complianceItems, siteOptions, itemsEmployeeFilter, setItemsEmployeeFilter }) {
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [siteFilter, setSiteFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [addMode, setAddMode] = useState('single')
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({})
   const [isAddWizardOpen, setIsAddWizardOpen] = useState(false)
@@ -455,6 +593,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
     category: 'fpcc',
     employeeId: '',
     locationId: '',
+    selectedCategories: [],
     subtype: '',
     lastCompleted: '',
     dueDate: '',
@@ -470,14 +609,16 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
     employees.filter(e => e.active !== false)
   ), [employees])
 
-  const maxWizardStep = 7
+  const maxWizardStep = addMode === 'single' ? 7 : 4
 
   const resetAddWizard = () => {
+    setAddMode('single')
     setWizardStep(1)
     setAddDraft({
       category: 'fpcc',
       employeeId: '',
       locationId: '',
+      selectedCategories: [],
       subtype: '',
       lastCompleted: '',
       dueDate: '',
@@ -493,6 +634,18 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
   const closeAddWizard = () => {
     setIsAddWizardOpen(false)
     resetAddWizard()
+  }
+
+  const toggleBulkCategory = (categoryKey) => {
+    setAddDraft(prev => {
+      const hasCategory = prev.selectedCategories.includes(categoryKey)
+      return {
+        ...prev,
+        selectedCategories: hasCategory
+          ? prev.selectedCategories.filter(c => c !== categoryKey)
+          : [...prev.selectedCategories, categoryKey]
+      }
+    })
   }
 
   const getItemTargetType = (item) => {
@@ -515,6 +668,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
 
   const filtered = complianceItems.filter(item => {
     if (categoryFilter !== 'all' && item.category !== categoryFilter) return false
+    if (itemsEmployeeFilter !== 'all' && item.employeeId !== itemsEmployeeFilter) return false
     const itemSite = getItemSite(item)
     if (siteFilter !== 'all') {
       if (itemSite !== siteFilter) return false
@@ -541,6 +695,57 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
   }
 
   const handleAdd = async () => {
+    if (addMode === 'multi') {
+      const selectedEmployee = employeeMap[addDraft.employeeId]
+      const normalizedEmployeeSite = normalizeMainLocation(selectedEmployee?.site) || String(selectedEmployee?.site || '').trim().toUpperCase() || null
+      const uniqueCategories = [...new Set((addDraft.selectedCategories || []).filter(requiresEmployee))]
+      if (!addDraft.employeeId) return alert('Select an employee')
+      if (!selectedEmployee) return alert('Select a valid employee')
+      if (!normalizedEmployeeSite) return alert('Selected employee does not have a valid site')
+      if (uniqueCategories.length === 0) return alert('Select at least one compliance item')
+
+      const existingSet = new Set(
+        complianceItems
+          .filter(item => item.employeeId === addDraft.employeeId && requiresEmployee(item.category))
+          .map(item => `${item.employeeId}::${item.category}`)
+      )
+      const categoriesToCreate = uniqueCategories.filter(category => !existingSet.has(`${addDraft.employeeId}::${category}`))
+      const skippedCount = uniqueCategories.length - categoriesToCreate.length
+      if (categoriesToCreate.length === 0) return alert('All selected items already exist for this employee')
+
+      try {
+        const batch = writeBatch(db)
+        categoriesToCreate.forEach(category => {
+          const itemRef = doc(collection(db, 'complianceItems'))
+          batch.set(itemRef, {
+            targetType: 'employee',
+            locationId: null,
+            employeeId: addDraft.employeeId,
+            employeeName: selectedEmployee?.name || '',
+            employeeSite: normalizedEmployeeSite,
+            category,
+            subtype: addDraft.subtype || null,
+            lastCompleted: addDraft.lastCompleted ? Timestamp.fromDate(new Date(addDraft.lastCompleted)) : null,
+            dueDate: addDraft.dueDate ? Timestamp.fromDate(new Date(addDraft.dueDate)) : null,
+            notes: addDraft.notes || '',
+            source: 'manual',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          })
+        })
+        await batch.commit()
+        closeAddWizard()
+        notifySuccess(`Added ${categoriesToCreate.length} compliance items`)
+        if (skippedCount > 0) {
+          alert(`${skippedCount} selected item(s) were skipped because they already exist for this employee.`)
+        }
+      } catch (err) {
+        console.error('Failed to add bulk compliance items', err)
+        alert(`Unable to save compliance items: ${err?.message || 'Unknown error'}`)
+      }
+      return
+    }
+
     const employeeCategory = requiresEmployee(addDraft.category)
     const normalizedLocation = normalizeMainLocation(addDraft.locationId) || String(addDraft.locationId || '').trim().toUpperCase() || null
     const selectedEmployee = employeeCategory ? employeeMap[addDraft.employeeId] : null
@@ -593,6 +798,11 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
 
   const categoryNeedsEmployee = requiresEmployee(addDraft.category)
   const canAdvanceWizard = (() => {
+    if (addMode === 'multi') {
+      if (wizardStep === 1) return Boolean(addDraft.employeeId)
+      if (wizardStep === 2) return addDraft.selectedCategories.length > 0
+      return true
+    }
     if (wizardStep === 1) return Boolean(addDraft.category)
     if (wizardStep === 2) {
       return categoryNeedsEmployee ? Boolean(addDraft.employeeId) : Boolean(addDraft.locationId)
@@ -611,6 +821,16 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
         <select style={{ ...inputStyle, width: 'auto', minWidth: '100px' }} value={siteFilter} onChange={e => setSiteFilter(e.target.value)}>
           <option value="all">All Locations</option>
           {siteOptions.map(site => <option key={site} value={site}>{site}</option>)}
+        </select>
+        <select
+          style={{ ...inputStyle, width: 'auto', minWidth: '180px' }}
+          value={itemsEmployeeFilter}
+          onChange={e => setItemsEmployeeFilter(e.target.value)}
+        >
+          <option value="all">All Employees</option>
+          {activeEmployees.map(emp => (
+            <option key={emp.id} value={emp.id}>{emp.name} ({emp.site})</option>
+          ))}
         </select>
         <select style={{ ...inputStyle, width: 'auto', minWidth: '130px' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="all">All Status</option>
@@ -643,11 +863,43 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
             padding: '20px'
           }}>
             <h4 style={{ margin: '0 0 6px 0', color: '#EAF0F6' }}>Add Compliance Item</h4>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                style={{
+                  ...btnSecondary,
+                  padding: '6px 10px',
+                  fontSize: '12px',
+                  backgroundColor: addMode === 'single' ? '#CD4E42' : 'rgba(180,197,215,0.25)'
+                }}
+                onClick={() => {
+                  resetAddWizard()
+                  setAddMode('single')
+                }}
+              >
+                Single Item
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...btnSecondary,
+                  padding: '6px 10px',
+                  fontSize: '12px',
+                  backgroundColor: addMode === 'multi' ? '#CD4E42' : 'rgba(180,197,215,0.25)'
+                }}
+                onClick={() => {
+                  resetAddWizard()
+                  setAddMode('multi')
+                }}
+              >
+                Multiple Items (Employee)
+              </button>
+            </div>
             <div style={{ fontSize: '12px', color: '#B8C7D8', marginBottom: '14px' }}>
               Step {wizardStep} of {maxWizardStep}
             </div>
 
-            {wizardStep === 1 && (
+            {addMode === 'single' && wizardStep === 1 && (
               <div>
                 <label style={darkModalLabelStyle}>Which item are you adding?</label>
                 <select
@@ -669,7 +921,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
               </div>
             )}
 
-            {wizardStep === 2 && categoryNeedsEmployee && (
+            {addMode === 'single' && wizardStep === 2 && categoryNeedsEmployee && (
               <div>
                 <label style={darkModalLabelStyle}>Select employee *</label>
                 <select
@@ -687,7 +939,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
               </div>
             )}
 
-            {wizardStep === 2 && !categoryNeedsEmployee && (
+            {addMode === 'single' && wizardStep === 2 && !categoryNeedsEmployee && (
               <div>
                 <label style={darkModalLabelStyle}>Select location *</label>
                 <select
@@ -701,7 +953,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
               </div>
             )}
 
-            {wizardStep === 3 && (
+            {addMode === 'single' && wizardStep === 3 && (
               <div>
                 <label style={darkModalLabelStyle}>Subtype (optional)</label>
                 <input
@@ -713,7 +965,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
               </div>
             )}
 
-            {wizardStep === 4 && (
+            {addMode === 'single' && wizardStep === 4 && (
               <div>
                 <label style={darkModalLabelStyle}>Last Completed (optional)</label>
                 <input
@@ -725,7 +977,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
               </div>
             )}
 
-            {wizardStep === 5 && (
+            {addMode === 'single' && wizardStep === 5 && (
               <div>
                 <label style={darkModalLabelStyle}>Due Date (optional)</label>
                 <input
@@ -737,7 +989,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
               </div>
             )}
 
-            {wizardStep === 6 && (
+            {addMode === 'single' && wizardStep === 6 && (
               <div>
                 <label style={darkModalLabelStyle}>Notes (optional)</label>
                 <input
@@ -749,7 +1001,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
               </div>
             )}
 
-            {wizardStep === 7 && (
+            {addMode === 'single' && wizardStep === 7 && (
               <div style={{ display: 'grid', gap: '8px', color: '#d6dbe1', fontSize: '13px' }}>
                 <div><strong>Category:</strong> {COMPLIANCE_CATEGORIES[addDraft.category]?.label || addDraft.category}</div>
                 <div>
@@ -758,6 +1010,121 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
                     ? (employeeMap[addDraft.employeeId]?.name || 'Not selected')
                     : (addDraft.locationId || 'Not selected')}
                 </div>
+                <div><strong>Subtype:</strong> {addDraft.subtype || '--'}</div>
+                <div><strong>Last Completed:</strong> {addDraft.lastCompleted || '--'}</div>
+                <div><strong>Due Date:</strong> {addDraft.dueDate || '--'}</div>
+                <div><strong>Notes:</strong> {addDraft.notes || '--'}</div>
+              </div>
+            )}
+            {addMode === 'multi' && wizardStep === 1 && (
+              <div>
+                <label style={darkModalLabelStyle}>Select employee *</label>
+                <select
+                  style={darkModalInputStyle}
+                  value={addDraft.employeeId}
+                  onChange={e => setAddDraft(prev => ({ ...prev, employeeId: e.target.value }))}
+                >
+                  <option value="">Select...</option>
+                  {activeEmployees.map(e => (
+                    <option key={e.id} value={e.id}>
+                      {e.name} ({e.site})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {addMode === 'multi' && wizardStep === 2 && (
+              <div>
+                <label style={darkModalLabelStyle}>Select compliance items *</label>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    style={{ ...btnCancel, padding: '6px 10px', fontSize: '12px' }}
+                    onClick={() => setAddDraft(prev => ({ ...prev, selectedCategories: [...EMPLOYEE_CATEGORY_KEYS] }))}
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    style={{ ...btnCancel, padding: '6px 10px', fontSize: '12px' }}
+                    onClick={() => setAddDraft(prev => ({ ...prev, selectedCategories: [] }))}
+                  >
+                    Clear All
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                  {EMPLOYEE_CATEGORY_KEYS.map(key => (
+                    <label
+                      key={key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        border: '1px solid rgba(180,197,215,0.28)',
+                        borderRadius: '8px',
+                        padding: '8px'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={addDraft.selectedCategories.includes(key)}
+                        onChange={() => toggleBulkCategory(key)}
+                      />
+                      <span style={{ color: '#EAF0F6', fontSize: '13px' }}>
+                        {COMPLIANCE_CATEGORIES[key].icon} {COMPLIANCE_CATEGORIES[key].label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            {addMode === 'multi' && wizardStep === 3 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                <div>
+                  <label style={darkModalLabelStyle}>Subtype (optional)</label>
+                  <input
+                    style={darkModalInputStyle}
+                    value={addDraft.subtype}
+                    onChange={e => setAddDraft(prev => ({ ...prev, subtype: e.target.value }))}
+                    placeholder="e.g., 90_day"
+                  />
+                </div>
+                <div>
+                  <label style={darkModalLabelStyle}>Last Completed (optional)</label>
+                  <input
+                    type="date"
+                    style={darkModalInputStyle}
+                    value={addDraft.lastCompleted}
+                    onChange={e => setAddDraft(prev => ({ ...prev, lastCompleted: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label style={darkModalLabelStyle}>Due Date (optional)</label>
+                  <input
+                    type="date"
+                    style={darkModalInputStyle}
+                    value={addDraft.dueDate}
+                    onChange={e => setAddDraft(prev => ({ ...prev, dueDate: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label style={darkModalLabelStyle}>Notes (optional)</label>
+                  <input
+                    style={darkModalInputStyle}
+                    value={addDraft.notes}
+                    onChange={e => setAddDraft(prev => ({ ...prev, notes: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </div>
+              </div>
+            )}
+            {addMode === 'multi' && wizardStep === 4 && (
+              <div style={{ display: 'grid', gap: '8px', color: '#d6dbe1', fontSize: '13px' }}>
+                <div><strong>Employee:</strong> {employeeMap[addDraft.employeeId]?.name || 'Not selected'}</div>
+                <div><strong>Items Selected:</strong> {addDraft.selectedCategories.length}</div>
+                {addDraft.selectedCategories.length > 0 && (
+                  <div>{addDraft.selectedCategories.map(key => COMPLIANCE_CATEGORIES[key]?.label || key).join(', ')}</div>
+                )}
                 <div><strong>Subtype:</strong> {addDraft.subtype || '--'}</div>
                 <div><strong>Last Completed:</strong> {addDraft.lastCompleted || '--'}</div>
                 <div><strong>Due Date:</strong> {addDraft.dueDate || '--'}</div>
@@ -1021,6 +1388,7 @@ function CintasTab({ cintasServices }) {
 // ─── MAIN COMPLIANCE PANEL ─────────────────────────────────────────────────────
 function CompliancePanel({ user, scopeSites = null }) {
   const [subTab, setSubTab] = useState('employees')
+  const [itemsEmployeeFilter, setItemsEmployeeFilter] = useState('all')
   const [employees, setEmployees] = useState([])
   const [complianceItems, setComplianceItems] = useState([])
   const [cintasServices, setCintasServices] = useState([])
@@ -1079,6 +1447,10 @@ function CompliancePanel({ user, scopeSites = null }) {
   const scopedEmployees = hasComplianceScope ? employees : []
   const scopedComplianceItems = hasComplianceScope ? complianceItems : []
   const scopedCintasServices = hasComplianceScope && isAdmin ? cintasServices : []
+  const jumpToItemsForEmployee = (employeeId) => {
+    setItemsEmployeeFilter(employeeId || 'all')
+    setSubTab('items')
+  }
 
   return (
     <div>
@@ -1119,8 +1491,23 @@ function CompliancePanel({ user, scopeSites = null }) {
         ))}
       </div>
 
-      {activeSubTab === 'employees' && <EmployeesTab employees={scopedEmployees} complianceItems={scopedComplianceItems} siteOptions={siteOptions} />}
-      {activeSubTab === 'items' && <ItemsTab employees={scopedEmployees} complianceItems={scopedComplianceItems} siteOptions={siteOptions} />}
+      {activeSubTab === 'employees' && (
+        <EmployeesTab
+          employees={scopedEmployees}
+          complianceItems={scopedComplianceItems}
+          siteOptions={siteOptions}
+          onJumpToItems={jumpToItemsForEmployee}
+        />
+      )}
+      {activeSubTab === 'items' && (
+        <ItemsTab
+          employees={scopedEmployees}
+          complianceItems={scopedComplianceItems}
+          siteOptions={siteOptions}
+          itemsEmployeeFilter={itemsEmployeeFilter}
+          setItemsEmployeeFilter={setItemsEmployeeFilter}
+        />
+      )}
       {activeSubTab === 'cintas' && <CintasTab cintasServices={scopedCintasServices} />}
         </>
       )}
