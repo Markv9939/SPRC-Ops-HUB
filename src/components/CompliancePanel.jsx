@@ -35,7 +35,7 @@ function requiresEmployee(category) {
 }
 
 const cardStyle = {
-  backgroundColor: 'rgba(255,255,255,0.05)',
+  backgroundColor: 'rgba(17,47,82,0.08)',
   borderRadius: '12px',
   padding: '20px',
   marginBottom: '20px',
@@ -46,17 +46,17 @@ const cardStyle = {
 const inputStyle = {
   width: '100%',
   padding: '8px',
-  border: '2px solid rgba(255,255,255,0.1)',
+  border: '2px solid rgba(17,47,82,0.20)',
   borderRadius: '6px',
   fontSize: '14px',
   boxSizing: 'border-box',
-  backgroundColor: 'rgba(255,255,255,0.06)',
-  color: '#e8e8e8'
+  backgroundColor: 'rgba(17,47,82,0.10)',
+  color: 'var(--text-primary)'
 }
 
 const btnPrimary = {
   padding: '10px 20px',
-  backgroundColor: '#4CAF50',
+  backgroundColor: '#2F7D57',
   color: 'white',
   border: 'none',
   borderRadius: '8px',
@@ -67,7 +67,7 @@ const btnPrimary = {
 
 const btnSecondary = {
   padding: '8px 16px',
-  backgroundColor: '#E53935',
+  backgroundColor: '#CD4E42',
   color: 'white',
   border: 'none',
   borderRadius: '6px',
@@ -87,7 +87,7 @@ const btnCancel = {
   cursor: 'pointer'
 }
 
-const labelStyle = { fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }
+const labelStyle = { fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }
 
 function formatDateShort(ts) {
   if (!ts) return '--'
@@ -97,7 +97,7 @@ function formatDateShort(ts) {
 }
 
 function statusBadge(status) {
-  const colors = { overdue: '#f44336', upcoming: '#FF9800', current: '#4CAF50', none: '#556677' }
+  const colors = { overdue: '#B75E54', upcoming: '#B07A28', current: '#2F7D57', none: '#556677' }
   const labels = { overdue: 'OVERDUE', upcoming: 'DUE SOON', current: 'CURRENT', none: 'N/A' }
   return (
     <span style={{
@@ -248,8 +248,8 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
             boxShadow: '0 20px 40px rgba(0,0,0,0.45)',
             padding: '20px'
           }}>
-            <h4 style={{ margin: '0 0 6px 0', color: '#e8e8e8' }}>Add Employee</h4>
-            <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '14px' }}>
+            <h4 style={{ margin: '0 0 6px 0', color: 'var(--text-primary)' }}>Add Employee</h4>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
               Step {addWizardStep} of {maxAddWizardStep}
             </div>
 
@@ -325,8 +325,8 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
             <div key={emp.id} style={{
               padding: '14px',
               borderRadius: '8px',
-              border: stats.overdue > 0 ? '2px solid #f44336' : '1px solid rgba(255,255,255,0.08)',
-              backgroundColor: 'rgba(255,255,255,0.03)'
+              border: stats.overdue > 0 ? '2px solid #B75E54' : '1px solid rgba(17,47,82,0.14)',
+              backgroundColor: 'rgba(17,47,82,0.05)'
             }}>
               {isEditing ? (
                 <div>
@@ -359,19 +359,19 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => setExpandedId(isExpanded ? null : emp.id)}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <span style={{ fontSize: '15px', fontWeight: 'bold' }}>{emp.name}</span>
-                      <span style={{ fontSize: '12px', color: '#8899aa', backgroundColor: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '4px' }}>{emp.site}</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', backgroundColor: 'rgba(17,47,82,0.10)', padding: '2px 8px', borderRadius: '4px' }}>{emp.site}</span>
                       {!emp.active && <span style={{ fontSize: '11px', color: '#999' }}>INACTIVE</span>}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {stats.overdue > 0 && <span style={{ color: '#f44336', fontWeight: 'bold', fontSize: '13px' }}>{stats.overdue} overdue</span>}
-                      {stats.upcoming > 0 && <span style={{ color: '#FF9800', fontWeight: 'bold', fontSize: '13px' }}>{stats.upcoming} upcoming</span>}
+                      {stats.overdue > 0 && <span style={{ color: '#B75E54', fontWeight: 'bold', fontSize: '13px' }}>{stats.overdue} overdue</span>}
+                      {stats.upcoming > 0 && <span style={{ color: '#B07A28', fontWeight: 'bold', fontSize: '13px' }}>{stats.upcoming} upcoming</span>}
                       <button onClick={(e) => { e.stopPropagation(); setEditingId(emp.id); setEditForm({ name: emp.name, site: emp.site, active: emp.active !== false }) }} style={btnSecondary}>Edit</button>
-                      <span style={{ fontSize: '18px', color: '#8899aa' }}>{isExpanded ? '\u25B2' : '\u25BC'}</span>
+                      <span style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>{isExpanded ? '\u25B2' : '\u25BC'}</span>
                     </div>
                   </div>
 
                   {isExpanded && (
-                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(17,47,82,0.14)' }}>
                       {(itemsByEmployee[emp.id] || []).length === 0 ? (
                         <div style={{ color: '#556677', fontSize: '13px' }}>No compliance items</div>
                       ) : (
@@ -379,14 +379,14 @@ function EmployeesTab({ employees, complianceItems, siteOptions }) {
                           {(itemsByEmployee[emp.id] || []).map(item => (
                             <div key={item.id} style={{
                               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                              padding: '8px 12px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '6px'
+                              padding: '8px 12px', backgroundColor: 'rgba(17,47,82,0.05)', borderRadius: '6px'
                             }}>
                               <span style={{ fontSize: '13px' }}>
                                 {COMPLIANCE_CATEGORIES[item.category]?.icon} {COMPLIANCE_CATEGORIES[item.category]?.label || item.category}
-                                {item.subtype && <span style={{ color: '#8899aa' }}> ({item.subtype})</span>}
+                                {item.subtype && <span style={{ color: 'var(--text-secondary)' }}> ({item.subtype})</span>}
                               </span>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ fontSize: '12px', color: '#8899aa' }}>Due: {formatDateShort(item.dueDate)}</span>
+                                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Due: {formatDateShort(item.dueDate)}</span>
                                 {statusBadge(getStatus(item.dueDate))}
                               </div>
                             </div>
@@ -608,8 +608,8 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
             boxShadow: '0 20px 40px rgba(0,0,0,0.45)',
             padding: '20px'
           }}>
-            <h4 style={{ margin: '0 0 6px 0', color: '#e8e8e8' }}>Add Compliance Item</h4>
-            <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '14px' }}>
+            <h4 style={{ margin: '0 0 6px 0', color: 'var(--text-primary)' }}>Add Compliance Item</h4>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
               Step {wizardStep} of {maxWizardStep}
             </div>
 
@@ -760,7 +760,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
       )}
 
       {/* Items list */}
-      <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '8px' }}>{filtered.length} items</div>
+      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px' }}>{filtered.length} items</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {filtered.map(item => {
           const s = getStatus(item.dueDate)
@@ -773,7 +773,7 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
 
           if (isEditing) {
             return (
-              <div key={item.id} style={{ ...cardStyle, border: '2px solid #E53935', marginBottom: '0' }}>
+              <div key={item.id} style={{ ...cardStyle, border: '2px solid #CD4E42', marginBottom: '0' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
                   <div>
                     <label style={labelStyle}>Last Completed</label>
@@ -800,16 +800,16 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
             <div key={item.id} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               padding: '12px 16px', borderRadius: '8px',
-              border: s === 'overdue' ? '2px solid #f44336' : '1px solid rgba(255,255,255,0.08)',
-              backgroundColor: 'rgba(255,255,255,0.03)'
+              border: s === 'overdue' ? '2px solid #B75E54' : '1px solid rgba(17,47,82,0.14)',
+              backgroundColor: 'rgba(17,47,82,0.05)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, flexWrap: 'wrap' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '14px', minWidth: '140px' }}>{itemDisplayLabel}</span>
                 {itemTargetType === 'employee' && itemSite && (
                   <span style={{
                     fontSize: '12px',
-                    color: '#8899aa',
-                    backgroundColor: 'rgba(255,255,255,0.06)',
+                    color: 'var(--text-secondary)',
+                    backgroundColor: 'rgba(17,47,82,0.10)',
                     padding: '2px 8px',
                     borderRadius: '4px'
                   }}>
@@ -818,12 +818,12 @@ function ItemsTab({ employees, complianceItems, siteOptions }) {
                 )}
                 <span style={{ fontSize: '13px' }}>
                   {COMPLIANCE_CATEGORIES[item.category]?.icon} {COMPLIANCE_CATEGORIES[item.category]?.label || item.category}
-                  {item.subtype && <span style={{ color: '#8899aa' }}> ({item.subtype})</span>}
+                  {item.subtype && <span style={{ color: 'var(--text-secondary)' }}> ({item.subtype})</span>}
                 </span>
-                {item.notes && <span style={{ fontSize: '12px', color: '#8899aa', fontStyle: 'italic' }}>{item.notes}</span>}
+                {item.notes && <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic' }}>{item.notes}</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                <span style={{ fontSize: '12px', color: '#8899aa' }}>Due: {formatDateShort(item.dueDate)}</span>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Due: {formatDateShort(item.dueDate)}</span>
                 {statusBadge(s)}
                 <button onClick={() => {
                   setEditingId(item.id)
@@ -913,8 +913,8 @@ function CintasTab({ cintasServices }) {
       </div>
 
       {adding && (
-        <div style={{ ...cardStyle, border: '2px solid #E53935' }}>
-          <h4 style={{ margin: '0 0 12px 0', color: '#e8e8e8' }}>Add Cintas Service</h4>
+        <div style={{ ...cardStyle, border: '2px solid #CD4E42' }}>
+          <h4 style={{ margin: '0 0 12px 0', color: 'var(--text-primary)' }}>Add Cintas Service</h4>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
             <div>
               <label style={labelStyle}>Site Address *</label>
@@ -946,19 +946,19 @@ function CintasTab({ cintasServices }) {
 
       {Object.entries(grouped).map(([address, services]) => (
         <div key={address} style={{ ...cardStyle }}>
-          <h4 style={{ margin: '0 0 12px 0', color: '#e8e8e8', fontSize: '15px' }}>{address}</h4>
+          <h4 style={{ margin: '0 0 12px 0', color: 'var(--text-primary)', fontSize: '15px' }}>{address}</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {services.map(svc => (
               <div key={svc.id} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '10px 14px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '6px',
-                border: '1px solid rgba(255,255,255,0.06)'
+                padding: '10px 14px', backgroundColor: 'rgba(17,47,82,0.05)', borderRadius: '6px',
+                border: '1px solid rgba(17,47,82,0.10)'
               }}>
                 <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{svc.serviceType}</span>
-                  {svc.monthDue && <span style={{ fontSize: '12px', color: '#8899aa' }}>Due: {svc.monthDue}</span>}
-                  <span style={{ fontSize: '12px', color: '#8899aa' }}>Last: {formatDateShort(svc.lastCompleted)}</span>
-                  {svc.fiveYearNote && <span style={{ fontSize: '11px', color: '#FF9800' }}>{svc.fiveYearNote}</span>}
+                  {svc.monthDue && <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Due: {svc.monthDue}</span>}
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Last: {formatDateShort(svc.lastCompleted)}</span>
+                  {svc.fiveYearNote && <span style={{ fontSize: '11px', color: '#B07A28' }}>{svc.fiveYearNote}</span>}
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                   {editingId === svc.id ? (
@@ -1054,7 +1054,7 @@ function CompliancePanel({ user, scopeSites = null }) {
           borderRadius: '10px',
           backgroundColor: 'rgba(255,152,0,0.15)',
           border: '1px solid rgba(255,152,0,0.3)',
-          color: '#FF9800',
+          color: '#B07A28',
           fontSize: '13px'
         }}>
           No compliance location scope is configured for this account.
@@ -1071,8 +1071,8 @@ function CompliancePanel({ user, scopeSites = null }) {
             onClick={() => setSubTab(key)}
             style={{
               padding: '8px 18px',
-              backgroundColor: activeSubTab === key ? '#E53935' : 'rgba(255,255,255,0.06)',
-              color: activeSubTab === key ? 'white' : '#8899aa',
+              backgroundColor: activeSubTab === key ? '#CD4E42' : 'rgba(17,47,82,0.10)',
+              color: activeSubTab === key ? 'white' : 'var(--text-secondary)',
               border: 'none',
               borderRadius: '6px',
               fontSize: '13px',
@@ -1095,4 +1095,6 @@ function CompliancePanel({ user, scopeSites = null }) {
 }
 
 export default CompliancePanel
+
+
 

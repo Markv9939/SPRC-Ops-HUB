@@ -1,6 +1,6 @@
 # Phase 9 Regression + UAT Checklist
 
-Last updated: 2026-02-13
+Last updated: 2026-02-17
 Owner: Claude Code (engineering run) + Admin/Supervisor (business signoff)
 
 ## Automated Smoke Checks
@@ -74,6 +74,20 @@ Walkthrough script:
 | DI-5 | Data Integrity | Offline mode write attempt | Writes are blocked with explicit offline feedback | PENDING | Network-off scenario |
 | SC-1 | Scheduler | Sync run with configured due rules | Correct tasks created for assignment scope | PENDING | Requires seeded scenario |
 | SC-2 | Scheduler | Re-run same cycle | No duplicate cycle task creation | PENDING | Determinism check |
+
+## Mobile/Tablet Validation Checklist (Required Per Deploy Batch)
+
+Status legend: `PASS`, `FAIL`, `PENDING`
+
+| ID | Device | Scenario | Expected Result | Status | Evidence |
+|---|---|---|---|---|---|
+| MT-1 | iPhone (portrait) | PIN login and role landing | No clipping/overlap; controls remain readable | PENDING | |
+| MT-2 | iPhone (portrait) | BHT primary actions | Main action buttons are visible and easy to tap | PENDING | |
+| MT-3 | iPhone (portrait) | EOC sticky actions | `Next Unanswered` and `Submit EOC` remain reachable | PENDING | |
+| MT-4 | iPad (portrait) | Card/list spacing | Cards keep clear hierarchy and spacing | PENDING | |
+| MT-5 | iPad (landscape) | Dashboard and queue layout | No horizontal overflow or hidden controls | PENDING | |
+| MT-6 | iPhone/iPad | Input focus + keyboard | Focus is clear; keyboard does not block required fields/actions | PENDING | |
+| MT-7 | iPhone/iPad | Status chips/badges | Status colors are visually distinct and understandable | PENDING | |
 
 ## Signoff
 

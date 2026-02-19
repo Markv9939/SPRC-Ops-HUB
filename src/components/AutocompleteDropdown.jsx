@@ -95,9 +95,9 @@ function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, lo
             padding: '12px 14px',
             cursor: 'pointer',
             fontSize: '14px',
-            color: '#e8e8e8',
+            color: 'var(--text-primary)',
             transition: 'background 0.1s',
-            borderBottom: index < suggestions.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+            borderBottom: index < suggestions.length - 1 ? '1px solid rgba(17,47,82,0.08)' : 'none',
             minHeight: '44px', // Mobile tap target
             display: 'flex',
             alignItems: 'center'
@@ -118,3 +118,5 @@ function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, lo
 }
 
 export default AutocompleteDropdown
+
+

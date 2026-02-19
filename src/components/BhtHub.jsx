@@ -41,24 +41,24 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
 
   const renderIssueUpdatesCard = () => issueUpdates.length > 0 && (
     <div className="glass-card" style={{ marginBottom: '16px', padding: '14px 16px' }}>
-      <div style={{ fontSize: '14px', fontWeight: 700, color: '#e8e8e8', marginBottom: '10px' }}>
+      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '10px' }}>
         Issue Updates
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {issueUpdates.map(update => (
           <div key={update.id} style={{
-            border: '1px solid rgba(255,255,255,0.08)',
+            border: '1px solid rgba(17,47,82,0.14)',
             borderRadius: '8px',
             padding: '10px',
-            backgroundColor: 'rgba(255,255,255,0.03)'
+            backgroundColor: 'rgba(17,47,82,0.05)'
           }}>
             <div style={{ fontSize: '12px', color: '#cfd8dc', marginBottom: '4px', textTransform: 'uppercase' }}>
               {update.status === 'resolved' ? 'Resolved' : 'In Progress'}
             </div>
-            <div style={{ fontSize: '13px', color: '#e8e8e8', marginBottom: '4px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-primary)', marginBottom: '4px' }}>
               {update.message || 'Issue status updated.'}
             </div>
-            <div style={{ fontSize: '12px', color: '#8899aa' }}>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
               Note: {update.statusNote || 'No note provided.'}
             </div>
             <div style={{ fontSize: '11px', color: '#556677', marginTop: '4px' }}>
@@ -126,8 +126,8 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
           border: '2px solid rgba(255,152,0,0.3)'
         }}>
           <div style={{ fontSize: '40px', marginBottom: '12px' }}>!</div>
-          <h3 style={{ color: '#FF9800', marginBottom: '8px', fontSize: '18px' }}>No Active Assignment</h3>
-          <p style={{ color: '#8899aa', fontSize: '14px', lineHeight: '1.5' }}>
+          <h3 style={{ color: '#B07A28', marginBottom: '8px', fontSize: '18px' }}>No Active Assignment</h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: '1.5' }}>
             You don't have an active assignment. Contact your supervisor to get assigned to a location, shift, and van(s).
           </p>
         </div>
@@ -140,10 +140,10 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
 
       {/* Context bar */}
       <div className="glass-card" style={{ marginBottom: '16px', padding: '14px 18px' }}>
-        <div style={{ fontSize: '15px', fontWeight: 700, color: '#e8e8e8', marginBottom: '4px' }}>
+        <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
           {user.name}
         </div>
-        <div style={{ fontSize: '13px', color: '#8899aa' }}>
+        <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
           {locationLabel} - {shiftLabel}
           {vanLabels.length > 0 ? ` - ${vanLabels.join(', ')}` : ''}
         </div>
@@ -194,8 +194,8 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
                 gridTemplateColumns: '1fr auto',
                 gap: '8px',
                 alignItems: 'center',
-                backgroundColor: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.08)',
+                backgroundColor: 'rgba(17,47,82,0.05)',
+                border: '1px solid rgba(17,47,82,0.14)',
                 borderRadius: '10px',
                 padding: '10px'
               }}>
@@ -206,9 +206,9 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
                     width: '100%',
                     padding: '10px',
                     borderRadius: '8px',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    backgroundColor: 'rgba(255,255,255,0.06)',
-                    color: '#e8e8e8',
+                    border: '1px solid rgba(17,47,82,0.22)',
+                    backgroundColor: 'rgba(17,47,82,0.10)',
+                    color: 'var(--text-primary)',
                     fontSize: '14px'
                   }}
                 >
@@ -241,14 +241,14 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
           </div>
 
           {actionableTasks.length === 0 ? (
-            <div style={{ fontSize: '13px', color: '#8899aa' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
               No pending or overdue EOC tasks.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {Object.entries(actionableByLocation).map(([locationId, locationTasks]) => (
                 <div key={locationId}>
-                  <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '6px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
                     {LOCATIONS.find(l => l.id === locationId)?.label || locationId}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -292,3 +292,5 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
 }
 
 export default BhtHub
+
+

@@ -23,14 +23,14 @@ const DIALOG_STYLE = {
   border: '1px solid rgba(229,57,53,0.35)',
   boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
   padding: '22px',
-  color: '#e8e8e8'
+  color: 'var(--text-primary)'
 }
 
 const CANCEL_BUTTON_STYLE = {
   flex: 1,
   padding: '12px 14px',
-  backgroundColor: 'rgba(255,255,255,0.07)',
-  color: '#8899aa',
+  backgroundColor: 'rgba(17,47,82,0.12)',
+  color: 'var(--text-secondary)',
   border: 'none',
   borderRadius: '10px',
   fontSize: '15px',
@@ -43,15 +43,15 @@ function toneStyle(tone) {
     return {
       border: '1px solid rgba(255,152,0,0.45)',
       heading: '#FFB74D',
-      buttonBg: '#FF9800',
+      buttonBg: '#B07A28',
       buttonText: '#1f2933'
     }
   }
   if (tone === 'success') {
     return {
       border: '1px solid rgba(76,175,80,0.45)',
-      heading: '#81C784',
-      buttonBg: '#4CAF50',
+      heading: '#2F7D57',
+      buttonBg: '#2F7D57',
       buttonText: '#ffffff'
     }
   }
@@ -65,8 +65,8 @@ function toneStyle(tone) {
   }
   return {
     border: '1px solid rgba(229,57,53,0.45)',
-    heading: '#E53935',
-    buttonBg: '#E53935',
+    heading: '#CD4E42',
+    buttonBg: '#CD4E42',
     buttonText: '#ffffff'
   }
 }
@@ -192,7 +192,7 @@ function DialogHost() {
           whiteSpace: 'pre-wrap',
           lineHeight: 1.4,
           fontSize: '15px',
-          color: '#e8e8e8'
+          color: 'var(--text-primary)'
         }}>
           {activeDialog.message || ''}
         </div>
@@ -246,3 +246,5 @@ function DialogHost() {
 }
 
 export default DialogHost
+
+

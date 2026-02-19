@@ -597,17 +597,17 @@ function SupervisorEocPanel({ user, isOffline = false }) {
 
   const selectStyle = {
     padding: '6px 10px',
-    border: '2px solid rgba(255,255,255,0.1)',
+    border: '2px solid rgba(17,47,82,0.20)',
     borderRadius: '6px',
     fontSize: '13px',
-    background: 'rgba(255,255,255,0.06)',
-    color: '#e8e8e8'
+    background: 'rgba(17,47,82,0.10)',
+    color: 'var(--text-primary)'
   }
 
   const tabBtnStyle = (active) => ({
     padding: '8px 16px',
-    backgroundColor: active ? '#E53935' : 'rgba(255,255,255,0.06)',
-    color: active ? 'white' : '#8899aa',
+    backgroundColor: active ? '#CD4E42' : 'rgba(17,47,82,0.10)',
+    color: active ? 'white' : 'var(--text-secondary)',
     border: 'none',
     borderRadius: '6px',
     fontSize: '13px',
@@ -668,8 +668,8 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                 <div key={a.id} style={{
                   padding: '14px',
                   borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  backgroundColor: 'rgba(255,255,255,0.05)'
+                  border: '1px solid rgba(17,47,82,0.14)',
+                  backgroundColor: 'rgba(17,47,82,0.08)'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontWeight: 700, fontSize: '14px' }}>
@@ -677,7 +677,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                     </span>
                     {statusBadge(a.status)}
                   </div>
-                  <div style={{ fontSize: '13px', color: '#8899aa' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                     Due: {a.dueDate} &bull; BHT: {a.assignedTechName || 'Unassigned'}
                     {a.eocType ? ` \u00B7 ${a.eocType.toUpperCase()}` : ''}
                     {a.vanId ? ` \u00B7 ${vanLabel(a.vanId)}` : ''}
@@ -719,8 +719,8 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                 <div key={issue.id} style={{
                   padding: '14px',
                   borderRadius: '8px',
-                  border: issue.severity === 'high' ? '2px solid #FF5722' : '1px solid rgba(255,255,255,0.08)',
-                  backgroundColor: 'rgba(255,255,255,0.05)'
+                  border: issue.severity === 'high' ? '2px solid #B75E54' : '1px solid rgba(17,47,82,0.14)',
+                  backgroundColor: 'rgba(17,47,82,0.08)'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontWeight: 700, fontSize: '14px' }}>
@@ -728,7 +728,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                     </span>
                     {severityBadge(issue.severity)}
                   </div>
-                  <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
                     {issue.description}
                   </div>
                   <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
@@ -749,7 +749,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                         <button
                           onClick={handleResolveIssue}
                           style={{
-                            padding: '6px 14px', backgroundColor: '#4CAF50', color: 'white',
+                            padding: '6px 14px', backgroundColor: '#2F7D57', color: 'white',
                             border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
                             cursor: 'pointer'
                           }}
@@ -759,7 +759,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                         <button
                           onClick={() => { setResolvingIssue(null); setResolveNotes('') }}
                           style={{
-                            padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#8899aa',
+                            padding: '6px 14px', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-secondary)',
                             border: 'none', borderRadius: '6px', fontSize: '13px', cursor: 'pointer'
                           }}
                         >
@@ -770,7 +770,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                       <button
                         onClick={() => setResolvingIssue(issue)}
                         style={{
-                          padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8',
+                          padding: '6px 14px', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-primary)',
                           border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
                           cursor: 'pointer'
                         }}
@@ -779,7 +779,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                       </button>
                     )
                   ) : (
-                    <div style={{ fontSize: '12px', color: '#4CAF50', fontWeight: 600 }}>
+                    <div style={{ fontSize: '12px', color: '#2F7D57', fontWeight: 600 }}>
                       Resolved {issue.resolvedNotes ? `— ${issue.resolvedNotes}` : ''}
                     </div>
                   )}
@@ -793,7 +793,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
       {/* ===== TEMPLATE TAB ===== */}
       {subTab === 'template' && (
         <div>
-          <p style={{ fontSize: '13px', color: '#8899aa', marginBottom: '16px' }}>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
             Draft -&gt; Diff -&gt; Publish workflow. Draft edits do not affect active checklists until publish.
           </p>
           <div style={{ marginBottom: '12px' }}>
@@ -808,22 +808,22 @@ function SupervisorEocPanel({ user, isOffline = false }) {
           ) : (
             <>
               <div style={{
-                backgroundColor: 'rgba(255,255,255,0.03)',
+                backgroundColor: 'rgba(17,47,82,0.05)',
                 borderRadius: '10px',
-                border: '1px solid rgba(255,255,255,0.08)',
+                border: '1px solid rgba(17,47,82,0.14)',
                 padding: '12px',
                 marginBottom: '12px'
               }}>
-                <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
                   Live template: {publishedTemplateItems.length} item(s)
                   {lastPublishedVersion ? ` · v${lastPublishedVersion.version || 0}` : ' · not published yet'}
                   {lastPublishedVersion?.versionNote ? ` · "${lastPublishedVersion.versionNote}"` : ''}
                 </div>
-                <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
                   Draft: {draftTemplateItems.length} item(s) · {templateDiff.hasChanges ? 'changes detected' : 'no changes'}
                 </div>
                 {!isTemplateAdmin && (
-                  <div style={{ fontSize: '12px', color: '#FF9800' }}>
+                  <div style={{ fontSize: '12px', color: '#B07A28' }}>
                     Read-only: only admin can edit drafts and publish templates.
                   </div>
                 )}
@@ -842,13 +842,13 @@ function SupervisorEocPanel({ user, isOffline = false }) {
               </div>
 
               <div style={{
-                backgroundColor: 'rgba(255,255,255,0.05)',
+                backgroundColor: 'rgba(17,47,82,0.08)',
                 borderRadius: '12px',
                 padding: '16px',
                 marginBottom: '16px',
-                border: '1px solid rgba(255,255,255,0.08)'
+                border: '1px solid rgba(17,47,82,0.14)'
               }}>
-                <h4 style={{ margin: '0 0 12px 0', color: '#e8e8e8', fontSize: '14px' }}>
+                <h4 style={{ margin: '0 0 12px 0', color: 'var(--text-primary)', fontSize: '14px' }}>
                   {editingTemplateId ? 'Edit Draft Item' : 'Add Draft Item'}
                 </h4>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
@@ -914,20 +914,20 @@ function SupervisorEocPanel({ user, isOffline = false }) {
               </div>
 
               <div style={{
-                backgroundColor: 'rgba(255,255,255,0.03)',
+                backgroundColor: 'rgba(17,47,82,0.05)',
                 borderRadius: '10px',
-                border: '1px solid rgba(255,255,255,0.08)',
+                border: '1px solid rgba(17,47,82,0.14)',
                 padding: '12px',
                 marginBottom: '12px'
               }}>
-                <div style={{ fontSize: '12px', color: '#e8e8e8', marginBottom: '6px', fontWeight: 700 }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '6px', fontWeight: 700 }}>
                   Draft vs Published Diff
                 </div>
-                <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '6px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
                   Added: {templateDiff.added.length} · Removed: {templateDiff.removed.length} · Changed: {templateDiff.changed.length} · Unchanged: {templateDiff.unchangedCount}
                 </div>
                 {templateDiff.hasChanges ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: '#8899aa' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-secondary)' }}>
                     {templateDiff.added.slice(0, 5).map(item => (
                       <div key={`add:${item.id || templateDiffKey(item)}`}>+ {item.category} · {item.label}</div>
                     ))}
@@ -941,20 +941,20 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                     ))}
                   </div>
                 ) : (
-                  <div style={{ fontSize: '12px', color: '#8899aa' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                     No publishable differences yet.
                   </div>
                 )}
               </div>
 
               <div style={{
-                backgroundColor: 'rgba(255,255,255,0.05)',
+                backgroundColor: 'rgba(17,47,82,0.08)',
                 borderRadius: '12px',
                 padding: '16px',
                 marginBottom: '16px',
-                border: '1px solid rgba(255,255,255,0.08)'
+                border: '1px solid rgba(17,47,82,0.14)'
               }}>
-                <h4 style={{ margin: '0 0 10px 0', color: '#e8e8e8', fontSize: '14px' }}>Publish Draft</h4>
+                <h4 style={{ margin: '0 0 10px 0', color: 'var(--text-primary)', fontSize: '14px' }}>Publish Draft</h4>
                 <div style={{ marginBottom: '10px' }}>
                   <label style={{ fontSize: '11px', color: '#556677', display: 'block', marginBottom: '4px' }}>
                     Version Note (required)
@@ -987,18 +987,18 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                     <div key={item.id} style={{
                       padding: '12px',
                       borderRadius: '8px',
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      backgroundColor: 'rgba(255,255,255,0.05)'
+                      border: '1px solid rgba(17,47,82,0.14)',
+                      backgroundColor: 'rgba(17,47,82,0.08)'
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                         <span style={{ fontWeight: 700, fontSize: '14px' }}>
                           {item.category} — {item.label}
                         </span>
-                        <span className="badge" style={{ background: item.active === false ? 'rgba(255,255,255,0.06)' : 'rgba(76,175,80,0.15)', color: '#e8e8e8' }}>
+                        <span className="badge" style={{ background: item.active === false ? 'rgba(17,47,82,0.10)' : 'rgba(76,175,80,0.15)', color: 'var(--text-primary)' }}>
                           {item.active === false ? 'Inactive' : 'Active'}
                         </span>
                       </div>
-                      <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
                         Order: {item.order || 0}
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
@@ -1017,18 +1017,18 @@ function SupervisorEocPanel({ user, isOffline = false }) {
       {/* ===== VEHICLES TAB ===== */}
       {subTab === 'vehicles' && (
         <div>
-          <p style={{ fontSize: '13px', color: '#8899aa', marginBottom: '16px' }}>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
             Manage vehicle details (name, VIN) and assign vans to locations.
           </p>
 
           <div style={{
-            backgroundColor: 'rgba(255,255,255,0.05)',
+            backgroundColor: 'rgba(17,47,82,0.08)',
             borderRadius: '12px',
             padding: '16px',
             marginBottom: '16px',
-            border: '1px solid rgba(255,255,255,0.08)'
+            border: '1px solid rgba(17,47,82,0.14)'
           }}>
-            <h4 style={{ margin: '0 0 12px 0', color: '#e8e8e8', fontSize: '14px' }}>
+            <h4 style={{ margin: '0 0 12px 0', color: 'var(--text-primary)', fontSize: '14px' }}>
               {editingVehicleId ? 'Edit Vehicle' : 'Add Vehicle'}
             </h4>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
@@ -1111,16 +1111,16 @@ function SupervisorEocPanel({ user, isOffline = false }) {
                 <div key={v.id} style={{
                   padding: '12px',
                   borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  backgroundColor: 'rgba(255,255,255,0.05)'
+                  border: '1px solid rgba(17,47,82,0.14)',
+                  backgroundColor: 'rgba(17,47,82,0.08)'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                     <span style={{ fontWeight: 700, fontSize: '14px' }}>{v.name}</span>
-                    <span className="badge" style={{ background: v.active === false ? 'rgba(255,255,255,0.06)' : 'rgba(76,175,80,0.15)', color: '#e8e8e8' }}>
+                    <span className="badge" style={{ background: v.active === false ? 'rgba(17,47,82,0.10)' : 'rgba(76,175,80,0.15)', color: 'var(--text-primary)' }}>
                       {v.active === false ? 'Inactive' : 'Active'}
                     </span>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
                     VIN: {v.vin || '--'} &bull; Van: {vanLabel(v.vanId)} &bull; Location: {v.locationId ? locationLabel(v.locationId) : 'Unassigned'}
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
@@ -1138,5 +1138,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
 }
 
 export default SupervisorEocPanel
+
+
 
 

@@ -238,7 +238,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
   if (loading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center' }}>
-        <p style={{ color: '#8899aa' }}>Loading transport...</p>
+        <p style={{ color: 'var(--text-secondary)' }}>Loading transport...</p>
       </div>
     )
   }
@@ -248,7 +248,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
 
       {/* Title row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }} className="animate-in">
-        <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: '#e8e8e8' }}>Transport</h2>
+        <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)' }}>Transport</h2>
         <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#556677', padding: '4px 8px', borderRadius: '6px' }}>✕</button>
       </div>
 
@@ -269,13 +269,13 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
       <p style={{ textAlign: 'center', fontSize: '11px', color: '#556677', marginBottom: '16px' }}>Tap to log an arrival time</p>
 
       {isOffline && (
-        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#FF9800', textAlign: 'center' }}>
+        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#B07A28', textAlign: 'center' }}>
           Offline mode is active. Transport writes are disabled until connection is restored.
         </div>
       )}
 
       {submitLocked && (
-        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#FF9800', textAlign: 'center' }}>
+        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#B07A28', textAlign: 'center' }}>
           {normalizedStatus === 'closed'
             ? 'Transport is finished and locked. You can review details, but editing is disabled.'
             : 'Transport is returned and locked. You can review details, but editing is disabled.'}
@@ -302,7 +302,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
       {/* DC Paperwork Status (shown after return) */}
       {dcPaperworkStatus && (
         <div className="glass-card animate-in" style={{ marginBottom: '16px' }}>
-          <div style={{ fontSize: '14px', color: '#e8e8e8' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-primary)' }}>
             <strong>DC paperwork:</strong>{' '}
             {dcStatusLabel(dcPaperworkStatus)}
             {dcPaperworkStatus === 'other' && dcPaperworkOtherNote && (
@@ -320,7 +320,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
           <div key={i} className="dest-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               {d.name && <div style={{ fontWeight: 700, fontSize: '14px' }}>{d.name}</div>}
-              <div style={{ fontSize: '13px', color: '#8899aa' }}>{d.address}</div>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{d.address}</div>
             </div>
             <button
               onClick={() => removeDest(i)}
@@ -336,7 +336,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
             existingDestinations={destinations}
           />
         ) : (
-          <div style={{ fontSize: '12px', color: '#8899aa' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
             {isOffline ? 'Destination editing is disabled while offline.' : 'Destination editing is locked after submit.'}
           </div>
         )}
@@ -360,7 +360,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
             transportId={transportId}
           />
         ) : (
-          <div style={{ fontSize: '12px', color: '#8899aa' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
             {isOffline ? 'Client editing is disabled while offline.' : 'Client editing is locked after submit.'}
           </div>
         )}
@@ -436,7 +436,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
             <h2 style={{
               margin: '0 0 24px 0',
               fontSize: '20px',
-              color: '#E53935',
+              color: '#CD4E42',
               textAlign: 'center'
             }}>
               REMIND THE CLIENT ABOUT DC PAPERWORK
@@ -447,8 +447,8 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
                 style={{
                   flex: 1,
                   padding: '14px',
-                  backgroundColor: 'rgba(255,255,255,0.06)',
-                  color: '#8899aa',
+                  backgroundColor: 'rgba(17,47,82,0.10)',
+                  color: 'var(--text-secondary)',
                   border: 'none',
                   borderRadius: '10px',
                   fontSize: '16px',
@@ -463,7 +463,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
                 style={{
                   flex: 1,
                   padding: '14px',
-                  backgroundColor: '#E53935',
+                  backgroundColor: '#CD4E42',
                   color: 'white',
                   border: 'none',
                   borderRadius: '10px',
@@ -491,4 +491,6 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
 }
 
 export default TransportCard
+
+
 

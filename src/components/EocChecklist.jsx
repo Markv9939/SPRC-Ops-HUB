@@ -613,7 +613,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       <div style={{ padding: '20px', maxWidth: '700px', margin: '0 auto' }}>
         <div className="glass-card" style={{ textAlign: 'center', padding: '40px 20px' }}>
           <p style={{ color: '#C94A3F', marginBottom: '16px' }}>{error}</p>
-          <button className="btn" onClick={onBack} style={{ background: 'rgba(255,255,255,0.06)', color: '#e8e8e8' }}>
+          <button className="btn" onClick={onBack} style={{ background: 'rgba(17,47,82,0.10)', color: 'var(--text-primary)' }}>
             Back
           </button>
         </div>
@@ -643,14 +643,14 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
             border: 'none',
             fontSize: '24px',
             cursor: 'pointer',
-            color: '#8899aa',
+            color: 'var(--text-secondary)',
             padding: '4px'
           }}
         >
           {'<-'}
         </button>
         <div>
-          <h2 style={{ margin: 0, fontSize: '32px', lineHeight: 1.1, color: '#e8e8e8', fontWeight: 700 }}>
+          <h2 style={{ margin: 0, fontSize: '32px', lineHeight: 1.1, color: 'var(--text-primary)', fontWeight: 700 }}>
             {eocType === 'van' ? 'Van EOC Checklist' : 'House EOC Checklist'}
           </h2>
           <div style={{ fontSize: '14px', color: '#9eb0c2', marginTop: '4px' }}>
@@ -662,11 +662,11 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       <div className="glass-card eoc-shell-card" style={{ padding: '14px', marginBottom: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
           <div>
-            <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '4px' }}>Completed by</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Completed by</div>
             <div className="badge badge-eoc-completed" style={{ fontSize: '12px' }}>{user?.name || 'Unknown User'}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '4px' }}>Draft status</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Draft status</div>
             <div className="eoc-inline-note">{draftStatusText}</div>
           </div>
         </div>
@@ -679,7 +679,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
         {eocType === 'van' ? (
           <>
-            <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>Vehicle Receiving Inspection</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>Vehicle Receiving Inspection</div>
             <div className="eoc-meta-grid">
               <input className="input" value={vehicleName} readOnly aria-label="Vehicle name" placeholder="Vehicle name" />
               <input className="input" value={vinNumber} readOnly aria-label="VIN number" placeholder="VIN number" />
@@ -695,13 +695,13 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
               />
             </div>
             {(!vehicleName || !vinNumber) && (
-              <div style={{ marginTop: '8px', fontSize: '12px', color: '#FF9800' }}>
+              <div style={{ marginTop: '8px', fontSize: '12px', color: '#B07A28' }}>
                 Vehicle details missing - ask supervisor to set vehicle name/VIN.
               </div>
             )}
           </>
         ) : (
-          <div style={{ fontSize: '13px', color: '#8899aa' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
             House: {locationLabel}
           </div>
         )}
@@ -725,11 +725,11 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
                   background: idx % 2 === 0 ? 'rgba(22,36,52,0.96)' : 'rgba(19,31,46,0.96)',
                   borderRadius: '10px',
                   padding: '12px',
-                  border: '1px solid rgba(255,255,255,0.16)'
+                  border: '1px solid rgba(17,47,82,0.28)'
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
-                  <div style={{ fontSize: '16px', color: '#e8e8e8', fontWeight: 600 }}>
+                  <div style={{ fontSize: '16px', color: 'var(--text-primary)', fontWeight: 600 }}>
                     {idx + 1}. {item.label}
                   </div>
                   <span className={`badge ${answers[item.id] ? (answers[item.id] === 'repair' ? 'badge-overdue' : 'badge-eoc-completed') : 'badge-eoc-pending'}`}>
@@ -782,7 +782,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         )
       })}
 
-      <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '16px' }}>
+      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
         Checklist must be completed on a weekly basis by staff on the first day of each shift. To be turned in to Supervisor following day.
       </div>
 
@@ -792,7 +792,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         </div>
       )}
       {isOffline && (
-        <div style={{ color: '#FF9800', fontSize: '12px', marginBottom: '12px', textAlign: 'center' }}>
+        <div style={{ color: '#B07A28', fontSize: '12px', marginBottom: '12px', textAlign: 'center' }}>
           Offline mode is active. EOC submission is disabled until connection is restored.
         </div>
       )}
@@ -803,7 +803,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           className="btn"
           onClick={jumpToNextOutstanding}
           disabled={!firstOutstandingItem}
-          style={{ width: '48%', fontSize: '16px', borderRadius: 'var(--radius)', background: 'rgba(255,255,255,0.08)', color: '#d8e2ec' }}
+          style={{ width: '48%', fontSize: '16px', borderRadius: 'var(--radius)', background: 'rgba(17,47,82,0.14)', color: 'var(--text-secondary)' }}
         >
           Next Unanswered
         </button>
@@ -821,3 +821,5 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 }
 
 export default EocChecklist
+
+

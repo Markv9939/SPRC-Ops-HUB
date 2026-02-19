@@ -46,7 +46,7 @@ function DCPaperworkModal({ onComplete, onCancel }) {
         <h2 style={{
           margin: '0 0 20px 0',
           fontSize: '20px',
-          color: '#e8e8e8',
+          color: 'var(--text-primary)',
           textAlign: 'center'
         }}>
           DC paperwork status
@@ -68,14 +68,14 @@ function DCPaperworkModal({ onComplete, onCancel }) {
                   fontSize: '14px',
                   cursor: 'pointer',
                   border: selected === opt.value
-                    ? '2px solid #E53935'
-                    : '2px solid rgba(255,255,255,0.1)',
+                    ? '2px solid #CD4E42'
+                    : '2px solid rgba(17,47,82,0.20)',
                   backgroundColor: selected === opt.value
                     ? 'rgba(229,57,53,0.15)'
-                    : 'rgba(255,255,255,0.05)',
+                    : 'rgba(17,47,82,0.08)',
                   color: selected === opt.value
-                    ? '#E53935'
-                    : '#e8e8e8',
+                    ? '#CD4E42'
+                    : 'var(--text-primary)',
                   fontWeight: selected === opt.value ? 'bold' : 'normal',
                   textAlign: 'left'
                 }}
@@ -90,7 +90,7 @@ function DCPaperworkModal({ onComplete, onCancel }) {
           <div style={{ marginBottom: '20px' }}>
             <label style={{
               fontSize: '13px',
-              color: '#8899aa',
+              color: 'var(--text-secondary)',
               display: 'block',
               marginBottom: '6px'
             }}>
@@ -104,15 +104,15 @@ function DCPaperworkModal({ onComplete, onCancel }) {
               style={{
                 width: '100%',
                 padding: '12px',
-                border: '2px solid rgba(255,255,255,0.1)',
+                border: '2px solid rgba(17,47,82,0.20)',
                 borderRadius: '8px',
                 fontSize: '14px',
                 outline: 'none',
                 boxSizing: 'border-box',
                 resize: 'vertical',
                 fontFamily: 'inherit',
-                backgroundColor: 'rgba(255,255,255,0.06)',
-                color: '#e8e8e8'
+                backgroundColor: 'rgba(17,47,82,0.10)',
+                color: 'var(--text-primary)'
               }}
             />
           </div>
@@ -127,8 +127,8 @@ function DCPaperworkModal({ onComplete, onCancel }) {
             style={{
               flex: 1,
               padding: '14px',
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              color: '#8899aa',
+              backgroundColor: 'rgba(17,47,82,0.10)',
+              color: 'var(--text-secondary)',
               border: 'none',
               borderRadius: '10px',
               fontSize: '16px',
@@ -144,7 +144,7 @@ function DCPaperworkModal({ onComplete, onCancel }) {
             style={{
               flex: 1,
               padding: '14px',
-              backgroundColor: isValid ? '#E53935' : 'rgba(255,255,255,0.06)',
+              backgroundColor: isValid ? '#CD4E42' : 'rgba(17,47,82,0.10)',
               color: isValid ? 'white' : '#556677',
               border: 'none',
               borderRadius: '10px',
@@ -163,3 +163,5 @@ function DCPaperworkModal({ onComplete, onCancel }) {
 }
 
 export default DCPaperworkModal
+
+

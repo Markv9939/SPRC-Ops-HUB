@@ -985,7 +985,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
         <div>
-          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
             User ID *
           </label>
           <input
@@ -997,17 +997,17 @@ function SupervisorDashboard({ user, isOffline = false }) {
             style={{
               width: '100%',
               padding: '8px',
-              border: '2px solid rgba(255,255,255,0.1)',
+              border: '2px solid rgba(17,47,82,0.20)',
               borderRadius: '6px',
               fontSize: '14px',
               boxSizing: 'border-box',
-              backgroundColor: !isNewUser ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
-              color: '#e8e8e8'
+              backgroundColor: !isNewUser ? 'rgba(17,47,82,0.04)' : 'rgba(17,47,82,0.10)',
+              color: 'var(--text-primary)'
             }}
           />
         </div>
         <div>
-          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
             Name *
           </label>
           <input
@@ -1018,17 +1018,17 @@ function SupervisorDashboard({ user, isOffline = false }) {
             style={{
               width: '100%',
               padding: '8px',
-              border: '2px solid rgba(255,255,255,0.1)',
+              border: '2px solid rgba(17,47,82,0.20)',
               borderRadius: '6px',
               fontSize: '14px',
               boxSizing: 'border-box',
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              color: '#e8e8e8'
+              backgroundColor: 'rgba(17,47,82,0.10)',
+              color: 'var(--text-primary)'
             }}
           />
         </div>
         <div>
-          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
             PIN (4 digits) * {!isNewUser ? '(set new PIN to rotate)' : ''}
           </label>
           <input
@@ -1040,17 +1040,17 @@ function SupervisorDashboard({ user, isOffline = false }) {
             style={{
               width: '100%',
               padding: '8px',
-              border: '2px solid rgba(255,255,255,0.1)',
+              border: '2px solid rgba(17,47,82,0.20)',
               borderRadius: '6px',
               fontSize: '14px',
               boxSizing: 'border-box',
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              color: '#e8e8e8'
+              backgroundColor: 'rgba(17,47,82,0.10)',
+              color: 'var(--text-primary)'
             }}
           />
         </div>
         <div>
-          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
             Role
           </label>
           <select
@@ -1073,12 +1073,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
             style={{
               width: '100%',
               padding: '8px',
-              border: '2px solid rgba(255,255,255,0.1)',
+              border: '2px solid rgba(17,47,82,0.20)',
               borderRadius: '6px',
               fontSize: '14px',
               boxSizing: 'border-box',
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              color: '#e8e8e8'
+              backgroundColor: 'rgba(17,47,82,0.10)',
+              color: 'var(--text-primary)'
             }}
           >
             <option value="">Select Role...</option>
@@ -1088,7 +1088,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           </select>
         </div>
         <div>
-          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
             Location
           </label>
           <select
@@ -1108,12 +1108,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
             style={{
               width: '100%',
               padding: '8px',
-              border: '2px solid rgba(255,255,255,0.1)',
+              border: '2px solid rgba(17,47,82,0.20)',
               borderRadius: '6px',
               fontSize: '14px',
               boxSizing: 'border-box',
-              backgroundColor: locationSelectDisabled ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
-              color: '#e8e8e8',
+              backgroundColor: locationSelectDisabled ? 'rgba(17,47,82,0.04)' : 'rgba(17,47,82,0.10)',
+              color: 'var(--text-primary)',
               cursor: locationSelectDisabled ? 'not-allowed' : 'pointer'
             }}
           >
@@ -1135,7 +1135,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         </div>
         {showHouseSelect && (
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               OTC House *
             </label>
             <select
@@ -1144,12 +1144,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
               style={{
                 width: '100%',
                 padding: '8px',
-                border: '2px solid rgba(255,255,255,0.1)',
+                border: '2px solid rgba(17,47,82,0.20)',
                 borderRadius: '6px',
                 fontSize: '14px',
                 boxSizing: 'border-box',
-                backgroundColor: 'rgba(255,255,255,0.06)',
-                color: '#e8e8e8'
+                backgroundColor: 'rgba(17,47,82,0.10)',
+                color: 'var(--text-primary)'
               }}
             >
               <option value="">Select House...</option>
@@ -1161,12 +1161,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
         )}
         {isBhtRole(normalizedFormRole) && (
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Vans * (select one or more)
             </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '8px', border: '2px solid rgba(255,255,255,0.1)', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.06)' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '8px', border: '2px solid rgba(17,47,82,0.20)', borderRadius: '6px', backgroundColor: 'rgba(17,47,82,0.10)' }}>
               {vanOptions.length === 0 ? (
-                <span style={{ fontSize: '13px', color: '#8899aa' }}>Select location first</span>
+                <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Select location first</span>
               ) : vanOptions.map(vanOption => {
                 const normalizedCurrentVanIds = normalizeVanIdList(userForm.vanIds, userForm.vanId)
                 const selected = normalizedCurrentVanIds.includes(vanOption.id)
@@ -1187,9 +1187,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     style={{
                       padding: '8px 12px',
                       borderRadius: '999px',
-                      border: selected ? '1px solid #4CAF50' : '1px solid rgba(255,255,255,0.2)',
-                      backgroundColor: selected ? 'rgba(76,175,80,0.18)' : 'rgba(255,255,255,0.03)',
-                      color: selected ? '#81C784' : '#e8e8e8',
+                      border: selected ? '1px solid #2F7D57' : '1px solid rgba(17,47,82,0.32)',
+                      backgroundColor: selected ? 'rgba(76,175,80,0.18)' : 'rgba(17,47,82,0.05)',
+                      color: selected ? '#2F7D57' : 'var(--text-primary)',
                       fontSize: '13px',
                       fontWeight: 600,
                       cursor: 'pointer'
@@ -1204,7 +1204,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         )}
         {isBhtRole(normalizedFormRole) && (
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Shift *
             </label>
             <select
@@ -1213,12 +1213,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
               style={{
                 width: '100%',
                 padding: '8px',
-                border: '2px solid rgba(255,255,255,0.1)',
+                border: '2px solid rgba(17,47,82,0.20)',
                 borderRadius: '6px',
                 fontSize: '14px',
                 boxSizing: 'border-box',
-                backgroundColor: 'rgba(255,255,255,0.06)',
-                color: '#e8e8e8'
+                backgroundColor: 'rgba(17,47,82,0.10)',
+                color: 'var(--text-primary)'
               }}
             >
               <option value="">Select Shift...</option>
@@ -1229,7 +1229,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           </div>
         )}
         <div>
-          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
             Active
           </label>
           <select
@@ -1238,12 +1238,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
             style={{
               width: '100%',
               padding: '8px',
-              border: '2px solid rgba(255,255,255,0.1)',
+              border: '2px solid rgba(17,47,82,0.20)',
               borderRadius: '6px',
               fontSize: '14px',
               boxSizing: 'border-box',
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              color: '#e8e8e8'
+              backgroundColor: 'rgba(17,47,82,0.10)',
+              color: 'var(--text-primary)'
             }}
           >
             <option value="true">Active</option>
@@ -1747,11 +1747,11 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
   const selectStyle = {
     padding: '6px 10px',
-    border: '2px solid rgba(255,255,255,0.1)',
+    border: '2px solid rgba(17,47,82,0.20)',
     borderRadius: '6px',
     fontSize: '13px',
-    background: 'rgba(255,255,255,0.06)',
-    color: '#e8e8e8'
+    background: 'rgba(17,47,82,0.10)',
+    color: 'var(--text-primary)'
   }
   const tabRailStyle = {
     position: 'sticky',
@@ -1760,8 +1760,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
     marginBottom: '20px',
     paddingTop: '8px',
     paddingBottom: '6px',
-    background: 'linear-gradient(180deg, rgba(15,25,35,0.98) 0%, rgba(15,25,35,0.9) 72%, rgba(15,25,35,0) 100%)',
-    backdropFilter: 'blur(8px)'
+    background: 'linear-gradient(180deg, rgba(248,245,241,0.98) 0%, rgba(248,245,241,0.92) 72%, rgba(248,245,241,0) 100%)',
+    backdropFilter: 'blur(6px)'
   }
 
   return (
@@ -1772,31 +1772,31 @@ function SupervisorDashboard({ user, isOffline = false }) {
         alignItems: 'center',
         marginBottom: '20px'
       }}>
-        <h2 style={{ margin: 0, color: '#e8e8e8' }}>
+        <h2 style={{ margin: 0, color: 'var(--text-primary)' }}>
           {isAdmin ? 'Admin' : 'Supervisor'} Dashboard
         </h2>
       </div>
 
       <div style={{
-        backgroundColor: 'rgba(255,255,255,0.04)',
+        backgroundColor: 'rgba(17,47,82,0.06)',
         borderRadius: '10px',
-        border: '1px solid rgba(255,255,255,0.1)',
+        border: '1px solid rgba(17,47,82,0.20)',
         padding: '12px 14px',
         marginBottom: '16px'
       }}>
-        <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '6px' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
           Scope
         </div>
         {isAdmin ? (
-          <div style={{ fontSize: '13px', color: '#4CAF50' }}>
+          <div style={{ fontSize: '13px', color: '#2F7D57' }}>
             Global access (all locations)
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ fontSize: '13px', color: '#e8e8e8' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
               Primary: {primaryScopes.length > 0 ? primaryScopes.join(', ') : 'None'}
             </div>
-            <div style={{ fontSize: '13px', color: '#e8e8e8' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
               Backup: {activeBackupGrants.length > 0 ? '' : 'None'}
             </div>
             {activeBackupGrants.length > 0 && (
@@ -1806,7 +1806,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     key={grant.id}
                     style={{
                       fontSize: '11px',
-                      color: '#FF9800',
+                      color: '#B07A28',
                       border: '1px solid rgba(255,152,0,0.3)',
                       borderRadius: '999px',
                       padding: '3px 8px',
@@ -1826,7 +1826,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         <div style={{
           marginBottom: '16px',
           fontSize: '12px',
-          color: '#FF9800',
+          color: '#B07A28',
           textAlign: 'center'
         }}>
           Offline mode is active. Supervisor/Admin write actions are disabled until connection is restored.
@@ -1844,8 +1844,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 width: '100%',
                 padding: '12px 16px',
                 backgroundColor: 'rgba(229,57,53,0.15)',
-                color: '#e8e8e8',
-                border: '2px solid #E53935',
+                color: 'var(--text-primary)',
+                border: '2px solid #CD4E42',
                 borderRadius: '10px',
                 fontSize: '15px',
                 fontWeight: 'bold',
@@ -1867,7 +1867,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           <div style={{
             display: 'flex',
             gap: '8px',
-            borderBottom: '2px solid rgba(255,255,255,0.08)',
+            borderBottom: '2px solid rgba(17,47,82,0.14)',
             flexWrap: 'wrap'
           }}>
             {availableTabKeys.map(tab => (
@@ -1876,10 +1876,10 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 onClick={() => setActiveTab(tab)}
                 style={{
                   padding: '12px 24px',
-                  backgroundColor: activeTab === tab ? '#E53935' : 'transparent',
-                  color: activeTab === tab ? 'white' : '#8899aa',
+                  backgroundColor: activeTab === tab ? '#CD4E42' : 'transparent',
+                  color: activeTab === tab ? 'white' : 'var(--text-secondary)',
                   border: 'none',
-                  borderBottom: activeTab === tab ? '3px solid #E53935' : 'none',
+                  borderBottom: activeTab === tab ? '3px solid #CD4E42' : 'none',
                   borderRadius: '8px 8px 0 0',
                   fontSize: '14px',
                   fontWeight: 'bold',
@@ -1909,14 +1909,14 @@ function SupervisorDashboard({ user, isOffline = false }) {
       {activeTab === 'audit' && isAdmin && (
         <div>
           <div style={{
-            backgroundColor: 'rgba(255,255,255,0.05)',
+            backgroundColor: 'rgba(17,47,82,0.08)',
             borderRadius: '12px',
             padding: '20px',
             marginBottom: '20px',
             border: '1px solid rgba(229,57,53,0.2)',
             backdropFilter: 'blur(12px)'
           }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#e8e8e8' }}>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: 'var(--text-primary)' }}>
               Audit Logs ({auditLogs.length})
             </h3>
 
@@ -1932,22 +1932,22 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     style={{
                       padding: '12px',
                       borderRadius: '8px',
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      backgroundColor: 'rgba(255,255,255,0.03)'
+                      border: '1px solid rgba(17,47,82,0.14)',
+                      backgroundColor: 'rgba(17,47,82,0.05)'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
-                      <div style={{ fontWeight: 700, fontSize: '13px', color: '#e8e8e8' }}>
+                      <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)' }}>
                         {(log.action || 'action').toUpperCase()} &bull; {log.collectionPath || '--'} &bull; {log.documentId || '--'}
                       </div>
-                      <div style={{ fontSize: '12px', color: '#8899aa' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                         {formatDate(log.createdAt)} {formatTime(log.createdAt)}
                       </div>
                     </div>
-                    <div style={{ fontSize: '12px', color: '#8899aa', marginTop: '4px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
                       By: {log.performedByName || log.performedByUserId || 'Unknown'}
                     </div>
-                    <div style={{ fontSize: '13px', color: '#e8e8e8', marginTop: '6px' }}>
+                    <div style={{ fontSize: '13px', color: 'var(--text-primary)', marginTop: '6px' }}>
                       Reason: {log.reason || '(none)'}
                     </div>
                   </div>
@@ -1961,7 +1961,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
       {activeTab === 'users' && (
         <div>
           <div style={{
-            backgroundColor: 'rgba(255,255,255,0.05)',
+            backgroundColor: 'rgba(17,47,82,0.08)',
             borderRadius: '12px',
             padding: '20px',
             marginBottom: '20px',
@@ -1969,12 +1969,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
             backdropFilter: 'blur(12px)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', color: '#e8e8e8' }}>Users ({users.length})</h3>
+              <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text-primary)' }}>Users ({users.length})</h3>
               <button
                 onClick={handleAddUser}
                 style={{
                   padding: '10px 20px',
-                  backgroundColor: '#4CAF50',
+                  backgroundColor: '#2F7D57',
                   color: 'white',
                   border: 'none',
                   borderRadius: '8px',
@@ -1989,13 +1989,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
             {editingUser === 'new' && (
               <div style={{
-                backgroundColor: 'rgba(255,255,255,0.03)',
+                backgroundColor: 'rgba(17,47,82,0.05)',
                 padding: '20px',
                 borderRadius: '8px',
                 marginBottom: '20px',
-                border: '2px solid #E53935'
+                border: '2px solid #CD4E42'
               }}>
-                <h4 style={{ margin: '0 0 16px 0', color: '#e8e8e8' }}>
+                <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-primary)' }}>
                   Add New User
                 </h4>
                 {renderUserEditorFields(true)}
@@ -2004,7 +2004,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     onClick={handleSaveUser}
                     style={{
                       padding: '10px 20px',
-                      backgroundColor: '#4CAF50',
+                      backgroundColor: '#2F7D57',
                       color: 'white',
                       border: 'none',
                       borderRadius: '8px',
@@ -2046,39 +2046,39 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     style={{
                       padding: '16px',
                       borderRadius: '8px',
-                      border: isEditingThisUser ? '2px solid #E53935' : '1px solid rgba(255,255,255,0.08)',
-                      backgroundColor: managedUser.active ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.01)'
+                      border: isEditingThisUser ? '2px solid #CD4E42' : '1px solid rgba(17,47,82,0.14)',
+                      backgroundColor: managedUser.active ? 'rgba(17,47,82,0.05)' : 'rgba(17,47,82,0.03)'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', flex: 1 }}>
                         <div>
-                          <div style={{ fontSize: '11px', color: '#8899aa' }}>ID</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>ID</div>
                           <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{managedUser.id}</div>
                         </div>
                         <div>
-                          <div style={{ fontSize: '11px', color: '#8899aa' }}>Name</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Name</div>
                           <div style={{ fontSize: '14px' }}>{managedUser.name}</div>
                         </div>
                         <div>
-                          <div style={{ fontSize: '11px', color: '#8899aa' }}>PIN Storage</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>PIN Storage</div>
                           <div style={{ fontSize: '14px', fontFamily: 'monospace' }}>
                             {managedUser.pinHash ? 'hashed (v1)' : (managedUser.pin ? 'legacy plaintext' : 'unset')}
                           </div>
                         </div>
                         <div>
-                          <div style={{ fontSize: '11px', color: '#8899aa' }}>Role</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Role</div>
                           <div style={{ fontSize: '14px' }}>{formatRoleLabel(managedUser.role)}</div>
                         </div>
                         <div>
-                          <div style={{ fontSize: '11px', color: '#8899aa' }}>Location</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Location</div>
                           <div style={{ fontSize: '14px' }}>
                             {isAdminRole(managedUser.role) ? 'GLOBAL (full access)' : (managedUserLocation || '--')}
                           </div>
                         </div>
                         {isBhtRole(managedUser.role) && (
                           <div>
-                            <div style={{ fontSize: '11px', color: '#8899aa' }}>House / Shift / Van</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>House / Shift / Van</div>
                             <div style={{ fontSize: '14px' }}>
                               {managedUserLocation === MAIN_LOCATION_OTC
                                 ? `${managedUserHouse === 'MESQUITE' ? 'Mesquite House' : (managedUserHouse === 'LONE_MOUNTAIN' ? 'Lone Mountain' : '--')}`
@@ -2093,11 +2093,11 @@ function SupervisorDashboard({ user, isOffline = false }) {
                           </div>
                         )}
                         <div>
-                          <div style={{ fontSize: '11px', color: '#8899aa' }}>Status</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Status</div>
                           <div style={{
                             fontSize: '12px',
                             fontWeight: 'bold',
-                            color: managedUser.active ? '#4CAF50' : '#999'
+                            color: managedUser.active ? '#2F7D57' : '#999'
                           }}>
                             {managedUser.active ? 'ACTIVE' : 'INACTIVE'}
                           </div>
@@ -2108,7 +2108,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                           onClick={() => handleEditUser(managedUser)}
                           style={{
                             padding: '8px 16px',
-                            backgroundColor: '#E53935',
+                            backgroundColor: '#CD4E42',
                             color: 'white',
                             border: 'none',
                             borderRadius: '6px',
@@ -2123,7 +2123,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                           onClick={() => handleDeleteUser(managedUser.id)}
                           style={{
                             padding: '8px 16px',
-                            backgroundColor: '#f44336',
+                            backgroundColor: '#B75E54',
                             color: 'white',
                             border: 'none',
                             borderRadius: '6px',
@@ -2158,9 +2158,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
                       <div style={{
                         marginTop: '16px',
                         paddingTop: '16px',
-                        borderTop: '1px solid rgba(255,255,255,0.1)'
+                        borderTop: '1px solid rgba(17,47,82,0.20)'
                       }}>
-                        <h4 style={{ margin: '0 0 16px 0', color: '#e8e8e8' }}>
+                        <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-primary)' }}>
                           Edit User
                         </h4>
                         {renderUserEditorFields(false)}
@@ -2169,7 +2169,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                             onClick={handleSaveUser}
                             style={{
                               padding: '10px 20px',
-                              backgroundColor: '#4CAF50',
+                              backgroundColor: '#2F7D57',
                               color: 'white',
                               border: 'none',
                               borderRadius: '8px',
@@ -2220,14 +2220,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
           {/* EOC Summary */}
             {hasQueueData && (
               <div style={{
-                backgroundColor: 'rgba(255,255,255,0.05)',
+                backgroundColor: '#FFFFFF',
               borderRadius: '12px',
               padding: '20px',
               marginBottom: '20px',
-              border: '1px solid rgba(229,57,53,0.2)',
-              backdropFilter: 'blur(12px)'
+              border: '1px solid #D8D1C6'
             }}>
-              <h3 style={{ margin: '0 0 14px 0', fontSize: '16px', color: '#e8e8e8' }}>EOC + Compliance Status</h3>
+              <h3 style={{ margin: '0 0 14px 0', fontSize: '16px', color: 'var(--text-primary)' }}>EOC + Compliance Status</h3>
 
               {/* Clickable KPI cards */}
               <div style={{ display: 'flex', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
@@ -2238,13 +2237,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     backgroundColor: 'rgba(255,87,34,0.15)',
                     borderRadius: '8px',
                     textAlign: 'center',
-                    border: queueView === 'issues' ? '2px solid #FF5722' : '1px solid rgba(255,87,34,0.3)',
+                    border: queueView === 'issues' ? '2px solid #B75E54' : '1px solid rgba(255,87,34,0.3)',
                     cursor: 'pointer',
                     color: 'inherit'
                   }}
                 >
-                  <div style={{ fontSize: '12px', color: '#FF5722' }}>Open Issues</div>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF5722' }}>{eocIssues.length}</div>
+                  <div style={{ fontSize: '12px', color: '#B75E54' }}>Open Issues</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#B75E54' }}>{eocIssues.length}</div>
                 </button>
                 <button
                   onClick={() => setQueueView('overdue')}
@@ -2253,13 +2252,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     backgroundColor: 'rgba(255,152,0,0.15)',
                     borderRadius: '8px',
                     textAlign: 'center',
-                    border: queueView === 'overdue' ? '2px solid #FF9800' : '1px solid rgba(255,152,0,0.3)',
+                    border: queueView === 'overdue' ? '2px solid #B07A28' : '1px solid rgba(255,152,0,0.3)',
                     cursor: 'pointer',
                     color: 'inherit'
                   }}
                 >
-                  <div style={{ fontSize: '12px', color: '#FF9800' }}>Overdue Tasks</div>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF9800' }}>
+                  <div style={{ fontSize: '12px', color: '#B07A28' }}>Overdue Tasks</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#B07A28' }}>
                     {eocOverdueTasks.length + complianceSummary.overdue}
                   </div>
                 </button>
@@ -2270,13 +2269,13 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     backgroundColor: 'rgba(76,175,80,0.15)',
                     borderRadius: '8px',
                     textAlign: 'center',
-                    border: queueView === 'compliance_upcoming' ? '2px solid #4CAF50' : '1px solid rgba(76,175,80,0.3)',
+                    border: queueView === 'compliance_upcoming' ? '2px solid #2F7D57' : '1px solid rgba(76,175,80,0.3)',
                     cursor: 'pointer',
                     color: 'inherit'
                   }}
                 >
-                  <div style={{ fontSize: '12px', color: '#4CAF50' }}>Upcoming Compliance</div>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>{complianceSummary.upcoming}</div>
+                  <div style={{ fontSize: '12px', color: '#2F7D57' }}>Upcoming Compliance</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2F7D57' }}>{complianceSummary.upcoming}</div>
                 </button>
                 <button
                   onClick={() => setQueueView('alerts')}
@@ -2303,7 +2302,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 marginBottom: '12px'
               }}>
                 <div>
-                  <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+                  <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
                     Queue
                   </label>
                   <select
@@ -2318,7 +2317,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+                  <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
                     Location
                   </label>
                   <select
@@ -2337,14 +2336,14 @@ function SupervisorDashboard({ user, isOffline = false }) {
               {/* Queue list */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {queueView === 'issues' && filteredIssueQueue.length === 0 && (
-                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No active issues for this filter.</div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No active issues for this filter.</div>
                 )}
                 {queueView === 'issues' && filteredIssueQueue.map(issue => (
                   <div key={issue.id} style={{
                     padding: '12px',
                     borderRadius: '8px',
-                    border: issue.severity === 'high' ? '2px solid #FF5722' : '1px solid rgba(255,255,255,0.08)',
-                    backgroundColor: 'rgba(255,255,255,0.04)'
+                    border: issue.severity === 'high' ? '2px solid #B75E54' : '1px solid rgba(17,47,82,0.14)',
+                    backgroundColor: 'rgba(17,47,82,0.06)'
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <span style={{ fontWeight: 700, fontSize: '14px' }}>{issue.label}</span>
@@ -2357,7 +2356,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                         </span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '4px' }}>{issue.description}</div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{issue.description}</div>
                     <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
                       {LOCATIONS.find(l => l.id === issue.locationId)?.label || issue.locationId} &bull; {issue.reportedByName}
                       {issue.vanId ? ` \u00B7 ${VANS.find(v => v.id === issue.vanId)?.label || issue.vanId}` : ''}
@@ -2377,7 +2376,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                             <button
                               onClick={() => handleDashStartIssue(issue.id, getIssueActionNote(issue.id))}
                               style={{
-                                padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8',
+                                padding: '6px 14px', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-primary)',
                                 border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
                                 cursor: 'pointer'
                               }}
@@ -2388,7 +2387,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                           <button
                             onClick={() => handleDashResolveIssue(issue.id, getIssueActionNote(issue.id))}
                             style={{
-                              padding: '6px 14px', backgroundColor: '#4CAF50', color: 'white',
+                              padding: '6px 14px', backgroundColor: '#2F7D57', color: 'white',
                               border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
                               cursor: 'pointer'
                             }}
@@ -2398,7 +2397,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                           <button
                             onClick={() => clearIssueActionNote(issue.id)}
                             style={{
-                              padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#8899aa',
+                              padding: '6px 14px', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-secondary)',
                               border: 'none', borderRadius: '6px', fontSize: '13px', cursor: 'pointer'
                             }}
                           >
@@ -2408,7 +2407,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                       </div>
                     )}
                     {issue.status === 'in_progress' && issue.inProgressByName && (
-                      <div style={{ fontSize: '11px', color: '#8899aa', marginTop: '6px' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px' }}>
                         In progress by {issue.inProgressByName}
                       </div>
                     )}
@@ -2416,14 +2415,14 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 ))}
 
                 {queueView === 'overdue' && filteredOverdueTaskQueue.length === 0 && filteredComplianceOverdueQueue.length === 0 && (
-                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No overdue EOC or compliance tasks for this filter.</div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No overdue EOC or compliance tasks for this filter.</div>
                 )}
                 {queueView === 'overdue' && filteredOverdueTaskQueue.map(task => (
                   <div key={task.id} style={{
                     padding: '12px',
                     borderRadius: '8px',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    backgroundColor: 'rgba(255,255,255,0.04)'
+                    border: '1px solid rgba(17,47,82,0.14)',
+                    backgroundColor: 'rgba(17,47,82,0.06)'
                   }}>
                     <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>
                       {task.taskType === 'house'
@@ -2488,12 +2487,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
                           style={{
                             width: '100%',
                             padding: '8px 10px',
-                            border: '2px solid rgba(255,255,255,0.1)',
+                            border: '2px solid rgba(17,47,82,0.20)',
                             borderRadius: '6px',
                             fontSize: '13px',
                             boxSizing: 'border-box',
-                            backgroundColor: 'rgba(255,255,255,0.06)',
-                            color: '#e8e8e8'
+                            backgroundColor: 'rgba(17,47,82,0.10)',
+                            color: 'var(--text-primary)'
                           }}
                         />
                         <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
@@ -2502,8 +2501,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
                             disabled={overdueTaskActionSubmitting}
                             style={{
                               padding: '6px 14px',
-                              backgroundColor: overdueTaskActionSubmitting ? 'rgba(255,255,255,0.08)' : '#FF9800',
-                              color: overdueTaskActionSubmitting ? '#8899aa' : '#1f2933',
+                              backgroundColor: overdueTaskActionSubmitting ? 'rgba(17,47,82,0.14)' : '#B07A28',
+                              color: overdueTaskActionSubmitting ? 'var(--text-secondary)' : '#1f2933',
                               border: 'none',
                               borderRadius: '6px',
                               fontSize: '13px',
@@ -2518,8 +2517,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
                             disabled={overdueTaskActionSubmitting}
                             style={{
                               padding: '6px 14px',
-                              backgroundColor: 'rgba(255,255,255,0.06)',
-                              color: '#8899aa',
+                              backgroundColor: 'rgba(17,47,82,0.10)',
+                              color: 'var(--text-secondary)',
                               border: 'none',
                               borderRadius: '6px',
                               fontSize: '13px',
@@ -2547,7 +2546,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                       </span>
                       <span className="chip" style={{
                         fontSize: '11px',
-                        color: '#f44336',
+                        color: '#B75E54',
                         border: '1px solid rgba(244,67,54,0.45)',
                         backgroundColor: 'rgba(244,67,54,0.08)'
                       }}>
@@ -2560,7 +2559,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                       {' '} &bull; Due {formatDate(item.dueDate)}
                     </div>
                     {item.notes && (
-                      <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
                         Notes: {item.notes}
                       </div>
                     )}
@@ -2583,7 +2582,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 ))}
 
                 {queueView === 'compliance_upcoming' && filteredComplianceUpcomingQueue.length === 0 && (
-                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No upcoming compliance tasks for this filter.</div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No upcoming compliance tasks for this filter.</div>
                 )}
                 {queueView === 'compliance_upcoming' && filteredComplianceUpcomingQueue.map(item => (
                   <div key={`compliance-upcoming-${item.id}`} style={{
@@ -2598,7 +2597,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                       </span>
                       <span className="chip" style={{
                         fontSize: '11px',
-                        color: '#81C784',
+                        color: '#2F7D57',
                         border: '1px solid rgba(76,175,80,0.45)',
                         backgroundColor: 'rgba(76,175,80,0.08)'
                       }}>
@@ -2611,7 +2610,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                       {' '} &bull; Due {formatDate(item.dueDate)}
                     </div>
                     {item.notes && (
-                      <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
                         Notes: {item.notes}
                       </div>
                     )}
@@ -2634,19 +2633,19 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 ))}
 
                 {queueView === 'alerts' && filteredAlertQueue.length === 0 && (
-                  <div style={{ color: '#8899aa', fontSize: '13px' }}>No unread alerts for this filter.</div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No unread alerts for this filter.</div>
                 )}
                 {queueView === 'alerts' && filteredAlertQueue.map(alertItem => (
                   <div key={alertItem.id} style={{
                     padding: '12px',
                     borderRadius: '8px',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    backgroundColor: 'rgba(255,255,255,0.04)'
+                    border: '1px solid rgba(17,47,82,0.14)',
+                    backgroundColor: 'rgba(17,47,82,0.06)'
                   }}>
                     <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>
                       {alertItem.type || 'Alert'}
                     </div>
-                    <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '6px' }}>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
                       {alertItem.message || '(no message)'}
                     </div>
                     <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
@@ -2677,12 +2676,11 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
             {/* Filter row */}
             <div style={{
-              backgroundColor: 'rgba(255,255,255,0.05)',
+              backgroundColor: '#FFFFFF',
             borderRadius: '12px',
             padding: '20px',
             marginBottom: '20px',
-            border: '1px solid rgba(229,57,53,0.2)',
-            backdropFilter: 'blur(12px)'
+            border: '1px solid #D8D1C6'
           }}>
             <div style={{
               display: 'grid',
@@ -2691,7 +2689,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
               alignItems: 'center'
             }}>
               <div>
-                <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
                   Month
                 </label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2699,7 +2697,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     onClick={() => setDashMonth(new Date(dashMonth.getFullYear(), dashMonth.getMonth() - 1, 1))}
                     style={{
                       padding: '8px 12px',
-                      backgroundColor: '#E53935',
+                      backgroundColor: '#CD4E42',
                       color: 'white',
                       border: 'none',
                       borderRadius: '6px',
@@ -2714,7 +2712,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     onClick={() => setDashMonth(new Date(dashMonth.getFullYear(), dashMonth.getMonth() + 1, 1))}
                     style={{
                       padding: '8px 12px',
-                      backgroundColor: '#E53935',
+                      backgroundColor: '#CD4E42',
                       color: 'white',
                       border: 'none',
                       borderRadius: '6px',
@@ -2725,7 +2723,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 </div>
               </div>
               <div>
-                <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
                   Location
                 </label>
                 <select
@@ -2766,17 +2764,17 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 onClick={() => handleDashboardDrilldown('total')}
                 style={{
                   width: '100%',
-                  backgroundColor: 'rgba(255,255,255,0.05)',
+                  backgroundColor: '#FFFFFF',
                   borderRadius: '12px',
                   padding: '20px',
                   marginBottom: '20px',
-                  border: '1px solid #eee',
+                  border: '1px solid #D8D1C6',
                   textAlign: 'center',
                   cursor: 'pointer'
                 }}
               >
-                <div style={{ fontSize: '12px', color: '#8899aa', marginBottom: '4px' }}>Total Transports</div>
-                <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#E53935' }}>{dashStats.total}</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Total Transports</div>
+                <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#CD4E42' }}>{dashStats.total}</div>
               </button>
 
               {/* Two-column breakdown */}
@@ -2788,12 +2786,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
               }}>
                 {/* By Reason */}
                 <div className="glass-card" style={{
-                  backgroundColor: 'rgba(255,255,255,0.05)',
+                  backgroundColor: '#FFFFFF',
                   borderRadius: '12px',
                   padding: '20px',
-                  border: '1px solid #eee'
+                  border: '1px solid #D8D1C6'
                 }}>
-                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#e8e8e8' }}>By Reason</h3>
+                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: 'var(--text-primary)' }}>By Reason</h3>
                   {dashStats.byReason.length === 0 ? (
                     <div style={{ color: '#556677', fontSize: '14px' }}>No reasons recorded</div>
                   ) : (
@@ -2809,14 +2807,14 @@ function SupervisorDashboard({ user, isOffline = false }) {
                             justifyContent: 'space-between',
                             alignItems: 'center',
                             padding: '8px 12px',
-                            backgroundColor: 'rgba(255,255,255,0.04)',
+                            backgroundColor: '#F8F5F1',
                             borderRadius: '6px',
-                            border: '1px solid rgba(255,255,255,0.08)',
+                            border: '1px solid #D8D1C6',
                             cursor: 'pointer'
                           }}
                         >
                           <span style={{ fontSize: '14px' }}>{reason}</span>
-                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#E53935' }}>{count}</span>
+                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#CD4E42' }}>{count}</span>
                         </button>
                       ))}
                     </div>
@@ -2825,12 +2823,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
                 {/* By BHT */}
                 <div className="glass-card" style={{
-                  backgroundColor: 'rgba(255,255,255,0.05)',
+                  backgroundColor: '#FFFFFF',
                   borderRadius: '12px',
                   padding: '20px',
-                  border: '1px solid #eee'
+                  border: '1px solid #D8D1C6'
                 }}>
-                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#e8e8e8' }}>By BHT</h3>
+                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: 'var(--text-primary)' }}>By BHT</h3>
                   {dashStats.byTech.length === 0 ? (
                     <div style={{ color: '#556677', fontSize: '14px' }}>No BHT activity recorded</div>
                   ) : (
@@ -2846,14 +2844,14 @@ function SupervisorDashboard({ user, isOffline = false }) {
                             justifyContent: 'space-between',
                             alignItems: 'center',
                             padding: '8px 12px',
-                            backgroundColor: 'rgba(255,255,255,0.04)',
+                            backgroundColor: '#F8F5F1',
                             borderRadius: '6px',
-                            border: '1px solid rgba(255,255,255,0.08)',
+                            border: '1px solid #D8D1C6',
                             cursor: 'pointer'
                           }}
                         >
                           <span style={{ fontSize: '14px' }}>{tech}</span>
-                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#E53935' }}>{count}</span>
+                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#CD4E42' }}>{count}</span>
                         </button>
                       ))}
                     </div>
@@ -2863,27 +2861,26 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
               {/* DC Paperwork */}
               <div className="glass-card" style={{
-                backgroundColor: 'rgba(255,255,255,0.05)',
+                backgroundColor: '#FFFFFF',
                 borderRadius: '12px',
                 padding: '20px',
-                border: '1px solid rgba(229,57,53,0.2)',
-                backdropFilter: 'blur(12px)'
+                border: '1px solid #D8D1C6'
               }}>
-                <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#e8e8e8' }}>DC Paperwork</h3>
+                <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: 'var(--text-primary)' }}>DC Paperwork</h3>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                   {dashStats.byPaperwork.map(([status, count]) => (
                     <div key={status} style={{
                       padding: '10px 20px',
                       backgroundColor:
                         status === 'collected' ? 'rgba(76,175,80,0.15)' :
-                        status === 'N/A' ? 'rgba(255,255,255,0.04)' :
+                        status === 'N/A' ? 'rgba(17,47,82,0.06)' :
                         status === 'unknown' ? 'rgba(255,152,0,0.15)' :
                         'rgba(229,57,53,0.15)',
                       borderRadius: '8px',
                       textAlign: 'center'
                     }}>
-                      <div style={{ fontSize: '12px', color: '#8899aa', textTransform: 'capitalize' }}>{status}</div>
-                      <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#e8e8e8' }}>{count}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', textTransform: 'capitalize' }}>{status}</div>
+                      <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{count}</div>
                     </div>
                   ))}
                 </div>
@@ -2898,7 +2895,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         <div>
           {/* Filters */}
           <div style={{
-        backgroundColor: 'rgba(255,255,255,0.05)',
+        backgroundColor: 'rgba(17,47,82,0.08)',
         borderRadius: '12px',
         padding: '20px',
         marginBottom: '20px',
@@ -2912,15 +2909,15 @@ function SupervisorDashboard({ user, isOffline = false }) {
           flexWrap: 'wrap',
           marginBottom: '16px'
         }}>
-          <h3 style={{ margin: 0, fontSize: '16px', color: '#e8e8e8' }}>Filters</h3>
+          <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text-primary)' }}>Filters</h3>
           <button
             type="button"
             onClick={clearTransportFilters}
             style={{
               padding: '8px 14px',
-              backgroundColor: 'rgba(255,255,255,0.1)',
-              color: '#e8e8e8',
-              border: '1px solid rgba(255,255,255,0.2)',
+              backgroundColor: 'rgba(17,47,82,0.20)',
+              color: 'var(--text-primary)',
+              border: '1px solid rgba(17,47,82,0.32)',
               borderRadius: '8px',
               fontSize: '12px',
               fontWeight: 'bold',
@@ -2938,7 +2935,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           marginBottom: '12px'
         }}>
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Start Date
             </label>
             <input
@@ -2957,7 +2954,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               End Date
             </label>
             <input
@@ -2976,7 +2973,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Location
             </label>
             <select
@@ -2999,7 +2996,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Status
             </label>
             <select
@@ -3020,7 +3017,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               BHT
             </label>
             <select
@@ -3043,7 +3040,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Reason
             </label>
             <select
@@ -3066,7 +3063,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Overdue
             </label>
             <select
@@ -3089,7 +3086,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         </div>
 
         <div>
-          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
             Search Client
           </label>
           <input
@@ -3121,7 +3118,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
           disabled={filteredTransports.length === 0}
           style={{
             padding: '12px 24px',
-            backgroundColor: filteredTransports.length > 0 ? '#4CAF50' : 'rgba(255,255,255,0.06)',
+            backgroundColor: filteredTransports.length > 0 ? '#2F7D57' : 'rgba(17,47,82,0.10)',
             color: filteredTransports.length > 0 ? 'white' : '#556677',
             border: 'none',
             borderRadius: '8px',
@@ -3136,12 +3133,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
       {/* Results */}
       <div style={{
-        backgroundColor: 'rgba(255,255,255,0.05)',
+        backgroundColor: 'rgba(17,47,82,0.08)',
         borderRadius: '12px',
         padding: '20px',
         border: '1px solid #eee'
       }}>
-        <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#e8e8e8' }}>
+        <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: 'var(--text-primary)' }}>
           Transports ({filteredTransports.length})
         </h3>
 
@@ -3161,8 +3158,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 style={{
                   padding: '16px',
                   borderRadius: '8px',
-                  border: isOverdue(t) ? '2px solid #FF5722' : '1px solid rgba(255,255,255,0.08)',
-                  backgroundColor: 'rgba(255,255,255,0.03)',
+                  border: isOverdue(t) ? '2px solid #B75E54' : '1px solid rgba(17,47,82,0.14)',
+                  backgroundColor: 'rgba(17,47,82,0.05)',
                   position: 'relative'
                 }}
               >
@@ -3171,7 +3168,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     position: 'absolute',
                     top: '-8px',
                     right: '12px',
-                    backgroundColor: '#FF5722',
+                    backgroundColor: '#B75E54',
                     color: 'white',
                     padding: '4px 12px',
                     borderRadius: '12px',
@@ -3184,23 +3181,23 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
                   <div>
-                    <div style={{ fontSize: '11px', color: '#8899aa' }}>Date</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Date</div>
                     <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{formatDate(t.departedAt)}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '11px', color: '#8899aa' }}>Driver</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Driver</div>
                     <div style={{ fontSize: '14px' }}>{t.createdByName}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '11px', color: '#8899aa' }}>Client(s)</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Client(s)</div>
                     <div style={{ fontSize: '14px' }}>{t.clients?.join(', ') || 'None'}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '11px', color: '#8899aa' }}>Stops</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Stops</div>
                     <div style={{ fontSize: '14px' }}>{t.stops?.length || 0}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '11px', color: '#8899aa' }}>Status</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Status</div>
                     <div style={{
                       fontSize: '12px',
                       fontWeight: 'bold',
@@ -3227,5 +3224,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
 }
 
 export default SupervisorDashboard
+
+
 
 

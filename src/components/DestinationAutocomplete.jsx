@@ -281,7 +281,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
             </div>
             <div style={{
               fontSize: '12px',
-              color: '#8899aa',
+              color: 'var(--text-secondary)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap'
@@ -310,3 +310,4 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
 }
 
 export default DestinationAutocomplete
+

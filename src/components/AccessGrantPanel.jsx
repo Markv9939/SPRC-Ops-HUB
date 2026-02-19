@@ -48,10 +48,10 @@ function formatDateTime(value) {
 }
 
 function badgeStyle(state) {
-  if (state === ACCESS_GRANT_STATES.ACTIVE) return { color: '#4CAF50', borderColor: 'rgba(76,175,80,0.4)' }
-  if (state === ACCESS_GRANT_STATES.UPCOMING) return { color: '#FF9800', borderColor: 'rgba(255,152,0,0.4)' }
-  if (state === ACCESS_GRANT_STATES.EXPIRED) return { color: '#8899aa', borderColor: 'rgba(136,153,170,0.4)' }
-  return { color: '#E53935', borderColor: 'rgba(229,57,53,0.4)' }
+  if (state === ACCESS_GRANT_STATES.ACTIVE) return { color: '#2F7D57', borderColor: 'rgba(76,175,80,0.4)' }
+  if (state === ACCESS_GRANT_STATES.UPCOMING) return { color: '#B07A28', borderColor: 'rgba(255,152,0,0.4)' }
+  if (state === ACCESS_GRANT_STATES.EXPIRED) return { color: 'var(--text-secondary)', borderColor: 'rgba(136,153,170,0.4)' }
+  return { color: '#CD4E42', borderColor: 'rgba(229,57,53,0.4)' }
 }
 
 function AccessGrantPanel({ currentUser, users, isOffline = false }) {
@@ -236,45 +236,45 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
 
   return (
     <div style={{
-      backgroundColor: 'rgba(255,255,255,0.04)',
+      backgroundColor: 'rgba(17,47,82,0.06)',
       borderRadius: '12px',
       padding: '20px',
-      border: '1px solid rgba(255,255,255,0.1)',
+      border: '1px solid rgba(17,47,82,0.20)',
       marginTop: '20px'
     }}>
-      <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#e8e8e8' }}>
+      <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: 'var(--text-primary)' }}>
         Backup Access Grants ({grants.length})
       </h3>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '14px' }}>
-        <span style={{ fontSize: '12px', color: '#4CAF50' }}>Active: {counts.active || 0}</span>
-        <span style={{ fontSize: '12px', color: '#FF9800' }}>Upcoming: {counts.upcoming || 0}</span>
-        <span style={{ fontSize: '12px', color: '#8899aa' }}>Expired: {counts.expired || 0}</span>
-        <span style={{ fontSize: '12px', color: '#E53935' }}>Revoked: {counts.revoked || 0}</span>
+        <span style={{ fontSize: '12px', color: '#2F7D57' }}>Active: {counts.active || 0}</span>
+        <span style={{ fontSize: '12px', color: '#B07A28' }}>Upcoming: {counts.upcoming || 0}</span>
+        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Expired: {counts.expired || 0}</span>
+        <span style={{ fontSize: '12px', color: '#CD4E42' }}>Revoked: {counts.revoked || 0}</span>
       </div>
       {isOffline && (
-        <div style={{ fontSize: '12px', color: '#FF9800', marginBottom: '10px' }}>
+        <div style={{ fontSize: '12px', color: '#B07A28', marginBottom: '10px' }}>
           Offline mode is active. Grant and revoke actions are disabled.
         </div>
       )}
 
       <div style={{
-        backgroundColor: 'rgba(255,255,255,0.03)',
+        backgroundColor: 'rgba(17,47,82,0.05)',
         borderRadius: '10px',
         padding: '14px',
         marginBottom: '14px',
-        border: '1px solid rgba(255,255,255,0.08)'
+        border: '1px solid rgba(17,47,82,0.14)'
       }}>
-        <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#e8e8e8', marginBottom: '10px' }}>
+        <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text-primary)', marginBottom: '10px' }}>
           Grant Backup Access
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px' }}>
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>User</label>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>User</label>
             <select
               value={form.userId}
               onChange={(event) => setForm(prev => ({ ...prev, userId: event.target.value }))}
-              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8' }}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(17,47,82,0.20)', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-primary)' }}
             >
               {selectableUsers.map(user => (
                 <option key={user.id} value={user.id}>{user.name} ({user.id})</option>
@@ -283,11 +283,11 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Location</label>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Location</label>
             <select
               value={form.locationId}
               onChange={(event) => setForm(prev => ({ ...prev, locationId: event.target.value }))}
-              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8' }}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(17,47,82,0.20)', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-primary)' }}
             >
               {LOCATION_OPTIONS.map(locationId => (
                 <option key={locationId} value={locationId}>{locationId}</option>
@@ -296,34 +296,34 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Start</label>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Start</label>
             <input
               type="date"
               value={form.startsOn}
               onChange={(event) => setForm(prev => ({ ...prev, startsOn: event.target.value }))}
-              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8' }}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(17,47,82,0.20)', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-primary)' }}
             />
           </div>
 
           <div>
-            <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Expires</label>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Expires</label>
             <input
               type="date"
               value={form.expiresOn}
               onChange={(event) => setForm(prev => ({ ...prev, expiresOn: event.target.value }))}
-              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8' }}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(17,47,82,0.20)', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-primary)' }}
             />
           </div>
         </div>
 
         <div style={{ marginTop: '10px' }}>
-          <label style={{ fontSize: '12px', color: '#8899aa', display: 'block', marginBottom: '4px' }}>Reason</label>
+          <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Reason</label>
           <input
             type="text"
             value={form.reason}
             onChange={(event) => setForm(prev => ({ ...prev, reason: event.target.value }))}
             placeholder="Why this temporary backup access is needed"
-            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.06)', color: '#e8e8e8', boxSizing: 'border-box' }}
+            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(17,47,82,0.20)', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-primary)', boxSizing: 'border-box' }}
           />
         </div>
 
@@ -333,8 +333,8 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
           style={{
             marginTop: '10px',
             padding: '10px 16px',
-            backgroundColor: (submitting || isOffline) ? 'rgba(255,255,255,0.08)' : '#4CAF50',
-            color: (submitting || isOffline) ? '#8899aa' : 'white',
+            backgroundColor: (submitting || isOffline) ? 'rgba(17,47,82,0.14)' : '#2F7D57',
+            color: (submitting || isOffline) ? 'var(--text-secondary)' : 'white',
             border: 'none',
             borderRadius: '8px',
             fontSize: '13px',
@@ -347,23 +347,23 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
       </div>
 
       {loading ? (
-        <div style={{ color: '#8899aa', fontSize: '13px' }}>Loading access grants...</div>
+        <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Loading access grants...</div>
       ) : grants.length === 0 ? (
-        <div style={{ color: '#8899aa', fontSize: '13px' }}>No backup grants created yet.</div>
+        <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No backup grants created yet.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {grants.map(grant => (
             <div
               key={grant.id}
               style={{
-                border: '1px solid rgba(255,255,255,0.08)',
+                border: '1px solid rgba(17,47,82,0.14)',
                 borderRadius: '8px',
-                backgroundColor: 'rgba(255,255,255,0.02)',
+                backgroundColor: 'rgba(17,47,82,0.04)',
                 padding: '12px'
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
-                <div style={{ fontWeight: 'bold', color: '#e8e8e8', fontSize: '13px' }}>
+                <div style={{ fontWeight: 'bold', color: 'var(--text-primary)', fontSize: '13px' }}>
                   {grant.userName} ({grant.userId}) - {grant.locationId}
                 </div>
                 <span
@@ -381,14 +381,14 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
                 </span>
               </div>
 
-              <div style={{ fontSize: '12px', color: '#8899aa', marginTop: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
                 Window: {formatDateTime(grant.startsAt)} - {formatDateTime(grant.expiresAt)}
               </div>
-              <div style={{ fontSize: '12px', color: '#8899aa', marginTop: '2px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
                 Reason: {grant.reason || '(none)'}
               </div>
               {grant.revokedReason && (
-                <div style={{ fontSize: '12px', color: '#E53935', marginTop: '2px' }}>
+                <div style={{ fontSize: '12px', color: '#CD4E42', marginTop: '2px' }}>
                   Revoked: {grant.revokedReason}
                 </div>
               )}
@@ -399,7 +399,7 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
                   style={{
                     marginTop: '8px',
                     padding: '7px 12px',
-                    backgroundColor: '#E53935',
+                    backgroundColor: '#CD4E42',
                     color: 'white',
                     border: 'none',
                     borderRadius: '6px',
@@ -420,3 +420,5 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
 }
 
 export default AccessGrantPanel
+
+

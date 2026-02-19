@@ -21,6 +21,8 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
   - requires authenticated identity match (`request.auth.uid == users.authUid`)
   - limits self-updates to PIN/version/timestamp fields only
   - keeps existing supervisor/admin managed-user PIN update permissions intact
+- Global UI token/theme layer in `src/index.css` aligned to healthcare-focused brand direction (deep navy, terracotta, warm neutral backgrounds) while preserving existing layout and workflows.
+- Restored warm-neutral app background direction and replaced legacy hardcoded inline dark-theme color literals across major components with readable semantic contrast values.
 
 ### Fixed
 - Resolved EOC submit permission failures caused by draft cleanup edge cases when draft ownership metadata does not match active auth UID.
@@ -28,11 +30,16 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 
 ### Verification
 - `npm run lint` passed.
-- `npm run build` could not complete in sandbox due to local process spawn restriction (`esbuild` `spawn EPERM`).
+- `npm run build` passed.
 
 ### Documentation
 - Rebuilt `plan.md` as a clean V2 Core operating blueprint aligned to current runtime state.
 - Added continuous-truth sections for current behavior, delivered work, and upcoming updates.
+- Added `docs/PROJECT_ALIGNMENT.md` to lock master-instruction alignment, approved exceptions, and workflow contract.
+- Added `PROJECT_INSTRUCTIONS.md` for session startup order and repo-specific operating rules.
+- Updated `README.md` with daily logical-batch deploy/testing workflow and hosting standard.
+- Updated `docs/CUTOVER_RUNBOOK.md` with repeatable per-batch deploy + mobile validation steps.
+- Updated `docs/REGRESSION_UAT_PHASE9.md` with explicit iPhone/iPad validation checklist rows.
 
 ## [2026-02-13]
 ### Added

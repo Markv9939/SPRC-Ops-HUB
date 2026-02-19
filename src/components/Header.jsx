@@ -2,8 +2,8 @@ function Header({ userName, onLogout, onChangePin, canChangeOwnPin = false, aler
   return (
     <div className="header">
       <div className="header-brand">
-        <img src="/sprc-logo.png" alt="SPRC" />
-        <span>BHT Hub</span>
+        <img src="/branding/sprc-mark-white.png" alt="SPRC" />
+        <span>SPRC Ops Hub</span>
       </div>
 
       <div className="header-right">
@@ -13,7 +13,7 @@ function Header({ userName, onLogout, onChangePin, canChangeOwnPin = false, aler
         {isOffline && (
           <span style={{
             fontSize: '11px',
-            color: '#FF9800',
+            color: '#B07A28',
             border: '1px solid rgba(255,152,0,0.4)',
             borderRadius: '999px',
             padding: '2px 8px',
@@ -37,3 +37,4 @@ function Header({ userName, onLogout, onChangePin, canChangeOwnPin = false, aler
 }
 
 export default Header
+

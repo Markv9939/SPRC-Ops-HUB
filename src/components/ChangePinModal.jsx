@@ -13,9 +13,9 @@ function PINInput({ value, onChange, placeholder, autoFocus = false }) {
         width: '100%',
         padding: '10px 12px',
         borderRadius: '8px',
-        border: '1px solid rgba(255,255,255,0.15)',
-        backgroundColor: 'rgba(255,255,255,0.06)',
-        color: '#e8e8e8',
+        border: '1px solid rgba(17,47,82,0.26)',
+        backgroundColor: 'rgba(17,47,82,0.10)',
+        color: 'var(--text-primary)',
         fontSize: '14px',
         letterSpacing: '2px',
         boxSizing: 'border-box'
@@ -79,16 +79,16 @@ function ChangePinModal({ isOpen, onClose, onSubmit }) {
           width: '100%',
           maxWidth: '420px',
           borderRadius: '12px',
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: '1px solid rgba(17,47,82,0.22)',
           backgroundColor: '#122231',
           boxShadow: '0 18px 40px rgba(0,0,0,0.45)',
           padding: '18px'
         }}
       >
-        <div style={{ fontSize: '18px', fontWeight: 700, color: '#e8e8e8', marginBottom: '4px' }}>
+        <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
           Change PIN
         </div>
-        <div style={{ fontSize: '13px', color: '#8899aa', marginBottom: '14px' }}>
+        <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
           Enter your current PIN, then set a new 4-digit PIN.
         </div>
 
@@ -99,7 +99,7 @@ function ChangePinModal({ isOpen, onClose, onSubmit }) {
         </div>
 
         {error && (
-          <div style={{ color: '#E53935', fontSize: '12px', marginTop: '10px' }}>
+          <div style={{ color: '#CD4E42', fontSize: '12px', marginTop: '10px' }}>
             {error}
           </div>
         )}
@@ -118,3 +118,5 @@ function ChangePinModal({ isOpen, onClose, onSubmit }) {
 }
 
 export default ChangePinModal
+
+

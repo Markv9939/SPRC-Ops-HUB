@@ -100,7 +100,7 @@ function TransportList({ transports, onNewTransport, onContinueTransport }) {
                 )}
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', marginTop: isOverdue(t) ? '8px' : '0' }}>
-                  <span style={{ fontWeight: 700, fontSize: '15px', color: '#e8e8e8' }}>
+                  <span style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)' }}>
                     {getClientDisplay(t)}
                   </span>
                   <span className={badgeClass(t.status)}>
@@ -108,7 +108,7 @@ function TransportList({ transports, onNewTransport, onContinueTransport }) {
                   </span>
                 </div>
 
-                <div style={{ fontSize: '13px', color: '#8899aa' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                   {getDestinationDisplay(t)}
                 </div>
 
@@ -117,7 +117,7 @@ function TransportList({ transports, onNewTransport, onContinueTransport }) {
                 </div>
 
                 {isClickable && (
-                  <div style={{ fontSize: '11px', color: '#E53935', marginTop: '8px', fontWeight: 600 }}>
+                  <div style={{ fontSize: '11px', color: '#CD4E42', marginTop: '8px', fontWeight: 600 }}>
                     Tap to continue →
                   </div>
                 )}
@@ -131,3 +131,5 @@ function TransportList({ transports, onNewTransport, onContinueTransport }) {
 }
 
 export default TransportList
+
+

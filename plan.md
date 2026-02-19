@@ -1,6 +1,6 @@
 # SPRC Ops Hub Blueprint (V2 Core)
 
-Last updated: 2026-02-16
+Last updated: 2026-02-17
 Status: Active
 Primary owner: Product + Engineering
 
@@ -30,6 +30,28 @@ This file is the running blueprint for what is live now, what is required behavi
   - Assignment sync: `src/services/assignmentService.js`
   - Scope and grants: `src/services/accessGrantService.js`
   - Auth policy: `src/services/authPolicyService.js`
+
+### 3.1 Instruction Alignment and Approved Exceptions
+Master instruction alignment and project exceptions are documented in `docs/PROJECT_ALIGNMENT.md`.
+Project session-start and repo operating rules are documented in `PROJECT_INSTRUCTIONS.md`.
+
+Approved exceptions for this repo:
+- Frontend remains React + Vite (intentional exception to vanilla-JS default guidance).
+- Cloud Functions are optional and not required for current runtime/cutover.
+- PWA implementation is deferred by owner decision for now.
+
+### 3.2 Delivery Workflow Contract
+Each logical batch should follow this operational order:
+1. Implement one cohesive batch.
+2. Run relevant verification:
+   - `npm run build`
+   - `npm run lint`
+   - `npm run smoke:phase9:full` (release-readiness path)
+3. Deploy for owner validation:
+   - Hosting changes: `firebase deploy --only hosting --project sprc-tx-l`
+   - Rules changes: `firebase deploy --only firestore:rules --project sprc-tx-l`
+4. Validate key paths on iPhone/iPad.
+5. Record evidence in `docs/REGRESSION_UAT_PHASE9.md` and shipped behavior in `CHANGELOG.md`.
 
 ## 4. Canonical Role and Scope Model
 Roles in runtime:
@@ -160,6 +182,9 @@ Completed:
 - Multi-van create/edit/save support in supervisor user management.
 - Self-service PIN rotation for BHT/Supervisor with current PIN verification.
 - Firestore strict self-PIN rule path (identity + field-level restrictions) while preserving supervisor/admin managed PIN updates.
+- Master-instruction alignment baseline added (`docs/PROJECT_ALIGNMENT.md`) with explicit project exceptions and workflow contract.
+- Project-local session/startup instruction contract added (`PROJECT_INSTRUCTIONS.md`).
+- UI token layer aligned to healthcare palette direction in `src/index.css` while preserving existing workflow behavior.
 
 In progress:
 - Final UAT signoff capture in `docs/REGRESSION_UAT_PHASE9.md`.
@@ -172,10 +197,19 @@ Next planned updates:
 
 ## 10. Source of Truth Policy
 - `plan.md` = current operating blueprint.
+- `docs/PROJECT_ALIGNMENT.md` = instruction alignment + approved project exceptions.
+- `PROJECT_INSTRUCTIONS.md` = session startup order + repo operating rules.
 - `CHANGELOG.md` = chronological implementation truth.
 - If implementation conflicts with this blueprint:
   1. Update code to match blueprint, or
   2. Revise blueprint first, then implement.
+
+Instruction precedence for conflicting guidance:
+1. Master `AGENTS.md` safety/change-control rules.
+2. `PROJECT_INSTRUCTIONS.md` repo operating rules.
+3. `docs/PROJECT_ALIGNMENT.md` for approved repo exceptions.
+4. `plan.md` product behavior contract.
+5. Implementation in code.
 
 ## 11. Linked Docs
 - `docs/CUTOVER_RUNBOOK.md`

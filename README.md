@@ -5,6 +5,13 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Supervisor oversight: queues, assignments, issue resolution
 - Admin governance: scope control, templates, audit, access
 
+## Project Alignment (Master Instructions)
+- Master instruction alignment is documented in `docs/PROJECT_ALIGNMENT.md`.
+- Project-specific session startup instructions are documented in `PROJECT_INSTRUCTIONS.md`.
+- This repo keeps **React + Vite** as an approved project exception to vanilla JS defaults.
+- Cloud Functions are **optional** for current runtime and cutover.
+- PWA implementation is deferred by owner decision for now.
+
 ## Recent EOC Behavior (Current)
 - EOC completer identity is read-only and uses the logged-in user.
 - EOC drafts autosave during completion and auto-restore when reopening the same task.
@@ -14,6 +21,8 @@ SPRC Ops Hub centralizes daily operations across three levels:
 
 ## Source of Truth
 - Blueprint: `plan.md`
+- Instruction alignment + approved exceptions: `docs/PROJECT_ALIGNMENT.md`
+- Session startup + operating rules: `PROJECT_INSTRUCTIONS.md`
 - Change history: `CHANGELOG.md`
 - Cutover: `docs/CUTOVER_RUNBOOK.md`
 - UAT walkthrough: `docs/UAT_WALKTHROUGH_PHASE9.md`
@@ -33,6 +42,20 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Reset baseline (destructive): `npm run reset:uat`
 - Claims provision: `npm run claims:provision`
 - Claims verify: `npm run claims:verify`
+
+## Daily Delivery Workflow
+Use this sequence for each logical batch so owner testing can happen quickly on phone/tablet:
+1. Make one cohesive change batch.
+2. Run checks needed for that batch (`npm run build`, `npm run lint`, and `npm run smoke:phase9:full` when release-ready).
+3. Deploy:
+   - Hosting/UI changes: `firebase deploy --only hosting --project sprc-tx-l`
+   - Firestore rules changes: `firebase deploy --only firestore:rules --project sprc-tx-l`
+4. Validate on iPhone and iPad critical paths.
+5. Record evidence/results in `docs/REGRESSION_UAT_PHASE9.md` and `CHANGELOG.md`.
+
+## Hosting Standard
+- Primary: Firebase Hosting (`sprc-tx-l`).
+- Secondary/fallback config exists in `netlify.toml` and is not the default path unless explicitly chosen.
 
 ## Operating Rule
 If implementation and docs conflict, update code to match `plan.md` or revise `plan.md` first.

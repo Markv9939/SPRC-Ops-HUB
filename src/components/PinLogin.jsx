@@ -228,48 +228,22 @@ function PinLogin({ onLogin }) {
   }
 
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      backgroundColor: '#0f1923'
-    }}>
-      <div style={{
-        backgroundColor: 'rgba(255,255,255,0.05)',
-        borderRadius: '16px',
-        padding: '40px',
-        textAlign: 'center',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-        border: '1px solid rgba(229,57,53,0.2)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        width: '300px'
-      }}>
-        <img
-          src="/sprc-logo.png"
-          alt="SPRC Logo"
-          style={{
-            width: '90px',
-            height: '90px',
-            margin: '0 auto 20px',
-            display: 'block',
-            filter: 'drop-shadow(0 0 12px rgba(229,57,53,0.3))'
-          }}
-        />
-
+    <div className="login-screen">
+      <div className="login-panel">
         <h1 style={{
           fontSize: '22px',
-          color: '#e8e8e8',
-          marginBottom: '5px'
+          color: '#F8F5F1',
+          marginBottom: '6px',
+          textShadow: '0 1px 0 #000, 1px 0 0 #000, 0 -1px 0 #000, -1px 0 0 #000, 0 2px 8px rgba(10,24,38,0.45)'
         }}>
           SPRC Ops Hub
         </h1>
 
         <p style={{
-          color: '#8899aa',
-          marginBottom: '25px',
-          fontSize: '14px'
+          color: 'rgba(248,245,241,0.86)',
+          marginBottom: '20px',
+          fontSize: '14px',
+          textShadow: '0 1px 0 rgba(0,0,0,0.9), 1px 0 0 rgba(0,0,0,0.9), 0 -1px 0 rgba(0,0,0,0.9), -1px 0 0 rgba(0,0,0,0.9), 0 2px 6px rgba(10,24,38,0.40)'
         }}>
           Enter PIN to access
         </p>
@@ -290,19 +264,19 @@ function PinLogin({ onLogin }) {
             padding: '14px',
             fontSize: '24px',
             textAlign: 'center',
-            border: '2px solid rgba(255,255,255,0.1)',
+            border: '2px solid rgba(248,245,241,0.45)',
             borderRadius: '10px',
             outline: 'none',
             letterSpacing: '8px',
             boxSizing: 'border-box',
-            marginBottom: '10px',
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            color: '#e8e8e8'
+            marginBottom: '12px',
+            backgroundColor: 'rgba(17,47,82,0.32)',
+            color: '#F8F5F1'
           }}
         />
 
         {error && (
-          <p style={{ color: '#E53935', fontSize: '13px', marginBottom: '10px' }}>
+          <p style={{ color: '#FFD6CF', fontSize: '13px', marginBottom: '10px' }}>
             {error}
           </p>
         )}
@@ -313,8 +287,8 @@ function PinLogin({ onLogin }) {
           style={{
             width: '100%',
             padding: '14px',
-            background: 'linear-gradient(135deg, #E53935 0%, #C62828 100%)',
-            color: 'white',
+            background: 'linear-gradient(135deg, #5FAEE3 0%, #3D86C6 100%)',
+            color: '#F8F5F1',
             border: 'none',
             borderRadius: '10px',
             fontSize: '18px',
@@ -322,7 +296,7 @@ function PinLogin({ onLogin }) {
             cursor: (isLoading || (lockoutUntil && Date.now() < lockoutUntil)) ? 'not-allowed' : 'pointer',
             marginTop: '5px',
             opacity: (isLoading || (lockoutUntil && Date.now() < lockoutUntil)) ? 0.6 : 1,
-            boxShadow: '0 4px 14px rgba(229,57,53,0.35), 0 0 20px rgba(229,57,53,0.3)'
+            boxShadow: '0 8px 20px rgba(21,62,102,0.40)'
           }}
         >
           {isLoading ? 'Checking...' : 'Enter'}

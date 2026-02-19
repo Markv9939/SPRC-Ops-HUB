@@ -1,6 +1,6 @@
 # SPRC Cutover Runbook (Free-Tier v1)
 
-Last updated: 2026-02-13
+Last updated: 2026-02-17
 Owner: Admin/Owner + Supervisor
 
 ## Goal
@@ -46,6 +46,26 @@ Execute a clean cutover into the current assignment/task model without Cloud Fun
    - `npm run smoke:phase9`
 2. Optional lint baseline report:
    - `npm run smoke:phase9:full`
+
+## Logical Batch Deploy Workflow (Daily)
+
+Use this sequence after each meaningful change batch, not only final cutover:
+
+1. Run local verification for the batch:
+   - `npm run build`
+   - `npm run lint`
+   - `npm run smoke:phase9:full` (release readiness)
+2. Deploy the relevant target:
+   - Hosting/UI changes: `firebase deploy --only hosting --project sprc-tx-l`
+   - Rules changes: `firebase deploy --only firestore:rules --project sprc-tx-l`
+3. Validate on iPhone/iPad critical paths:
+   - Login and role landing page
+   - Primary action buttons and card readability
+   - Sticky action areas (EOC forms)
+   - Input behavior (keyboard overlap, tap-target comfort)
+4. Record verification evidence:
+   - `docs/REGRESSION_UAT_PHASE9.md`
+   - `CHANGELOG.md`
 
 ## Rollback Approach
 
