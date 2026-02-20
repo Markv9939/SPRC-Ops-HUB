@@ -13,6 +13,22 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - Bulk compliance employee import script (`scripts/addComplianceEmployees.js`) and npm command (`npm run compliance:employees:add`) to upsert employee records by `name + site`.
 
 ### Changed
+- Compliance mobile item workflow refactored for low-friction editing:
+  - mobile employee detail now uses sticky bottom action bar (`Back`, `+ Add Item`, `Deactivate/Reactivate`)
+  - mobile add/edit actions now open focused bottom sheets with sticky save controls
+  - mobile item rows stay compact while editing (no in-list expansion that creates long page growth)
+  - mobile list includes bottom safe-area spacing so actions and final items remain reachable
+- Admin/Supervisor compliance workflow redesigned to an employee-centric model:
+  - `Compliance` now focuses on searchable employee list + in-context employee detail management.
+  - Employee compliance item CRUD now happens directly inside the selected employee detail view (desktop side panel, mobile full-screen detail sheet).
+  - Legacy `Items` sub-tab removed to reduce tab switching and friction.
+- `Cintas` moved out of Compliance sub-tabs into a dedicated top-level dashboard tab.
+- New top-level `Cintas` tab now includes scoped location-compliance management (including Fire Safety location items) for admin and supervisors.
+- `Cintas` and location-compliance records now use explicit location fields (`mainLocation`/`locationId`) in UI writes to support supervisor scope filtering.
+- Firestore rules tightened for compliance collections:
+  - removed broad authenticated-user fallback writes for `complianceEmployees`, `complianceItems`, and `cintasServices`
+  - added role+location scoped checks for compliance and Cintas writes
+  - added admin-only legacy read path for Cintas records missing location fields
 - EOC checklist completer identity is now read-only and always sourced from the authenticated user.
 - EOC checklist interaction flow optimized for faster completion on mobile and desktop:
   - sticky bottom actions
@@ -42,8 +58,11 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 ### Verification
 - `npm run lint` passed.
 - `npm run build` passed.
+- `npm run smoke:phase9:full` passed (build + lint) after compliance/cintas restructure.
 - `npm run build` passed after van-scope + login-timeout updates (2026-02-19).
 - `npm run build` passed after modal consistency + compliance warning quick-update changes (2026-02-19).
+- Firebase Hosting deploy passed to `sprc-tx-l` after compliance/cintas UX restructure (2026-02-19).
+- Firebase Firestore rules deploy passed to `sprc-tx-l` after scope updates for compliance/cintas (2026-02-19).
 - Firebase Hosting deploy passed to `sprc-tx-l` after dashboard warning workflow updates (2026-02-19).
 
 ### Documentation

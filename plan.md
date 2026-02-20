@@ -118,6 +118,9 @@ Auth claim contract (enforced by rules/policy):
 - Scope/role management and access grants lifecycle.
 - Template governance and publish workflows.
 - Audit visibility and privileged-action traceability.
+- Compliance operations are split by intent:
+  - `Compliance` tab: employee-centric compliance management (employee list + per-employee item management)
+  - `Cintas` tab: location-based compliance/services (Cintas + Fire Safety location items), scope-filtered for supervisors
 
 ## 6. Canonical Data Collections (Live)
 - `users`
@@ -130,7 +133,9 @@ Auth claim contract (enforced by rules/policy):
 - `transports`
 - `accessGrants`
 - `auditLogs`
+- `complianceEmployees`
 - `complianceItems`
+- `cintasServices`
 - `complianceCertificates`
 - `complianceSettings`
 - `authPolicy`

@@ -530,19 +530,39 @@ service cloud.firestore {
     // Compliance collections
     match /complianceEmployees/{employeeId} {
       allow read: if true;
-      allow write: if authRoleAllowed(['supervisor', 'admin'])
-        || request.auth != null;
+      allow write: if authRoleAllowed(['supervisor', 'admin']);
     }
     match /complianceItems/{itemId} {
       allow read: if true;
-      allow create, update: if authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.employeeSite);
-      allow delete: if authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.employeeSite);
-      allow create, update, delete: if request.auth != null;
+      allow create, update: if authRoleAllowed(['supervisor', 'admin'])
+        && (
+          authLocationAllowed(request.resource.data.employeeSite)
+          || authLocationAllowed(request.resource.data.mainLocation)
+          || authLocationAllowed(request.resource.data.locationId)
+        );
+      allow delete: if authRoleAllowed(['supervisor', 'admin'])
+        && (
+          authLocationAllowed(resource.data.employeeSite)
+          || authLocationAllowed(resource.data.mainLocation)
+          || authLocationAllowed(resource.data.locationId)
+        );
     }
     match /cintasServices/{serviceId} {
-      allow read: if true;
+      allow read: if authRoleAllowed(['supervisor', 'admin'])
+        && (
+          authLocationAllowed(resource.data.mainLocation)
+          || authLocationAllowed(resource.data.locationId)
+        )
+        || (
+          authRoleAllowed(['admin'])
+          && !('mainLocation' in resource.data)
+          && !('locationId' in resource.data)
+        );
       allow write: if authRoleAllowed(['supervisor', 'admin'])
-        || request.auth != null;
+        && (
+          authLocationAllowed(request.resource.data.mainLocation)
+          || authLocationAllowed(request.resource.data.locationId)
+        );
     }
 
     // Transports collection

@@ -24,6 +24,11 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - PIN login includes timeout guards on backend/auth lookups so degraded connectivity fails with a clear error instead of staying on `Checking...`.
 
 ## Recent Dashboard/Modal Behavior (Current)
+- Compliance admin surface is now employee-centric:
+  - one searchable employee workspace for add/deactivate/manage flows
+  - tap/select employee to manage all their compliance items in one place
+  - responsive detail behavior: side panel on larger screens, full-screen detail sheet on mobile
+- Cintas is now a dedicated top-level dashboard tab (separate from Compliance) and includes location-based compliance management.
 - Compliance warning cards (`Overdue Tasks`, `Upcoming Compliance`) now support direct inline resolution via `Quick Update`:
   - edit `Last Completed`, `Next Due Date`, and `Notes` directly from the warning card
   - save writes to `complianceItems` and records an audit log entry

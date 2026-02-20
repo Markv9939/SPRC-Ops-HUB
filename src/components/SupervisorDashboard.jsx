@@ -5,6 +5,7 @@ import { signInAnonymously, signOut } from 'firebase/auth'
 import * as XLSX from 'xlsx'
 import SupervisorEocPanel from './SupervisorEocPanel'
 import CompliancePanel from './CompliancePanel'
+import CintasPanel from './CintasPanel'
 import AccessGrantPanel from './AccessGrantPanel'
 import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
 import { hashPin } from '../utils/pinHash'
@@ -43,6 +44,7 @@ const TAB_LABELS = {
   users: '\u{1F465} Users',
   eoc: '\u{1F527} EOC',
   compliance: '\u{1F4CB} Compliance',
+  cintas: '\u{1F9FC} Cintas',
   audit: '\u{1F9FE} Audit'
 }
 const TAB_KEYS = Object.keys(TAB_LABELS)
@@ -1992,6 +1994,14 @@ function SupervisorDashboard({ user, isOffline = false }) {
       {/* Compliance Tab */}
       {activeTab === 'compliance' && (
         <CompliancePanel
+          user={user}
+          scopeSites={isAdmin ? null : allowedComplianceSites}
+        />
+      )}
+
+      {/* Cintas Tab */}
+      {activeTab === 'cintas' && (
+        <CintasPanel
           user={user}
           scopeSites={isAdmin ? null : allowedComplianceSites}
         />
