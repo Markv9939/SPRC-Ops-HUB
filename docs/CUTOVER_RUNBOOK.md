@@ -1,6 +1,6 @@
 # SPRC Cutover Runbook (Free-Tier v1)
 
-Last updated: 2026-02-19
+Last updated: 2026-03-01
 Owner: Admin/Owner + Supervisor
 
 ## Goal
@@ -35,6 +35,8 @@ Execute a clean cutover into the current assignment/task model without Cloud Fun
    - `accessGrants` seeded (active + upcoming lifecycle examples)
    - `eocTasks` seeded
    - `eocIssues` + `alerts` seeded
+   - fleet collections seeded/available: `eocVehicles`, `fleetMaintenanceTemplates`, `fleetVehicleRuntime`, `fleetTasks`, `vehicleServiceRecords`
+   - property collection available: `eocProperties`
 4. Execute UAT walkthrough:
    - `docs/UAT_WALKTHROUGH_PHASE9.md`
 5. Record UAT evidence + signoff:
@@ -63,6 +65,10 @@ Use this sequence after each meaningful change batch, not only final cutover:
    - Primary action buttons and card readability
    - Sticky action areas (EOC forms)
    - Input behavior (keyboard overlap, tap-target comfort)
+   - Top-level IA pathing:
+     - `EOC` tab shows template/issues workflows only
+     - `Properties` tab handles house/property workflows
+     - `Fleet` tab owns vehicle maintenance workflows
 4. Record verification evidence:
    - `docs/REGRESSION_UAT_PHASE9.md`
    - `CHANGELOG.md`

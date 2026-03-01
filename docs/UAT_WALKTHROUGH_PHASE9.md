@@ -1,6 +1,6 @@
 # Phase 9 UAT Walkthrough Script
 
-Last updated: 2026-02-13
+Last updated: 2026-03-01
 Goal: Execute a single guided walkthrough and capture signoff evidence for Phase 9.
 
 ## Preconditions
@@ -20,6 +20,8 @@ Goal: Execute a single guided walkthrough and capture signoff evidence for Phase
    - 1 multi-van BHT assignment
    - 1 pending EOC task due today
    - 1 overdue EOC task from prior day
+   - 1 fleet vehicle profile with overdue oil condition
+   - 1 property profile in `eocProperties`
 5. Start app:
    - `npm run dev`
 6. Validate claims provisioning:
@@ -120,6 +122,30 @@ For each test case below, capture:
    - Trigger/observe sync behavior and verify expected tasks.
 2. SC-2 Idempotent re-run
    - Re-run for same cycle key and verify no duplicates.
+
+### G. Fleet Persistence + Information Architecture
+
+1. FL-1 Oil overdue persistence
+   - Mark a fleet oil alert as read while oil task is overdue.
+   - Expected: overdue fleet row remains visible until oil service record is logged.
+2. FL-2 Renewal overdue persistence
+   - Set insurance/registration due dates in the past.
+   - Expected: overdue renewal rows persist until renewal service records update due dates.
+3. FL-3 Mileage milestone overdue persistence
+   - Cross a milestone due mileage.
+   - Expected: milestone overdue row persists until matching milestone service is logged.
+4. FL-4 Queue blending
+   - Open dashboard queue view.
+   - Expected: overdue/upcoming counts reflect EOC + Compliance + Fleet sources.
+5. IA-4 EOC tab scope
+   - Open top-level EOC tab as Supervisor/Admin.
+   - Expected: only `Template` and `Issues` are present (no vehicle CRUD).
+6. IA-5 Properties tab scope
+   - Open top-level Properties tab.
+   - Expected: property profile management + house EOC status board are available.
+7. IA-6 Fleet ownership continuity
+   - Open top-level Fleet tab.
+   - Expected: vehicle profiles, mileage templates, and service-record workflows remain operational there.
 
 ## Signoff Block
 

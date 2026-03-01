@@ -45,6 +45,19 @@ SPRC Ops Hub centralizes daily operations across three levels:
   - save writes to `complianceItems` and records an audit log entry
 - `Open Compliance Tab` buttons in compliance warning cards use contrast-safe styling for readability on tinted cards.
 - Transport reminder dialog (`REMIND THE CLIENT ABOUT DC PAPERWORK`) now uses the same shared high-contrast modal style as other app dialogs.
+- Fleet maintenance now has a dedicated top-level supervisor/admin tab:
+  - vehicle maintenance profiles (`eocVehicles`) include oil/renewal settings and per-vehicle milestone overrides
+  - global mileage templates are managed in `fleetMaintenanceTemplates`
+  - service logs are captured in `vehicleServiceRecords` (with optional external document URL)
+  - dashboard queue now blends EOC + compliance + fleet status
+  - fleet overdue visibility is persistent via `fleetTasks` and is not removed by marking alerts as read
+- EOC supervisor/admin surface is now focused on:
+  - EOC issue lifecycle management
+  - template library + assignment management
+- Property and house operations now have a dedicated top-level `Properties` tab:
+  - property profile management in `eocProperties`
+  - house EOC status board sourced from `eocTasks`
+  - assignment model remains user/shift-driven from Users flows
 
 ## Source of Truth
 - Blueprint: `plan.md`

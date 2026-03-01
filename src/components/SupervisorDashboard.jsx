@@ -5,6 +5,8 @@ import { signInAnonymously, signOut } from 'firebase/auth'
 import * as XLSX from 'xlsx'
 import SupervisorEocPanel from './SupervisorEocPanel'
 import CompliancePanel from './CompliancePanel'
+import PropertiesPanel from './PropertiesPanel'
+import FleetPanel from './FleetPanel'
 import CintasPanel from './CintasPanel'
 import AccessGrantPanel from './AccessGrantPanel'
 import { LOCATIONS, VANS, getShiftLabel, getShiftOptionsForMainLocation, isShiftAllowedForMainLocation } from '../data/eocConstants'
@@ -14,6 +16,7 @@ import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../se
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
 import { getStatus } from '../utils/complianceStatus'
+import { getFleetTaskTypeLabel, isFleetAlertType, parseMileageValue } from '../utils/fleetStatus'
 import {
   GLOBAL_SCOPE,
   MAIN_LOCATIONS,
@@ -44,6 +47,8 @@ const TAB_LABELS = {
   users: '\u{1F465} Users',
   eoc: '\u{1F527} EOC',
   compliance: '\u{1F4CB} Compliance',
+  properties: '\u{1F3E0} Properties',
+  fleet: '\u{1F69A} Fleet',
   cintas: '\u{1F9FC} Cintas',
   audit: '\u{1F9FE} Audit'
 }
@@ -106,6 +111,48 @@ function getComplianceItemDueMs(item) {
   return Number.isFinite(ms) ? ms : Number.POSITIVE_INFINITY
 }
 
+function getFleetTaskDueSortValue(task) {
+  if (task?.triggerMode === 'date') {
+    const dueDate = String(task?.dueDate || '').trim()
+    return dueDate ? dueDate : '9999-12-31'
+  }
+  const dueMileage = parseMileageValue(task?.dueMileage)
+  if (dueMileage === null) return '999999999'
+  return String(dueMileage).padStart(9, '0')
+}
+
+function getFleetTaskCurrentMileage(task) {
+  const parsed = parseMileageValue(task?.currentMileageSnapshot)
+  return parsed === null ? '--' : parsed.toLocaleString('en-US')
+}
+
+function formatFleetDueLabel(task) {
+  if (task?.triggerMode === 'date') {
+    return task?.dueDate ? `Due ${task.dueDate}` : 'Due date not set'
+  }
+  const dueMileage = parseMileageValue(task?.dueMileage)
+  if (dueMileage === null) return 'Due mileage not set'
+  return `Due ${dueMileage.toLocaleString('en-US')} mi`
+}
+
+function formatFleetCurrentLabel(task) {
+  if (task?.triggerMode === 'date') {
+    return task?.currentDateSnapshot ? `Current ${task.currentDateSnapshot}` : 'Current date unavailable'
+  }
+  return `Current ${getFleetTaskCurrentMileage(task)} mi`
+}
+
+function formatFleetVehicleLabel(task) {
+  const name = String(task?.vehicleName || '').trim()
+  const vanId = String(task?.vanId || '').trim()
+  const location = String(task?.mainLocation || task?.locationId || '').trim()
+  const details = [vanId, location].filter(Boolean).join(' | ')
+  if (name && details) return `${name} (${details})`
+  if (name) return name
+  if (details) return details
+  return task?.vehicleId || 'Unknown vehicle'
+}
+
 function tsToInputDate(ts) {
   if (!ts) return ''
   const dateValue = ts?.toDate ? ts.toDate() : new Date(ts)
@@ -155,6 +202,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const [eocIssues, setEocIssues] = useState([])
   const [eocOverdueTasks, setEocOverdueTasks] = useState([])
   const [eocAlerts, setEocAlerts] = useState([])
+  const [fleetOverdueTasks, setFleetOverdueTasks] = useState([])
+  const [fleetUpcomingTasks, setFleetUpcomingTasks] = useState([])
+  const [fleetAlerts, setFleetAlerts] = useState([])
   const [queueView, setQueueView] = useState('issues')
   const [queueLocationFilter, setQueueLocationFilter] = useState('all')
   const [eocIssueActionNotes, setEocIssueActionNotes] = useState({})
@@ -293,7 +343,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
   }, [queueView])
 
   useEffect(() => {
-    if (queueView === 'overdue' || queueView === 'compliance_upcoming') return
+    if (queueView === 'overdue' || queueView === 'upcoming') return
     setComplianceQuickEditId(null)
     setComplianceQuickEditForm({
       lastCompleted: '',
@@ -324,27 +374,64 @@ function SupervisorDashboard({ user, isOffline = false }) {
         setEocOverdueTasks(rows)
       }
     )
-    const unsubAlerts = onSnapshot(
-      query(collection(db, 'alerts'), where('read', '==', false)),
+    const unsubFleetOverdueTasks = onSnapshot(
+      query(collection(db, 'fleetTasks'), where('status', '==', 'overdue')),
       (snap) => {
         const rows = snap.docs
           .map(d => ({ id: d.id, ...d.data() }))
+          .filter(task => inComplianceScope(task.mainLocation || task.locationId))
+        rows.sort((a, b) => getFleetTaskDueSortValue(a).localeCompare(getFleetTaskDueSortValue(b)))
+        setFleetOverdueTasks(rows)
+      }
+    )
+    const unsubFleetUpcomingTasks = onSnapshot(
+      query(collection(db, 'fleetTasks'), where('status', '==', 'upcoming')),
+      (snap) => {
+        const rows = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(task => inComplianceScope(task.mainLocation || task.locationId))
+        rows.sort((a, b) => getFleetTaskDueSortValue(a).localeCompare(getFleetTaskDueSortValue(b)))
+        setFleetUpcomingTasks(rows)
+      }
+    )
+    const unsubAlerts = onSnapshot(
+      query(collection(db, 'alerts'), where('read', '==', false)),
+      (snap) => {
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        const scopedEocAlerts = rows
           .filter(alertItem => alertItem.type === 'eoc_issue')
           .filter(alertItem => inEocScope(alertItem.locationId))
-        rows.sort((a, b) => {
+        scopedEocAlerts.sort((a, b) => {
           const aMs = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0
           const bMs = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0
           return bMs - aMs
         })
-        setEocAlerts(rows)
+        setEocAlerts(scopedEocAlerts)
+
+        const scopedFleetAlerts = rows
+          .filter(alertItem => isFleetAlertType(alertItem.type))
+          .filter(alertItem => inComplianceScope(alertItem.mainLocation || alertItem.locationId || ''))
+        scopedFleetAlerts.sort((a, b) => {
+          const aMs = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0
+          const bMs = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0
+          return bMs - aMs
+        })
+        setFleetAlerts(scopedFleetAlerts)
       }
     )
     const unsubCompliance = onSnapshot(
       collection(db, 'complianceItems'),
       (snap) => setComplianceItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     )
-    return () => { unsubIssues(); unsubOverdueTasks(); unsubAlerts(); unsubCompliance() }
-  }, [inEocScope])
+    return () => {
+      unsubIssues()
+      unsubOverdueTasks()
+      unsubFleetOverdueTasks()
+      unsubFleetUpcomingTasks()
+      unsubAlerts()
+      unsubCompliance()
+    }
+  }, [inComplianceScope, inEocScope])
 
   const updateIssueActionNote = (issueId, note) => {
     setEocIssueActionNotes(prev => ({
@@ -511,7 +598,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
   const handleMarkAlertRead = async (alertId) => {
     if (blockIfOffline('marking alerts as read')) return
 
-    const selectedAlert = eocAlerts.find(alertRow => alertRow.id === alertId)
+    const selectedAlert = [...eocAlerts, ...fleetAlerts].find(alertRow => alertRow.id === alertId)
     try {
       await updateDoc(doc(db, 'alerts', alertId), {
         read: true,
@@ -1720,9 +1807,23 @@ function SupervisorDashboard({ user, isOffline = false }) {
     () => eocOverdueTasks.filter(task => locationMatchesQueueFilter(task.locationId)),
     [eocOverdueTasks, locationMatchesQueueFilter]
   )
+  const filteredFleetOverdueQueue = useMemo(
+    () => fleetOverdueTasks.filter(task => locationMatchesQueueFilter(task.mainLocation || task.locationId)),
+    [fleetOverdueTasks, locationMatchesQueueFilter]
+  )
+  const filteredFleetUpcomingQueue = useMemo(
+    () => fleetUpcomingTasks.filter(task => locationMatchesQueueFilter(task.mainLocation || task.locationId)),
+    [fleetUpcomingTasks, locationMatchesQueueFilter]
+  )
   const filteredAlertQueue = useMemo(
-    () => eocAlerts.filter(alert => locationMatchesQueueFilter(alert.locationId)),
-    [eocAlerts, locationMatchesQueueFilter]
+    () => [...eocAlerts, ...fleetAlerts]
+      .filter(alert => locationMatchesQueueFilter(alert.mainLocation || alert.locationId))
+      .sort((a, b) => {
+        const aMs = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0
+        const bMs = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0
+        return bMs - aMs
+      }),
+    [eocAlerts, fleetAlerts, locationMatchesQueueFilter]
   )
   const filteredComplianceOverdueQueue = useMemo(() => (
     scopedComplianceItems
@@ -1739,15 +1840,18 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
   const queueCounts = {
     issues: filteredIssueQueue.length,
-    overdue: filteredOverdueTaskQueue.length + filteredComplianceOverdueQueue.length,
-    upcomingCompliance: filteredComplianceUpcomingQueue.length,
+    overdue: filteredOverdueTaskQueue.length + filteredComplianceOverdueQueue.length + filteredFleetOverdueQueue.length,
+    upcoming: filteredComplianceUpcomingQueue.length + filteredFleetUpcomingQueue.length,
     alerts: filteredAlertQueue.length
   }
 
   const hasQueueData = (
     eocIssues.length > 0 ||
     eocOverdueTasks.length > 0 ||
+    fleetOverdueTasks.length > 0 ||
+    fleetUpcomingTasks.length > 0 ||
     eocAlerts.length > 0 ||
+    fleetAlerts.length > 0 ||
     complianceSummary.overdue > 0 ||
     complianceSummary.upcoming > 0
   )
@@ -1765,6 +1869,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
     eocIssues.forEach(issue => addMappedSite(issue.locationId))
     eocOverdueTasks.forEach(task => addMappedSite(task.locationId))
     eocAlerts.forEach(alertItem => addMappedSite(alertItem.locationId))
+    fleetOverdueTasks.forEach(task => addMappedSite(task.mainLocation || task.locationId))
+    fleetUpcomingTasks.forEach(task => addMappedSite(task.mainLocation || task.locationId))
+    fleetAlerts.forEach(alertItem => addMappedSite(alertItem.mainLocation || alertItem.locationId))
     scopedComplianceItems.forEach(item => {
       const site = getComplianceItemSite(item)
       if (site) discoveredLocations.add(site)
@@ -1777,7 +1884,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
     })
 
     return options
-  }, [eocAlerts, eocIssues, eocOverdueTasks, scopedComplianceItems])
+  }, [eocAlerts, eocIssues, eocOverdueTasks, fleetAlerts, fleetOverdueTasks, fleetUpcomingTasks, scopedComplianceItems])
 
   const transportReasonOptions = useMemo(() => {
     const reasonSet = new Set()
@@ -1998,6 +2105,23 @@ function SupervisorDashboard({ user, isOffline = false }) {
       {/* Compliance Tab */}
       {activeTab === 'compliance' && (
         <CompliancePanel
+          user={user}
+          scopeSites={isAdmin ? null : allowedComplianceSites}
+        />
+      )}
+
+      {/* Properties Tab */}
+      {activeTab === 'properties' && (
+        <PropertiesPanel
+          user={user}
+          scopeSites={isAdmin ? null : allowedComplianceSites}
+          onOpenTab={setActiveTab}
+        />
+      )}
+
+      {/* Fleet Tab */}
+      {activeTab === 'fleet' && (
+        <FleetPanel
           user={user}
           scopeSites={isAdmin ? null : allowedComplianceSites}
         />
@@ -2332,7 +2456,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
               marginBottom: '20px',
               border: '1px solid #D8D1C6'
             }}>
-              <h3 style={{ margin: '0 0 14px 0', fontSize: '16px', color: 'var(--text-primary)' }}>EOC + Compliance Status</h3>
+              <h3 style={{ margin: '0 0 14px 0', fontSize: '16px', color: 'var(--text-primary)' }}>EOC + Compliance + Fleet Status</h3>
 
               {/* Clickable KPI cards */}
               <div style={{ display: 'flex', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
@@ -2365,23 +2489,23 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 >
                   <div style={{ fontSize: '12px', color: '#B07A28' }}>Overdue Tasks</div>
                   <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#B07A28' }}>
-                    {eocOverdueTasks.length + complianceSummary.overdue}
+                    {queueCounts.overdue}
                   </div>
                 </button>
                 <button
-                  onClick={() => setQueueView('compliance_upcoming')}
+                  onClick={() => setQueueView('upcoming')}
                   style={{
                     padding: '10px 20px',
                     backgroundColor: 'rgba(76,175,80,0.15)',
                     borderRadius: '8px',
                     textAlign: 'center',
-                    border: queueView === 'compliance_upcoming' ? '2px solid #2F7D57' : '1px solid rgba(76,175,80,0.3)',
+                    border: queueView === 'upcoming' ? '2px solid #2F7D57' : '1px solid rgba(76,175,80,0.3)',
                     cursor: 'pointer',
                     color: 'inherit'
                   }}
                 >
-                  <div style={{ fontSize: '12px', color: '#2F7D57' }}>Upcoming Compliance</div>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2F7D57' }}>{complianceSummary.upcoming}</div>
+                  <div style={{ fontSize: '12px', color: '#2F7D57' }}>Upcoming Tasks</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2F7D57' }}>{queueCounts.upcoming}</div>
                 </button>
                 <button
                   onClick={() => setQueueView('alerts')}
@@ -2396,7 +2520,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   }}
                 >
                   <div style={{ fontSize: '12px', color: '#64B5F6' }}>Unread Alerts</div>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#64B5F6' }}>{eocAlerts.length}</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#64B5F6' }}>{eocAlerts.length + fleetAlerts.length}</div>
                 </button>
               </div>
 
@@ -2418,7 +2542,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   >
                     <option value="issues">Active Issues ({queueCounts.issues})</option>
                     <option value="overdue">Overdue Tasks ({queueCounts.overdue})</option>
-                    <option value="compliance_upcoming">Upcoming Compliance ({queueCounts.upcomingCompliance})</option>
+                    <option value="upcoming">Upcoming Tasks ({queueCounts.upcoming})</option>
                     <option value="alerts">Unread Alerts ({queueCounts.alerts})</option>
                   </select>
                 </div>
@@ -2520,8 +2644,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   </div>
                 ))}
 
-                {queueView === 'overdue' && filteredOverdueTaskQueue.length === 0 && filteredComplianceOverdueQueue.length === 0 && (
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No overdue EOC or compliance tasks for this filter.</div>
+                {queueView === 'overdue' && filteredOverdueTaskQueue.length === 0 && filteredComplianceOverdueQueue.length === 0 && filteredFleetOverdueQueue.length === 0 && (
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No overdue EOC, compliance, or fleet tasks for this filter.</div>
                 )}
                 {queueView === 'overdue' && filteredOverdueTaskQueue.map(task => (
                   <div key={task.id} style={{
@@ -2796,10 +2920,54 @@ function SupervisorDashboard({ user, isOffline = false }) {
                   </div>
                 ))}
 
-                {queueView === 'compliance_upcoming' && filteredComplianceUpcomingQueue.length === 0 && (
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No upcoming compliance tasks for this filter.</div>
+                {queueView === 'overdue' && filteredFleetOverdueQueue.map(task => (
+                  <div key={`fleet-overdue-${task.id}`} style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(183,94,84,0.38)',
+                    backgroundColor: 'rgba(183,94,84,0.08)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '14px' }}>
+                        Fleet: {getFleetTaskTypeLabel(task.taskType)}
+                      </span>
+                      <span className="chip" style={{
+                        fontSize: '11px',
+                        color: '#B75E54',
+                        border: '1px solid rgba(183,94,84,0.4)',
+                        backgroundColor: 'rgba(183,94,84,0.12)'
+                      }}>
+                        OVERDUE
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
+                      {formatFleetVehicleLabel(task)}
+                      {' '} &bull; {task.title || getFleetTaskTypeLabel(task.taskType)}
+                      {' '} &bull; {formatFleetDueLabel(task)}
+                      {' '} &bull; {formatFleetCurrentLabel(task)}
+                    </div>
+                    <button
+                      onClick={() => setActiveTab('fleet')}
+                      style={{
+                        padding: '6px 14px',
+                        backgroundColor: '#F1EFEA',
+                        color: '#1F3A52',
+                        border: '1px solid #C9D3DD',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Open Fleet Tab
+                    </button>
+                  </div>
+                ))}
+
+                {queueView === 'upcoming' && filteredComplianceUpcomingQueue.length === 0 && filteredFleetUpcomingQueue.length === 0 && (
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No upcoming compliance or fleet tasks for this filter.</div>
                 )}
-                {queueView === 'compliance_upcoming' && filteredComplianceUpcomingQueue.map(item => (
+                {queueView === 'upcoming' && filteredComplianceUpcomingQueue.map(item => (
                   <div key={`compliance-upcoming-${item.id}`} style={{
                     padding: '12px',
                     borderRadius: '8px',
@@ -2953,6 +3121,50 @@ function SupervisorDashboard({ user, isOffline = false }) {
                         </button>
                       </div>
                     )}
+                  </div>
+                ))}
+
+                {queueView === 'upcoming' && filteredFleetUpcomingQueue.map(task => (
+                  <div key={`fleet-upcoming-${task.id}`} style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(76,175,80,0.35)',
+                    backgroundColor: 'rgba(76,175,80,0.08)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '14px' }}>
+                        Fleet: {getFleetTaskTypeLabel(task.taskType)}
+                      </span>
+                      <span className="chip" style={{
+                        fontSize: '11px',
+                        color: '#2F7D57',
+                        border: '1px solid rgba(76,175,80,0.45)',
+                        backgroundColor: 'rgba(76,175,80,0.08)'
+                      }}>
+                        DUE SOON
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
+                      {formatFleetVehicleLabel(task)}
+                      {' '} &bull; {task.title || getFleetTaskTypeLabel(task.taskType)}
+                      {' '} &bull; {formatFleetDueLabel(task)}
+                      {' '} &bull; {formatFleetCurrentLabel(task)}
+                    </div>
+                    <button
+                      onClick={() => setActiveTab('fleet')}
+                      style={{
+                        padding: '6px 14px',
+                        backgroundColor: '#F1EFEA',
+                        color: '#1F3A52',
+                        border: '1px solid #C9D3DD',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Open Fleet Tab
+                    </button>
                   </div>
                 ))}
 

@@ -380,6 +380,49 @@ service cloud.firestore {
         && (!('defaultTemplateName' in data) || data.defaultTemplateName == null || data.defaultTemplateName is string);
     }
 
+    function fleetMainLocationFromData(data) {
+      return (
+        ('mainLocation' in data)
+        && data.mainLocation is string
+        && data.mainLocation.size() > 0
+      )
+        ? normalizedMainLocation(data.mainLocation)
+        : normalizedShiftMainLocation(data.locationId);
+    }
+
+    function fleetLocationAllowed(data) {
+      let mainLocation = fleetMainLocationFromData(data);
+      return mainLocation != '' && authLocationAllowed(mainLocation);
+    }
+
+    function fleetRuntimeLocationAllowed(data) {
+      return (
+        (
+          ('mainLocation' in data)
+          && data.mainLocation is string
+          && data.mainLocation.size() > 0
+          && authLocationAllowed(data.mainLocation)
+        )
+        || (
+          data.vehicleId is string
+          && exists(/databases/$(database)/documents/eocVehicles/$(data.vehicleId))
+          && fleetLocationAllowed(get(/databases/$(database)/documents/eocVehicles/$(data.vehicleId)).data)
+        )
+      );
+    }
+
+    function validFleetTaskType(taskType) {
+      return taskType in ['oil_change', 'insurance_renewal', 'registration_renewal', 'maintenance_milestone'];
+    }
+
+    function validFleetTaskStatus(status) {
+      return status in ['upcoming', 'overdue', 'resolved'];
+    }
+
+    function validFleetTriggerMode(mode) {
+      return mode in ['mileage', 'date'];
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if true;
@@ -700,7 +743,123 @@ service cloud.firestore {
     // EOC Vehicles
     match /eocVehicles/{docId} {
       allow read: if true;
-      allow write: if authRoleAllowed(['admin']);
+      allow create: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data);
+      allow update: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+      allow delete: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(resource.data);
+    }
+
+    // Property profiles
+    match /eocProperties/{docId} {
+      allow read: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(resource.data);
+      allow create: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data);
+      allow update: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+      allow delete: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(resource.data);
+    }
+
+    // Fleet maintenance templates
+    match /fleetMaintenanceTemplates/{docId} {
+      allow read: if true;
+      allow create: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data);
+      allow update: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+      allow delete: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(resource.data);
+    }
+
+    // Fleet runtime (strict mileage update path for BHT/tech)
+    match /fleetVehicleRuntime/{docId} {
+      allow read: if authRoleAllowed(['supervisor', 'admin']);
+
+      allow create: if authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
+        && request.resource.data.vehicleId is string
+        && request.resource.data.lastKnownMileage is int
+        && request.resource.data.lastKnownMileage >= 0
+        && fleetRuntimeLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data);
+
+      allow update: if authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
+        && request.resource.data.vehicleId is string
+        && request.resource.data.vehicleId == resource.data.vehicleId
+        && request.resource.data.lastKnownMileage is int
+        && (
+          !('lastKnownMileage' in resource.data)
+          || request.resource.data.lastKnownMileage >= resource.data.lastKnownMileage
+        )
+        && request.resource.data
+          .diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'vehicleId',
+            'mainLocation',
+            'lastKnownMileage',
+            'lastKnownMileageAt',
+            'lastKnownSubmissionId',
+            'version',
+            'updatedAt'
+          ])
+        && fleetRuntimeLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+
+      allow delete: if false;
+    }
+
+    // Fleet task queue
+    match /fleetTasks/{docId} {
+      allow read: if authRoleAllowed(['supervisor', 'admin']);
+
+      allow create: if authRoleAllowed(['supervisor', 'admin'])
+        && validFleetTaskType(request.resource.data.taskType)
+        && validFleetTaskStatus(request.resource.data.status)
+        && validFleetTriggerMode(request.resource.data.triggerMode)
+        && fleetLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data);
+
+      allow update: if authRoleAllowed(['supervisor', 'admin'])
+        && validFleetTaskType(request.resource.data.taskType)
+        && validFleetTaskStatus(request.resource.data.status)
+        && validFleetTriggerMode(request.resource.data.triggerMode)
+        && fleetLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+
+      allow delete: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(resource.data);
+    }
+
+    // Vehicle service records
+    match /vehicleServiceRecords/{docId} {
+      allow read: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(resource.data);
+
+      allow create: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data);
+
+      allow update: if authRoleAllowed(['supervisor', 'admin'])
+        && fleetLocationAllowed(request.resource.data)
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+
+      allow delete: if authRoleAllowed(['admin'])
+        && fleetLocationAllowed(resource.data);
     }
 
     // Compliance collections

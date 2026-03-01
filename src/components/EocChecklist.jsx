@@ -15,6 +15,9 @@ import {
 } from 'firebase/firestore'
 import { EOC_HOUSE_TEMPLATE, EOC_VAN_TEMPLATE, LOCATIONS, TEMPLATE_SCOPE_OTC_SHARED, VANS, getTemplateScopeForShift } from '../data/eocConstants'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
+import { updateFleetRuntimeFromEocSubmission } from '../services/fleetRuntimeService'
+import { syncFleetTasksForVehicle } from '../services/fleetTaskEngine'
+import { parseMileageValue } from '../utils/fleetStatus'
 import { requireOnline } from '../utils/networkGuard'
 
 const DRAFT_SAVE_DEBOUNCE_MS = 700
@@ -320,8 +323,13 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   }
 
   const findFirstInvalid = () => {
-    if (eocType === 'van' && !odometerReading.trim()) {
-      return { type: 'odometer', message: 'Please enter odometer reading' }
+    if (eocType === 'van') {
+      if (!odometerReading.trim()) {
+        return { type: 'odometer', message: 'Please enter odometer reading' }
+      }
+      if (parseMileageValue(odometerReading) === null) {
+        return { type: 'odometer', message: 'Odometer reading must be a valid number' }
+      }
     }
 
     for (const item of activeTemplate) {
@@ -563,6 +571,15 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     setError('')
 
     try {
+      const normalizedOdometerMileage = eocType === 'van'
+        ? parseMileageValue(odometerReading)
+        : null
+      if (eocType === 'van' && normalizedOdometerMileage === null) {
+        setError('Odometer reading must be a valid number')
+        setSubmitting(false)
+        return
+      }
+
       const answersData = activeTemplate.map(item => ({
         itemId: item.id,
         label: item.label,
@@ -574,6 +591,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       }))
 
       const issueItems = answersData.filter(a => a.status === 'repair')
+      let submittedEocSubmissionId = ''
 
       await runTransaction(db, async (transaction) => {
         const taskRef = doc(db, 'eocTasks', task.id)
@@ -603,6 +621,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         })
 
         const submissionRef = doc(collection(db, 'eocSubmissions'))
+        submittedEocSubmissionId = submissionRef.id
         transaction.set(submissionRef, {
           taskId: task.id,
           locationId: task.locationId,
@@ -618,6 +637,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           vehicleName: vehicleName.trim(),
           vinNumber: vinNumber.trim(),
           odometerReading: eocType === 'van' ? odometerReading.trim() : '',
+          odometerMileage: normalizedOdometerMileage,
           answers: answersData,
           issueCount: issueItems.length,
           submittedByUserId: normalizedUserId,
@@ -689,6 +709,27 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           })
         }
       })
+
+      if (eocType === 'van' && submittedEocSubmissionId) {
+        try {
+          const runtimeResult = await updateFleetRuntimeFromEocSubmission({
+            submissionId: submittedEocSubmissionId,
+            vehicleId: vehicleId || task.vehicleId || null,
+            vanId: task.vanId || null,
+            locationId: task.locationId || null,
+            odometerReading: String(normalizedOdometerMileage)
+          })
+          if (runtimeResult?.updated && runtimeResult.vehicleId) {
+            try {
+              await syncFleetTasksForVehicle({ vehicleId: runtimeResult.vehicleId })
+            } catch (syncErr) {
+              console.warn('Fleet task refresh after EOC submit failed:', syncErr)
+            }
+          }
+        } catch (runtimeErr) {
+          console.warn('Fleet runtime update after EOC submit failed:', runtimeErr)
+        }
+      }
 
       onComplete()
     } catch (err) {

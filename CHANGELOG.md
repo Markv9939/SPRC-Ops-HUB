@@ -18,6 +18,22 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
   - centralized library with search and owner-aware grouping (`My Templates`, `Shared Templates`)
   - cloning path so supervisors can copy shared templates and edit their own versions safely
   - location+shift default assignment workflow with immediate propagation to incomplete EOCs
+- Fleet maintenance MVP collections and services:
+  - `fleetMaintenanceTemplates` (global mileage templates by main location)
+  - `fleetVehicleRuntime` (strict latest-mileage runtime sourced from van EOC submission path)
+  - `fleetTasks` (persistent upcoming/overdue/resolved queue source)
+  - `vehicleServiceRecords` (service logging with optional external `documentUrl`)
+- New fleet runtime + task engine services:
+  - `src/services/fleetRuntimeService.js`
+  - `src/services/fleetTaskEngine.js`
+- New shared fleet status utility (`src/utils/fleetStatus.js`) for due-state evaluation and type formatting.
+- New top-level fleet supervisor/admin surface (`src/components/FleetPanel.jsx`) for:
+  - vehicle maintenance profile management
+  - mileage template management
+  - service record logging and task resolution workflows
+- New top-level supervisor/admin properties surface (`src/components/PropertiesPanel.jsx`) for:
+  - property profile CRUD in `eocProperties`
+  - house EOC status visibility from `eocTasks`
 
 ### Changed
 - Compliance mobile item workflow refactored for low-friction editing:
@@ -53,6 +69,22 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - PIN login now applies bounded timeout guards to critical auth/data fetch steps so the login button does not remain indefinitely on `Checking...` when backend requests hang.
 - Transport reminder popup (`REMIND THE CLIENT ABOUT DC PAPERWORK`) now uses the same high-contrast modal pattern as other updated dialogs.
 - Compliance warning queue action buttons now use high-contrast neutral styling for readable text on tinted warning cards.
+- Supervisor dashboard status queue now blends EOC + compliance + fleet:
+  - heading updated to `EOC + Compliance + Fleet Status`
+  - `Overdue Tasks` includes persistent `fleetTasks.status == 'overdue'`
+  - `Upcoming Tasks` includes compliance due soon + fleet `status == 'upcoming'`
+  - queue rows include fleet-specific due/current mileage/date details and `Open Fleet Tab` actions
+- Alert handling now includes unread `fleet_*` alerts in supervisor/admin counts while keeping overdue fleet visibility task-driven.
+- EOC submit path now records numeric odometer mileage (`odometerMileage`), updates `fleetVehicleRuntime`, and attempts vehicle fleet-task re-evaluation.
+- Firestore rules now include fleet write scopes:
+  - supervisor/admin scoped writes for `eocVehicles`, `fleetMaintenanceTemplates`, `fleetTasks`, `vehicleServiceRecords`
+  - restricted runtime-write path for BHT/tech via `fleetVehicleRuntime`
+- Firestore indexes now include fleet query coverage for `fleetTasks`, `vehicleServiceRecords`, and `fleetMaintenanceTemplates`.
+- Supervisor/admin information architecture refined:
+  - top-level `Properties` tab added
+  - `EOC` tab now focuses on `Template` + `Issues` only
+  - vehicle management responsibility remains in top-level `Fleet` tab
+- Firestore rules and index coverage extended for property profiles (`eocProperties`).
 - Supervisor BHT create/edit flow now enforces location-specific shift options:
   - OTC users can only be assigned OTC shifts (`shift_1`, `shift_2`)
   - RES users can only be assigned RES shifts (`res_shift_1_day`, `res_shift_1_night`, `res_shift_2_day`, `res_shift_2_night`)
@@ -93,6 +125,9 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - Firebase Hosting deploy passed to `sprc-tx-l` after dashboard warning workflow updates (2026-02-19).
 - `npm run lint` passed with one pre-existing baseline warning in `src/hooks/useEocTasks.js` (2026-02-28).
 - `npm run build` passed after RES shift model + template-scope changes (2026-02-28).
+- `npm.cmd run lint` passed with one pre-existing warning in `src/hooks/useEocTasks.js` (2026-03-01).
+- `npm.cmd run build` blocked in this environment (`esbuild` `spawn EPERM` while loading Vite config) (2026-03-01).
+- `npm.cmd run smoke:phase9:full` blocked by the same build environment `spawn EPERM` issue (2026-03-01).
 
 ### Documentation
 - Rebuilt `plan.md` as a clean V2 Core operating blueprint aligned to current runtime state.
@@ -104,6 +139,11 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - Updated `docs/REGRESSION_UAT_PHASE9.md` with explicit iPhone/iPad validation checklist rows.
 - Updated `README.md`, `plan.md`, and `docs/REGRESSION_UAT_PHASE9.md` to document warning-card quick resolution flow and visibility/contrast fixes.
 - Updated `README.md`, `docs/UAT_WALKTHROUGH_PHASE9.md`, `docs/REGRESSION_UAT_PHASE9.md`, `docs/CUTOVER_RUNBOOK.md`, and `plan.md` for RES day/night shift rollout and scoped template behavior.
+- Updated `README.md`, `plan.md`, and `docs/REGRESSION_UAT_PHASE9.md` for Fleet Maintenance MVP and persistent overdue queue behavior.
+- Updated `docs/UAT_WALKTHROUGH_PHASE9.md` and `docs/CUTOVER_RUNBOOK.md` for new supervisor/admin IA:
+  - EOC tab narrowed to template/issues workflows
+  - Properties tab coverage added for house/property workflows
+  - Fleet tab retained as the vehicle maintenance owner
 
 ## [2026-02-13]
 ### Added

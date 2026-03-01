@@ -1,6 +1,6 @@
 # SPRC Ops Hub Blueprint (V2 Core)
 
-Last updated: 2026-02-19
+Last updated: 2026-03-01
 Status: Active
 Primary owner: Product + Engineering
 
@@ -112,6 +112,17 @@ Auth claim contract (enforced by rules/policy):
   - `Quick Update` on warning cards updates `lastCompleted`, `dueDate`, and `notes`
   - due date is required for quick resolution
   - update writes generate audit log entries for traceability
+- Fleet maintenance is now a top-level supervisor/admin feature:
+  - persistent `fleetTasks` power dashboard overdue/upcoming fleet visibility
+  - overdue fleet queue rows remain visible until a qualifying service/renewal record resolves them
+  - unread fleet alerts are secondary notifications and do not control overdue queue persistence
+- EOC supervisor/admin tab is intentionally narrow:
+  - `Template`: template library + location/shift assignment workflow
+  - `Issues`: issue lifecycle and resolution workflow
+- Properties are now managed in a dedicated top-level tab:
+  - property profiles (`eocProperties`)
+  - house EOC status board from `eocTasks` (`taskType == house`)
+  - assignment source remains Users/shift assignment flow (no assignment-model fork)
 
 ### 5.4 Admin
 - Full user lifecycle management.
@@ -139,6 +150,11 @@ Auth claim contract (enforced by rules/policy):
 - `complianceCertificates`
 - `complianceSettings`
 - `authPolicy`
+- `fleetMaintenanceTemplates`
+- `fleetVehicleRuntime`
+- `fleetTasks`
+- `vehicleServiceRecords`
+- `eocProperties`
 
 ## 7. Guardrails (Must Hold)
 ### Auth/Policy
@@ -201,6 +217,16 @@ Completed:
 - PIN login resilience updated with timeout-bounded auth/policy/scope lookup to prevent frozen `Checking...` UX.
 - Shared modal styling primitives added and applied to transport reminder + dialog surfaces to enforce readable contrast consistency.
 - Compliance warning queue actions now include inline quick-update workflow so overdue/due-soon items can be handled directly from dashboard warning cards.
+- Fleet maintenance MVP delivered with persistent overdue queue semantics:
+  - top-level `Fleet` tab in supervisor/admin dashboard
+  - strict van EOC mileage runtime updates (`fleetVehicleRuntime`) on EOC submit
+  - task engine lifecycle for oil, insurance, registration, and mileage milestones
+  - service-record-driven task resolution (`vehicleServiceRecords`)
+  - dashboard status queue now blends EOC + compliance + fleet overdue/upcoming counts
+- Supervisor/admin information architecture refinement delivered:
+  - top-level `Properties` tab added for house/property operations
+  - EOC tab reduced to template + issues only
+  - legacy vehicle CRUD removed from EOC surface to avoid overlap with Fleet ownership
 
 In progress:
 - Final UAT signoff capture in `docs/REGRESSION_UAT_PHASE9.md`.

@@ -12,6 +12,7 @@ import ChangePinModal from './components/ChangePinModal'
 import ToastHost from './components/ToastHost'
 import DialogHost from './components/DialogHost'
 import { syncEocTasksForUserScope } from './services/eocTaskEngine'
+import { syncFleetTasksForUserScope } from './services/fleetTaskEngine'
 import { syncDerivedAssignmentForUser } from './services/assignmentService'
 import { refreshScopedSessionUser } from './services/accessGrantService'
 import { changeOwnPin } from './services/userPinService'
@@ -19,6 +20,7 @@ import { getAuthPolicy } from './services/authPolicyService'
 import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
 import { installAlertDialogBridge, showPromptDialog } from './utils/dialogs'
+import { isFleetAlertType } from './utils/fleetStatus'
 import {
   MAIN_LOCATIONS,
   getAvailableMainLocationsForUser,
@@ -406,6 +408,34 @@ function App() {
     return () => { cancelled = true }
   }, [user, isOffline])
 
+  // Sync fleet task generation on supervisor/admin session start and periodic refresh.
+  useEffect(() => {
+    if (!user || isOffline) return
+    if (!isSupervisorRole(user.role) && !isAdminRole(user.role)) return
+
+    let cancelled = false
+    const runFleetSync = async () => {
+      try {
+        const result = await syncFleetTasksForUserScope(user)
+        if (!cancelled && (result.created > 0 || result.updated > 0)) {
+          console.info('Fleet task engine sync complete:', result)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Fleet task engine sync failed:', err)
+        }
+      }
+    }
+
+    runFleetSync()
+    const intervalId = setInterval(runFleetSync, 5 * 60 * 1000)
+
+    return () => {
+      cancelled = true
+      clearInterval(intervalId)
+    }
+  }, [user, isOffline])
+
   // Supervisor/admin alert count listener
   useEffect(() => {
     if (!user || (!isSupervisorRole(user.role) && !isAdminRole(user.role))) return
@@ -417,7 +447,8 @@ function App() {
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const count = snapshot.docs.reduce((acc, alertDoc) => {
-        return alertDoc.data()?.type === 'eoc_issue' ? acc + 1 : acc
+        const type = String(alertDoc.data()?.type || '')
+        return (type === 'eoc_issue' || isFleetAlertType(type)) ? acc + 1 : acc
       }, 0)
       setAlertCount(count)
     })

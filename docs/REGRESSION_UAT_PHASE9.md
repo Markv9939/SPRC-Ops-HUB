@@ -1,6 +1,6 @@
 # Phase 9 Regression + UAT Checklist
 
-Last updated: 2026-02-19
+Last updated: 2026-03-01
 Owner: Claude Code (engineering run) + Admin/Supervisor (business signoff)
 
 ## Automated Smoke Checks
@@ -37,6 +37,9 @@ This includes ESLint. As of 2026-02-12, lint has existing baseline issues across
 | `npm run reset:uat` | PARTIAL | Users + issue/alert seeded, but `shiftAssignments` and `eocTasks` writes are denied by currently deployed Firestore rules |
 | `firebase deploy --only firestore:rules --project sprc-tx-l` | PASS | Local `firestore.rules` deployed successfully on 2026-02-12 |
 | `npm run reset:uat` (post-rules deploy) | PASS | Full reset complete; users/assignments/tasks seeded without permission errors |
+| `npm.cmd run lint` | PASS (warning baseline) | 2026-03-01: one pre-existing warning in `src/hooks/useEocTasks.js` |
+| `npm.cmd run build` | BLOCKED | 2026-03-01: `esbuild` `spawn EPERM` while loading Vite config in this environment |
+| `npm.cmd run smoke:phase9:full` | BLOCKED | 2026-03-01: blocked by the same build `spawn EPERM` issue |
 
 ## Blocker Status
 
@@ -77,6 +80,15 @@ Walkthrough script:
 | SC-3 | Scheduler | Van-scoped eligibility (same location+shift, different van assignments) | BHT only sees Van EOC tasks for assigned `vanIds`; unassigned vans do not appear | PENDING | Validate with two BHT users in same shift with different van assignments |
 | SC-4 | Scheduler | Stale van task cleanup after reassignment | Pending/overdue van tasks no longer in desired scope are deactivated (`ignored`) | PENDING | Reassign van mid-cycle and verify old task no longer shows in BHT Hub |
 | AU-1 | Auth/Login | Degraded connectivity/backend request hang during PIN submit | Login exits `Checking...` with clear timeout error and allows retry | PENDING | iPhone + iPad retry test |
+| FL-1 | Fleet Persistence | Oil overdue persists after alert is marked read | Fleet overdue row remains in queue until oil service record is logged | PENDING | Create overdue oil condition, mark `fleet_*` alert read, verify queue row remains |
+| FL-2 | Fleet Persistence | Insurance/registration overdue persistence | Overdue renewal rows remain until renewal service records update due dates | PENDING | Set past due dates and verify persistence |
+| FL-3 | Fleet Persistence | Mileage milestone overdue persistence | Milestone overdue row remains until matching milestone service record is logged | PENDING | Cross due mileage, then log milestone service |
+| FL-4 | Queue Blend | Overdue/upcoming aggregate includes EOC + Compliance + Fleet | Dashboard KPI counts and queue lists reflect blended sources | PENDING | Supervisor dashboard validation |
+| FL-5 | Fleet Security | Supervisor scope + BHT restrictions | Supervisor writes remain scoped; BHT cannot write fleet configs/service records | PENDING | Rules validation with scoped/non-scoped users |
+| FL-6 | Fleet Runtime | Van EOC mileage source strictness | `fleetVehicleRuntime` updates from van EOC submit path only | PENDING | Submit van EOC and verify runtime update |
+| IA-4 | Information Architecture | EOC tab scope | EOC tab shows only `Template` and `Issues` surfaces; no vehicle CRUD in EOC tab | PENDING | Supervisor/admin dashboard walkthrough |
+| IA-5 | Information Architecture | Properties tab scope | Properties tab supports property profile management and house EOC status visibility | PENDING | Validate `eocProperties` CRUD + house task cards |
+| IA-6 | Information Architecture | Fleet ownership continuity | Vehicle profile/maintenance workflows remain in Fleet tab and continue to drive fleet queue status | PENDING | Fleet tab walkthrough + queue verification |
 
 ## Mobile/Tablet Validation Checklist (Required Per Deploy Batch)
 
@@ -95,6 +107,7 @@ Status legend: `PASS`, `FAIL`, `PENDING`
 | MT-9 | iPhone/iPad | Transport ARRIVE reminder modal readability | `Cancel` and `OK` are clearly readable with high contrast on modal background | PENDING | Deployed 2026-02-19 to `sprc-tx-l`; awaiting owner device validation |
 | MT-10 | iPhone/iPad | Compliance warning card action readability | `Open Compliance Tab` and `Quick Update` buttons remain readable on overdue/upcoming tinted cards | PENDING | Deployed 2026-02-19 to `sprc-tx-l`; awaiting owner device validation |
 | MT-11 | iPhone/iPad | Compliance quick update from warning card | User can update `Next Due Date` inline; item status updates without opening Compliance tab | PENDING | Deployed 2026-02-19 to `sprc-tx-l`; awaiting owner workflow validation |
+| MT-12 | iPhone/iPad | Fleet queue row actions | Fleet overdue/upcoming rows remain readable and `Open Fleet Tab` action is usable | PENDING | Requires Fleet seed data and device validation |
 
 ## Signoff
 
