@@ -37,8 +37,9 @@ export function getAssignmentId(locationId, shiftId, dueDateStr, eocType) {
 
 /**
  * Get the current cycle's due date for a shift.
- * 1st shift (dueDayOfWeek=0) → most recent or current Sunday
- * 2nd shift (dueDayOfWeek=3) → most recent or current Wednesday
+ * dueDayOfWeek=0 -> most recent or current Sunday
+ * dueDayOfWeek=3 -> most recent or current Wednesday
+ * dueDayOfWeek=4 -> most recent or current Thursday
  */
 export function getCurrentCycleDueDate(shift) {
   const now = phoenixNow()

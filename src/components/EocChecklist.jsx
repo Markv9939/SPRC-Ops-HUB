@@ -13,7 +13,7 @@ import {
   setDoc,
   where
 } from 'firebase/firestore'
-import { EOC_HOUSE_TEMPLATE, EOC_VAN_TEMPLATE, LOCATIONS, VANS } from '../data/eocConstants'
+import { EOC_HOUSE_TEMPLATE, EOC_VAN_TEMPLATE, LOCATIONS, TEMPLATE_SCOPE_OTC_SHARED, VANS, getTemplateScopeForShift } from '../data/eocConstants'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { requireOnline } from '../utils/networkGuard'
 
@@ -84,8 +84,14 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         }
 
         const nextType = data.taskType || data.eocType || ''
+        const nextTemplateScope = String(data.templateScope || '').trim() || getTemplateScopeForShift(data.shiftId)
         setEocType(nextType)
-        setTask({ id: snap.id, ...data, version: getVersionNumber(data) })
+        setTask({
+          id: snap.id,
+          ...data,
+          templateScope: nextTemplateScope || TEMPLATE_SCOPE_OTC_SHARED,
+          version: getVersionNumber(data)
+        })
 
         if (nextType === 'van') {
           const vanLabel = VANS.find(v => v.id === data.vanId)?.label || ''
@@ -109,18 +115,138 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   useEffect(() => {
     if (!eocType) return
 
-    const q = query(
+    const normalizeLibraryItems = (items) => (
+      (Array.isArray(items) ? items : [])
+        .map((item, index) => ({
+          id: item?.id || `tpl-item-${index + 1}`,
+          category: String(item?.category || '').trim(),
+          label: String(item?.label || '').trim(),
+          order: Number(item?.order) || (index + 1),
+          active: item?.active !== false
+        }))
+        .filter(item => item.category && item.label)
+        .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
+    )
+
+    const templateId = String(task?.templateId || '').trim()
+    const resolvedTemplateScope = String(task?.templateScope || '').trim() || getTemplateScopeForShift(task?.shiftId)
+    let assignedTemplateItems = null
+    let exactTemplateItems = []
+    let sharedTemplateItems = []
+    let legacyTemplateItems = []
+
+    const applyTemplateItems = () => {
+      if (Array.isArray(assignedTemplateItems) && assignedTemplateItems.length > 0) {
+        setTemplateItems(assignedTemplateItems)
+        return
+      }
+      if (exactTemplateItems.length > 0) {
+        setTemplateItems(exactTemplateItems)
+        return
+      }
+      if (sharedTemplateItems.length > 0) {
+        setTemplateItems(sharedTemplateItems)
+        return
+      }
+      if (legacyTemplateItems.length > 0) {
+        setTemplateItems(legacyTemplateItems)
+        return
+      }
+      setTemplateItems([])
+    }
+
+    let unsubAssignedTemplate = () => {}
+    if (templateId) {
+      const templateRef = doc(db, 'eocTemplateLibrary', templateId)
+      unsubAssignedTemplate = onSnapshot(
+        templateRef,
+        (snap) => {
+          if (!snap.exists()) {
+            console.warn('Assigned template not found. Falling back to legacy scope template.', templateId)
+            assignedTemplateItems = null
+            applyTemplateItems()
+            return
+          }
+          const data = snap.data() || {}
+          assignedTemplateItems = normalizeLibraryItems(data.items)
+          applyTemplateItems()
+        },
+        (err) => {
+          console.error('Error loading assigned template:', err)
+          assignedTemplateItems = null
+          applyTemplateItems()
+        }
+      )
+    }
+
+    const exactQuery = query(
+      collection(db, 'eocChecklistTemplate'),
+      where('eocType', '==', eocType),
+      where('templateScope', '==', resolvedTemplateScope || TEMPLATE_SCOPE_OTC_SHARED),
+      orderBy('order', 'asc')
+    )
+    const unsubExact = onSnapshot(
+      exactQuery,
+      (snap) => {
+        exactTemplateItems = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        applyTemplateItems()
+      },
+      (err) => {
+        console.error('Error loading scope template:', err)
+        exactTemplateItems = []
+        applyTemplateItems()
+      }
+    )
+
+    let unsubShared = () => {}
+    if ((resolvedTemplateScope || TEMPLATE_SCOPE_OTC_SHARED) !== TEMPLATE_SCOPE_OTC_SHARED) {
+      const sharedQuery = query(
+        collection(db, 'eocChecklistTemplate'),
+        where('eocType', '==', eocType),
+        where('templateScope', '==', TEMPLATE_SCOPE_OTC_SHARED),
+        orderBy('order', 'asc')
+      )
+      unsubShared = onSnapshot(
+        sharedQuery,
+        (snap) => {
+          sharedTemplateItems = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+          applyTemplateItems()
+        },
+        (err) => {
+          console.error('Error loading shared fallback template:', err)
+          sharedTemplateItems = []
+          applyTemplateItems()
+        }
+      )
+    }
+
+    const legacyQuery = query(
       collection(db, 'eocChecklistTemplate'),
       where('eocType', '==', eocType),
       orderBy('order', 'asc')
     )
+    const unsubLegacy = onSnapshot(
+      legacyQuery,
+      (snap) => {
+        legacyTemplateItems = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(item => !String(item.templateScope || '').trim())
+        applyTemplateItems()
+      },
+      (err) => {
+        console.error('Error loading legacy fallback template:', err)
+        legacyTemplateItems = []
+        applyTemplateItems()
+      }
+    )
 
-    const unsub = onSnapshot(q, (snap) => {
-      setTemplateItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    })
-
-    return () => unsub()
-  }, [eocType])
+    return () => {
+      unsubAssignedTemplate()
+      unsubExact()
+      unsubShared()
+      unsubLegacy()
+    }
+  }, [eocType, task?.shiftId, task?.templateScope, task?.templateId])
 
   useEffect(() => {
     if (!task || eocType !== 'van') return
@@ -325,6 +451,9 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       taskId: task.id,
       locationId: task.locationId,
       shiftId: task.shiftId,
+      templateScope: task.templateScope || getTemplateScopeForShift(task.shiftId) || TEMPLATE_SCOPE_OTC_SHARED,
+      templateId: task.templateId || null,
+      templateName: task.templateName || '',
       vanId: task.vanId || null,
       eocType,
       draftByUserId: normalizedUserId,
@@ -367,7 +496,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     return () => {
       if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current)
     }
-  }, [answers, draftReady, eocType, isOffline, normalizedAuthUid, normalizedUserId, odometerReading, repairDetails, submitting, task?.id, task?.locationId, task?.shiftId, task?.vanId, user?.name, vehicleId, vehicleName, vinNumber])
+  }, [answers, draftReady, eocType, isOffline, normalizedAuthUid, normalizedUserId, odometerReading, repairDetails, submitting, task?.id, task?.locationId, task?.shiftId, task?.templateScope, task?.templateId, task?.templateName, task?.vanId, user?.name, vehicleId, vehicleName, vinNumber])
 
   const setAnswer = (itemId, value) => {
     setError('')
@@ -478,6 +607,9 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           taskId: task.id,
           locationId: task.locationId,
           shiftId: task.shiftId,
+          templateScope: task.templateScope || getTemplateScopeForShift(task.shiftId) || TEMPLATE_SCOPE_OTC_SHARED,
+          templateId: task.templateId || null,
+          templateName: task.templateName || '',
           vanId: task.vanId || null,
           dueDate: task.dueDate,
           staffCompleting: user.name,

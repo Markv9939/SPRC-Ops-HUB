@@ -25,19 +25,44 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig)
 const db = getFirestore(app)
 
-const VALID_SHIFTS = new Set(['shift_1', 'shift_2'])
+const OTC_SHIFTS = new Set(['shift_1', 'shift_2'])
+const RES_SHIFTS = new Set([
+  'res_shift_1_day',
+  'res_shift_1_night',
+  'res_shift_2_day',
+  'res_shift_2_night'
+])
 
 function normalizeRole(roleValue) {
   const normalized = String(roleValue || '').trim().toLowerCase()
   return normalized === 'tech' ? 'bht' : normalized
 }
 
+function normalizeMainLocationFromLocationId(locationId) {
+  const normalized = String(locationId || '').trim().toLowerCase()
+  if (!normalized) return ''
+  if (normalized === 'res') return 'RES'
+  if (normalized === 'mesquite' || normalized === 'lone_mountain') return 'OTC'
+  return ''
+}
+
+function isShiftAllowedForLocationId(locationId, shiftId) {
+  const normalizedShift = String(shiftId || '').trim()
+  const mainLocation = normalizeMainLocationFromLocationId(locationId)
+  if (!mainLocation) return false
+  if (mainLocation === 'OTC') return OTC_SHIFTS.has(normalizedShift)
+  if (mainLocation === 'RES') return RES_SHIFTS.has(normalizedShift)
+  return false
+}
+
 function shouldHaveActiveAssignment(userData) {
+  const locationId = String(userData?.locationId || '').trim().toLowerCase()
+  const shiftId = String(userData?.shiftId || '').trim()
   return normalizeRole(userData?.role) === 'bht'
     && userData?.active === true
-    && String(userData?.locationId || '').trim().length > 0
-    && String(userData?.shiftId || '').trim().length > 0
-    && VALID_SHIFTS.has(String(userData.shiftId))
+    && locationId.length > 0
+    && shiftId.length > 0
+    && isShiftAllowedForLocationId(locationId, shiftId)
     && String(userData?.vanId || '').trim().length > 0
 }
 
@@ -54,7 +79,7 @@ function readFallbackShiftFromAssignments(assignmentsByUserId, userId) {
   const fallback = assignmentsByUserId.get(String(userId || '').trim())
   if (!fallback) return ''
   const shiftId = String(fallback.shiftId || '').trim()
-  return VALID_SHIFTS.has(shiftId) ? shiftId : ''
+  return isShiftAllowedForLocationId(fallback.locationId, shiftId) ? shiftId : ''
 }
 
 async function buildAssignmentsByUserId() {
@@ -65,11 +90,12 @@ async function buildAssignmentsByUserId() {
     const assignmentData = assignmentDoc.data()
     const bhtUserId = String(assignmentData?.bhtUserId || '').trim()
     const shiftId = String(assignmentData?.shiftId || '').trim()
-    if (!bhtUserId || !VALID_SHIFTS.has(shiftId)) return
+    const locationId = String(assignmentData?.locationId || '').trim().toLowerCase()
+    if (!bhtUserId || !isShiftAllowedForLocationId(locationId, shiftId)) return
     if (byUser.has(bhtUserId)) return
     byUser.set(bhtUserId, {
       shiftId,
-      locationId: String(assignmentData?.locationId || '').trim().toLowerCase()
+      locationId
     })
   })
 
@@ -153,7 +179,8 @@ async function migrate() {
     if (normalizedRole !== 'bht') continue
 
     let shiftId = String(userData?.shiftId || '').trim()
-    if (!VALID_SHIFTS.has(shiftId)) {
+    const locationId = String(userData?.locationId || '').trim().toLowerCase()
+    if (!isShiftAllowedForLocationId(locationId, shiftId)) {
       const fallbackShift = readFallbackShiftFromAssignments(assignmentsByUserId, userId)
       if (fallbackShift) {
         await updateDoc(doc(db, 'users', userId), {

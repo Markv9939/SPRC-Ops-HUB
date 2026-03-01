@@ -1,38 +1,26 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import {
-  collection, query, where, orderBy, onSnapshot, getDocs,
-  doc, updateDoc, serverTimestamp, addDoc, deleteDoc, writeBatch
+  collection, query, orderBy, onSnapshot,
+  doc, updateDoc, serverTimestamp, addDoc, deleteDoc
 } from 'firebase/firestore'
-import { LOCATIONS, SHIFTS, VANS, EOC_VAN_TEMPLATE, EOC_HOUSE_TEMPLATE } from '../data/eocConstants'
+import {
+  LOCATIONS,
+  SHIFTS,
+  VANS,
+  getShiftLabel
+} from '../data/eocConstants'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
-
-function templateDiffKey(item) {
-  return `${String(item?.category || '').trim().toLowerCase()}::${String(item?.label || '').trim().toLowerCase()}`
-}
-
-function normalizeTemplatePayload(templateForm, templateType) {
-  return {
-    category: templateForm.category.trim(),
-    label: templateForm.label.trim(),
-    order: Number(templateForm.order) || 0,
-    active: templateForm.active !== false,
-    eocType: templateType
-  }
-}
+import EocTemplateManager from './EocTemplateManager'
 
 function SupervisorEocPanel({ user, isOffline = false }) {
   const [subTab, setSubTab] = useState('compliance') // compliance | issues | template | vehicles
   const [assignments, setAssignments] = useState([])
   const [issues, setIssues] = useState([])
-  const [publishedTemplateItems, setPublishedTemplateItems] = useState([])
-  const [draftTemplateItems, setDraftTemplateItems] = useState([])
   const [vehicles, setVehicles] = useState([])
   const [loadingAssignments, setLoadingAssignments] = useState(true)
   const [loadingIssues, setLoadingIssues] = useState(true)
-  const [loadingPublishedTemplate, setLoadingPublishedTemplate] = useState(true)
-  const [loadingDraftTemplate, setLoadingDraftTemplate] = useState(true)
   const [loadingVehicles, setLoadingVehicles] = useState(true)
 
   // Filters
@@ -42,13 +30,6 @@ function SupervisorEocPanel({ user, isOffline = false }) {
   const [filterSeverity, setFilterSeverity] = useState('all')
   const [filterIssueStatus, setFilterIssueStatus] = useState('open')
   const [filterEocType, setFilterEocType] = useState('all')
-
-  // Template editor
-  const [editingTemplateId, setEditingTemplateId] = useState(null)
-  const [templateForm, setTemplateForm] = useState({ category: '', label: '', order: 0, active: true })
-  const [templateType, setTemplateType] = useState('house')
-  const [templateVersionNote, setTemplateVersionNote] = useState('')
-  const [lastPublishedVersion, setLastPublishedVersion] = useState(null)
 
   const [editingVehicleId, setEditingVehicleId] = useState(null)
   const [vehicleForm, setVehicleForm] = useState({ name: '', vin: '', vanId: '', locationId: '', active: true })
@@ -77,66 +58,6 @@ function SupervisorEocPanel({ user, isOffline = false }) {
     return unsub
   }, [])
 
-  // Load published template items
-  useEffect(() => {
-    const q = query(
-      collection(db, 'eocChecklistTemplate'),
-      where('eocType', '==', templateType),
-      orderBy('order', 'asc')
-    )
-    const unsub = onSnapshot(q, (snap) => {
-      setPublishedTemplateItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-      setLoadingPublishedTemplate(false)
-    })
-    return unsub
-  }, [templateType])
-
-  // Load draft template items
-  useEffect(() => {
-    const q = query(
-      collection(db, 'eocTemplateDrafts'),
-      where('eocType', '==', templateType),
-      orderBy('order', 'asc')
-    )
-    const unsub = onSnapshot(q, (snap) => {
-      setDraftTemplateItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-      setLoadingDraftTemplate(false)
-    })
-    return unsub
-  }, [templateType])
-
-  const resetTemplateDraftEditor = () => {
-    setEditingTemplateId(null)
-    setTemplateForm({ category: '', label: '', order: 0, active: true })
-    setTemplateVersionNote('')
-  }
-
-  const handleTemplateTypeChange = (nextType) => {
-    if (nextType === templateType) return
-    resetTemplateDraftEditor()
-    setTemplateType(nextType)
-  }
-
-  useEffect(() => {
-    const versionQuery = query(
-      collection(db, 'eocTemplateVersions'),
-      where('eocType', '==', templateType)
-    )
-
-    const unsub = onSnapshot(versionQuery, (snap) => {
-      if (snap.empty) {
-        setLastPublishedVersion(null)
-        return
-      }
-      const latest = snap.docs
-        .map(record => ({ id: record.id, ...record.data() }))
-        .sort((a, b) => Number(b.version || 0) - Number(a.version || 0))[0]
-      setLastPublishedVersion(latest || null)
-    })
-
-    return unsub
-  }, [templateType])
-
   // Load vehicles
   useEffect(() => {
     const q = query(collection(db, 'eocVehicles'), orderBy('name', 'asc'))
@@ -161,65 +82,6 @@ function SupervisorEocPanel({ user, isOffline = false }) {
     if (filterIssueStatus !== 'all' && i.status !== filterIssueStatus) return false
     return true
   })
-
-  const templateDiff = useMemo(() => {
-    const publishedByKey = new Map()
-    const draftByKey = new Map()
-
-    for (const item of publishedTemplateItems) {
-      publishedByKey.set(templateDiffKey(item), item)
-    }
-    for (const item of draftTemplateItems) {
-      draftByKey.set(templateDiffKey(item), item)
-    }
-
-    const added = []
-    const removed = []
-    const changed = []
-    let unchangedCount = 0
-
-    for (const [key, draftItem] of draftByKey.entries()) {
-      if (!publishedByKey.has(key)) {
-        added.push(draftItem)
-        continue
-      }
-      const publishedItem = publishedByKey.get(key)
-      if ((Number(draftItem.order) || 0) !== (Number(publishedItem.order) || 0) || (draftItem.active !== false) !== (publishedItem.active !== false)) {
-        changed.push({ publishedItem, draftItem })
-      } else {
-        unchangedCount += 1
-      }
-    }
-
-    for (const [key, publishedItem] of publishedByKey.entries()) {
-      if (!draftByKey.has(key)) {
-        removed.push(publishedItem)
-      }
-    }
-
-    return {
-      added,
-      removed,
-      changed,
-      unchangedCount,
-      hasChanges: added.length > 0 || removed.length > 0 || changed.length > 0
-    }
-  }, [publishedTemplateItems, draftTemplateItems])
-
-  const isTemplateAdmin = user?.role === 'admin'
-  const defaultTemplateItems = templateType === 'van' ? EOC_VAN_TEMPLATE : EOC_HOUSE_TEMPLATE
-
-  const blockTemplateMutation = (actionLabel) => {
-    if (!isTemplateAdmin) {
-      alert('Only admin can edit or publish templates.')
-      return true
-    }
-    if (isOffline) {
-      alert(`Offline mode: ${actionLabel} is unavailable until connection is restored.`)
-      return true
-    }
-    return false
-  }
 
   const handleResolveIssue = async () => {
     if (!resolvingIssue) return
@@ -263,263 +125,6 @@ function SupervisorEocPanel({ user, isOffline = false }) {
     } catch (err) {
       console.error('Error resolving issue:', err)
       alert('Failed to resolve issue')
-    }
-  }
-
-  const handleSaveTemplateItem = async () => {
-    if (blockTemplateMutation('saving template drafts')) return
-    if (!templateForm.category.trim() || !templateForm.label.trim()) {
-      alert('Category and label are required')
-      return
-    }
-
-    const payload = normalizeTemplatePayload(templateForm, templateType)
-
-    try {
-      if (editingTemplateId) {
-        await updateDoc(doc(db, 'eocTemplateDrafts', editingTemplateId), {
-          ...payload,
-          updatedAt: serverTimestamp(),
-          updatedByUserId: user?.id || null,
-          updatedByName: user?.name || null
-        })
-      } else {
-        await addDoc(collection(db, 'eocTemplateDrafts'), {
-          ...payload,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          createdByUserId: user?.id || null,
-          createdByName: user?.name || null
-        })
-      }
-      setEditingTemplateId(null)
-      setTemplateForm({ category: '', label: '', order: 0, active: true })
-      notifySuccess(editingTemplateId ? 'Draft item updated' : 'Draft item added')
-    } catch (err) {
-      console.error('Error saving template draft item:', err)
-      alert('Failed to save draft item')
-    }
-  }
-
-  const handleEditTemplateItem = (item) => {
-    setEditingTemplateId(item.id)
-    setTemplateForm({
-      category: item.category || '',
-      label: item.label || '',
-      order: item.order || 0,
-      active: item.active !== false
-    })
-  }
-
-  const handleDeleteTemplateItem = async (id) => {
-    if (blockTemplateMutation('deleting template drafts')) return
-    if (!(await showConfirmDialog('Delete this draft checklist item?', {
-      title: 'Delete Draft Item',
-      tone: 'danger',
-      confirmText: 'Delete'
-    }))) return
-    try {
-      await deleteDoc(doc(db, 'eocTemplateDrafts', id))
-      notifySuccess('Draft item deleted')
-    } catch (err) {
-      console.error('Error deleting template draft item:', err)
-      alert('Failed to delete draft item')
-    }
-  }
-
-  const replaceDraftFromItems = async (items, sourceLabel) => {
-    const existingDraftSnap = await getDocs(query(
-      collection(db, 'eocTemplateDrafts'),
-      where('eocType', '==', templateType)
-    ))
-
-    const batch = writeBatch(db)
-    existingDraftSnap.docs.forEach(d => batch.delete(d.ref))
-
-    items.forEach((item, idx) => {
-      const ref = doc(collection(db, 'eocTemplateDrafts'))
-      batch.set(ref, {
-        category: String(item.category || '').trim(),
-        label: String(item.label || '').trim(),
-        order: Number(item.order) || idx + 1,
-        active: item.active !== false,
-        eocType: templateType,
-        source: sourceLabel,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        createdByUserId: user?.id || null,
-        createdByName: user?.name || null
-      })
-    })
-
-    await batch.commit()
-    setEditingTemplateId(null)
-    setTemplateForm({ category: '', label: '', order: 0, active: true })
-  }
-
-  const handleDraftFromPublished = async () => {
-    if (blockTemplateMutation('starting template draft')) return
-    if (draftTemplateItems.length > 0 && !(await showConfirmDialog('Replace current draft with the latest published template?', {
-      title: 'Replace Draft',
-      tone: 'warning',
-      confirmText: 'Replace'
-    }))) return
-
-    const sourceItems = publishedTemplateItems.length > 0
-      ? publishedTemplateItems
-      : defaultTemplateItems.map((item, idx) => ({ ...item, order: idx + 1, active: true }))
-
-    if (sourceItems.length === 0) {
-      alert('No template items are available to initialize this draft.')
-      return
-    }
-
-    try {
-      await replaceDraftFromItems(sourceItems, 'published_snapshot')
-      notifySuccess('Draft initialized from published template')
-    } catch (err) {
-      console.error('Error creating draft from published template:', err)
-      alert('Failed to initialize draft from published template')
-    }
-  }
-
-  const handleDraftFromDefaults = async () => {
-    if (blockTemplateMutation('seeding template defaults')) return
-    if (!(await showConfirmDialog('Replace current draft with default template items?', {
-      title: 'Reset Draft',
-      tone: 'warning',
-      confirmText: 'Reset'
-    }))) return
-    try {
-      const seededItems = defaultTemplateItems.map((item, idx) => ({
-        category: item.category,
-        label: item.label,
-        order: idx + 1,
-        active: true
-      }))
-      await replaceDraftFromItems(seededItems, 'default_seed')
-      notifySuccess('Draft reset to default template')
-    } catch (err) {
-      console.error('Error replacing draft from defaults:', err)
-      alert('Failed to seed default draft')
-    }
-  }
-
-  const handleDiscardDraft = async () => {
-    if (blockTemplateMutation('discarding template draft')) return
-    if (!(await showConfirmDialog('Discard all draft changes for this template type?', {
-      title: 'Discard Draft Changes',
-      tone: 'danger',
-      confirmText: 'Discard'
-    }))) return
-    try {
-      const existingDraftSnap = await getDocs(query(
-        collection(db, 'eocTemplateDrafts'),
-        where('eocType', '==', templateType)
-      ))
-      const batch = writeBatch(db)
-      existingDraftSnap.docs.forEach(d => batch.delete(d.ref))
-      await batch.commit()
-      setEditingTemplateId(null)
-      setTemplateForm({ category: '', label: '', order: 0, active: true })
-      setTemplateVersionNote('')
-      notifySuccess('Draft discarded')
-    } catch (err) {
-      console.error('Error discarding template draft:', err)
-      alert('Failed to discard draft')
-    }
-  }
-
-  const handlePublishTemplate = async () => {
-    if (blockTemplateMutation('publishing template')) return
-
-    if (draftTemplateItems.length === 0) {
-      alert('Draft is empty. Build a draft before publishing.')
-      return
-    }
-    if (!templateDiff.hasChanges) {
-      alert('No draft changes detected. Update the draft before publishing.')
-      return
-    }
-    if (!templateVersionNote.trim()) {
-      alert('Version note is required before publishing.')
-      return
-    }
-    if (!(await showConfirmDialog('Publish draft to the live template now?', {
-      title: 'Publish Draft',
-      tone: 'warning',
-      confirmText: 'Publish'
-    }))) return
-
-    try {
-      const publishedSnap = await getDocs(query(
-        collection(db, 'eocChecklistTemplate'),
-        where('eocType', '==', templateType)
-      ))
-      const draftSnap = await getDocs(query(
-        collection(db, 'eocTemplateDrafts'),
-        where('eocType', '==', templateType),
-        orderBy('order', 'asc')
-      ))
-      const versionSnap = await getDocs(query(
-        collection(db, 'eocTemplateVersions'),
-        where('eocType', '==', templateType)
-      ))
-
-      const latestVersion = versionSnap.empty
-        ? 0
-        : Math.max(...versionSnap.docs.map(d => Number(d.data()?.version || 0)))
-      const nextVersion = latestVersion + 1
-      const normalizedDraft = draftSnap.docs.map((d, index) => {
-        const data = d.data() || {}
-        return {
-          category: String(data.category || '').trim(),
-          label: String(data.label || '').trim(),
-          order: Number(data.order) || index + 1,
-          active: data.active !== false,
-          eocType: templateType
-        }
-      })
-
-      const batch = writeBatch(db)
-      publishedSnap.docs.forEach(d => batch.delete(d.ref))
-      draftSnap.docs.forEach(d => batch.delete(d.ref))
-
-      normalizedDraft.forEach((item) => {
-        const ref = doc(collection(db, 'eocChecklistTemplate'))
-        batch.set(ref, {
-          ...item,
-          templateVersion: nextVersion,
-          publishedAt: serverTimestamp(),
-          publishedByUserId: user?.id || null,
-          publishedByName: user?.name || null
-        })
-      })
-
-      const versionRef = doc(collection(db, 'eocTemplateVersions'))
-      batch.set(versionRef, {
-        eocType: templateType,
-        version: nextVersion,
-        versionNote: templateVersionNote.trim(),
-        itemCount: normalizedDraft.length,
-        addedCount: templateDiff.added.length,
-        removedCount: templateDiff.removed.length,
-        changedCount: templateDiff.changed.length,
-        unchangedCount: templateDiff.unchangedCount,
-        publishedByUserId: user?.id || null,
-        publishedByName: user?.name || null,
-        publishedAt: serverTimestamp(),
-        items: normalizedDraft
-      })
-
-      await batch.commit()
-      setTemplateVersionNote('')
-      setEditingTemplateId(null)
-      setTemplateForm({ category: '', label: '', order: 0, active: true })
-      notifySuccess('Template published')
-    } catch (err) {
-      console.error('Error publishing template draft:', err)
-      alert('Failed to publish draft')
     }
   }
 
@@ -577,7 +182,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
   }
 
   const locationLabel = (id) => LOCATIONS.find(l => l.id === id)?.label || id
-  const shiftLabel = (id) => SHIFTS.find(s => s.id === id)?.label || id
+  const shiftLabel = (id) => getShiftLabel(id)
   const vanLabel = (id) => VANS.find(v => v.id === id)?.label || id || 'None'
 
   const statusBadge = (status) => {
@@ -687,7 +292,8 @@ function SupervisorEocPanel({ user, isOffline = false }) {
             </div>
           )}
         </div>
-      )}
+      )}
+
       {/* ===== ISSUES TAB ===== */}
       {subTab === 'issues' && (
         <div>
@@ -792,226 +398,7 @@ function SupervisorEocPanel({ user, isOffline = false }) {
 
       {/* ===== TEMPLATE TAB ===== */}
       {subTab === 'template' && (
-        <div>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-            Draft -&gt; Diff -&gt; Publish workflow. Draft edits do not affect active checklists until publish.
-          </p>
-          <div style={{ marginBottom: '12px' }}>
-            <select value={templateType} onChange={e => handleTemplateTypeChange(e.target.value)} style={selectStyle}>
-              <option value="house">House Template</option>
-              <option value="van">Van Template</option>
-            </select>
-          </div>
-
-          {(loadingPublishedTemplate || loadingDraftTemplate) ? (
-            <div style={{ textAlign: 'center', padding: '30px', color: '#556677' }}>Loading template data...</div>
-          ) : (
-            <>
-              <div style={{
-                backgroundColor: 'rgba(17,47,82,0.05)',
-                borderRadius: '10px',
-                border: '1px solid rgba(17,47,82,0.14)',
-                padding: '12px',
-                marginBottom: '12px'
-              }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                  Live template: {publishedTemplateItems.length} item(s)
-                  {lastPublishedVersion ? ` · v${lastPublishedVersion.version || 0}` : ' · not published yet'}
-                  {lastPublishedVersion?.versionNote ? ` · "${lastPublishedVersion.versionNote}"` : ''}
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                  Draft: {draftTemplateItems.length} item(s) · {templateDiff.hasChanges ? 'changes detected' : 'no changes'}
-                </div>
-                {!isTemplateAdmin && (
-                  <div style={{ fontSize: '12px', color: '#B07A28' }}>
-                    Read-only: only admin can edit drafts and publish templates.
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                <button onClick={handleDraftFromPublished} style={tabBtnStyle(true)} disabled={!isTemplateAdmin || isOffline}>
-                  {draftTemplateItems.length > 0 ? 'Reset Draft From Published' : 'Start Draft From Published'}
-                </button>
-                <button onClick={handleDraftFromDefaults} style={tabBtnStyle(false)} disabled={!isTemplateAdmin || isOffline}>
-                  Replace Draft With Defaults
-                </button>
-                <button onClick={handleDiscardDraft} style={tabBtnStyle(false)} disabled={!isTemplateAdmin || isOffline || draftTemplateItems.length === 0}>
-                  Discard Draft
-                </button>
-              </div>
-
-              <div style={{
-                backgroundColor: 'rgba(17,47,82,0.08)',
-                borderRadius: '12px',
-                padding: '16px',
-                marginBottom: '16px',
-                border: '1px solid rgba(17,47,82,0.14)'
-              }}>
-                <h4 style={{ margin: '0 0 12px 0', color: 'var(--text-primary)', fontSize: '14px' }}>
-                  {editingTemplateId ? 'Edit Draft Item' : 'Add Draft Item'}
-                </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
-                  <div>
-                    <label style={{ fontSize: '11px', color: '#556677' }}>Category</label>
-                    <input
-                      className="input"
-                      value={templateForm.category}
-                      onChange={e => setTemplateForm({ ...templateForm, category: e.target.value })}
-                      disabled={!isTemplateAdmin || isOffline}
-                      placeholder="Exterior"
-                      style={{ fontSize: '13px' }}
-                    />
-                  </div>
-                  <div style={{ gridColumn: 'span 2' }}>
-                    <label style={{ fontSize: '11px', color: '#556677' }}>Label</label>
-                    <input
-                      className="input"
-                      value={templateForm.label}
-                      onChange={e => setTemplateForm({ ...templateForm, label: e.target.value })}
-                      disabled={!isTemplateAdmin || isOffline}
-                      placeholder="Tire condition and pressure"
-                      style={{ fontSize: '13px' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '11px', color: '#556677' }}>Order</label>
-                    <input
-                      className="input"
-                      type="number"
-                      value={templateForm.order}
-                      onChange={e => setTemplateForm({ ...templateForm, order: e.target.value })}
-                      disabled={!isTemplateAdmin || isOffline}
-                      style={{ fontSize: '13px' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '11px', color: '#556677', display: 'block' }}>Active</label>
-                    <select
-                      value={templateForm.active ? 'true' : 'false'}
-                      onChange={e => setTemplateForm({ ...templateForm, active: e.target.value === 'true' })}
-                      disabled={!isTemplateAdmin || isOffline}
-                      style={selectStyle}
-                    >
-                      <option value="true">Active</option>
-                      <option value="false">Inactive</option>
-                    </select>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                  <button onClick={handleSaveTemplateItem} style={tabBtnStyle(true)} disabled={!isTemplateAdmin || isOffline}>
-                    {editingTemplateId ? 'Save Changes' : 'Add Item'}
-                  </button>
-                  {editingTemplateId && (
-                    <button
-                      onClick={() => { setEditingTemplateId(null); setTemplateForm({ category: '', label: '', order: 0, active: true }) }}
-                      style={tabBtnStyle(false)}
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div style={{
-                backgroundColor: 'rgba(17,47,82,0.05)',
-                borderRadius: '10px',
-                border: '1px solid rgba(17,47,82,0.14)',
-                padding: '12px',
-                marginBottom: '12px'
-              }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '6px', fontWeight: 700 }}>
-                  Draft vs Published Diff
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Added: {templateDiff.added.length} · Removed: {templateDiff.removed.length} · Changed: {templateDiff.changed.length} · Unchanged: {templateDiff.unchangedCount}
-                </div>
-                {templateDiff.hasChanges ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    {templateDiff.added.slice(0, 5).map(item => (
-                      <div key={`add:${item.id || templateDiffKey(item)}`}>+ {item.category} · {item.label}</div>
-                    ))}
-                    {templateDiff.removed.slice(0, 5).map(item => (
-                      <div key={`remove:${item.id || templateDiffKey(item)}`}>- {item.category} · {item.label}</div>
-                    ))}
-                    {templateDiff.changed.slice(0, 5).map(entry => (
-                      <div key={`change:${entry.draftItem.id || templateDiffKey(entry.draftItem)}`}>
-                        ~ {entry.draftItem.category} · {entry.draftItem.label} (order {entry.publishedItem.order || 0} -&gt; {entry.draftItem.order || 0}, {(entry.publishedItem.active !== false) ? 'active' : 'inactive'} -&gt; {(entry.draftItem.active !== false) ? 'active' : 'inactive'})
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    No publishable differences yet.
-                  </div>
-                )}
-              </div>
-
-              <div style={{
-                backgroundColor: 'rgba(17,47,82,0.08)',
-                borderRadius: '12px',
-                padding: '16px',
-                marginBottom: '16px',
-                border: '1px solid rgba(17,47,82,0.14)'
-              }}>
-                <h4 style={{ margin: '0 0 10px 0', color: 'var(--text-primary)', fontSize: '14px' }}>Publish Draft</h4>
-                <div style={{ marginBottom: '10px' }}>
-                  <label style={{ fontSize: '11px', color: '#556677', display: 'block', marginBottom: '4px' }}>
-                    Version Note (required)
-                  </label>
-                  <input
-                    className="input"
-                    value={templateVersionNote}
-                    onChange={e => setTemplateVersionNote(e.target.value)}
-                    disabled={!isTemplateAdmin || isOffline}
-                    placeholder="What changed in this publish?"
-                    style={{ fontSize: '13px' }}
-                  />
-                </div>
-                <button
-                  onClick={handlePublishTemplate}
-                  style={tabBtnStyle(true)}
-                  disabled={!isTemplateAdmin || isOffline || draftTemplateItems.length === 0 || !templateDiff.hasChanges}
-                >
-                  Publish Draft
-                </button>
-              </div>
-
-              {draftTemplateItems.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: '#556677' }}>
-                  No draft items yet.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {draftTemplateItems.map(item => (
-                    <div key={item.id} style={{
-                      padding: '12px',
-                      borderRadius: '8px',
-                      border: '1px solid rgba(17,47,82,0.14)',
-                      backgroundColor: 'rgba(17,47,82,0.08)'
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <span style={{ fontWeight: 700, fontSize: '14px' }}>
-                          {item.category} — {item.label}
-                        </span>
-                        <span className="badge" style={{ background: item.active === false ? 'rgba(17,47,82,0.10)' : 'rgba(76,175,80,0.15)', color: 'var(--text-primary)' }}>
-                          {item.active === false ? 'Inactive' : 'Active'}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                        Order: {item.order || 0}
-                      </div>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button onClick={() => handleEditTemplateItem(item)} style={tabBtnStyle(false)} disabled={!isTemplateAdmin || isOffline}>Edit</button>
-                        <button onClick={() => handleDeleteTemplateItem(item.id)} style={tabBtnStyle(false)} disabled={!isTemplateAdmin || isOffline}>Delete</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
+        <EocTemplateManager user={user} isOffline={isOffline} />
       )}
 
       {/* ===== VEHICLES TAB ===== */}

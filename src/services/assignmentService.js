@@ -1,7 +1,8 @@
 import { db } from '../firebase'
 import { doc, runTransaction, serverTimestamp } from 'firebase/firestore'
 import { getVersionNumber } from './versioning'
-import { buildBhtLocationId, isBhtRole, normalizeHouseId, normalizeMainLocation } from '../utils/orgModel'
+import { isShiftAllowedForMainLocation, isValidShiftId } from '../data/eocConstants'
+import { buildBhtLocationId, isBhtRole, locationIdToMainLocation, normalizeHouseId, normalizeMainLocation } from '../utils/orgModel'
 
 function assignmentDocIdForUserId(userId) {
   return `asg_${String(userId || '').trim()}`
@@ -26,13 +27,26 @@ function resolveLocationId(userRecord) {
   return String(buildBhtLocationId(mainLocation, houseId) || '').trim().toLowerCase()
 }
 
+function normalizeShiftIdForLocation(locationId, shiftId) {
+  const normalizedShiftId = String(shiftId || '').trim()
+  const shiftMainLocation = locationIdToMainLocation(locationId)
+  if (shiftMainLocation === 'RES') {
+    if (normalizedShiftId === 'shift_1') return 'res_shift_1_day'
+    if (normalizedShiftId === 'shift_2') return 'res_shift_2_day'
+  }
+  return normalizedShiftId
+}
+
 function shouldHaveActiveAssignment(userRecord) {
   const locationId = resolveLocationId(userRecord)
+  const shiftId = normalizeShiftIdForLocation(locationId, userRecord?.shiftId)
+  const shiftMainLocation = locationIdToMainLocation(locationId)
+  const hasAllowedShift = isValidShiftId(shiftId) && isShiftAllowedForMainLocation(shiftMainLocation, shiftId)
   const normalizedVanIds = normalizeVanIds(userRecord?.vanIds, userRecord?.vanId)
   return isBhtRole(userRecord?.role)
     && userRecord?.active === true
     && String(locationId || '').trim().length > 0
-    && String(userRecord?.shiftId || '').trim().length > 0
+    && hasAllowedShift
     && normalizedVanIds.length > 0
 }
 
@@ -47,6 +61,7 @@ export async function syncDerivedAssignmentForUser(userId, userRecord) {
   const assignmentRef = doc(db, 'shiftAssignments', assignmentDocIdForUserId(normalizedUserId))
   const shouldActivate = shouldHaveActiveAssignment(userRecord)
   const resolvedLocationId = resolveLocationId(userRecord)
+  const normalizedShiftId = normalizeShiftIdForLocation(resolvedLocationId, userRecord?.shiftId)
   const normalizedVanIds = normalizeVanIds(userRecord?.vanIds, userRecord?.vanId)
 
   return runTransaction(db, async (transaction) => {
@@ -77,7 +92,7 @@ export async function syncDerivedAssignmentForUser(userId, userRecord) {
       bhtUserId: normalizedUserId,
       bhtUserName: String(userRecord?.name || normalizedUserId).trim(),
       locationId: resolvedLocationId,
-      shiftId: String(userRecord.shiftId || '').trim(),
+      shiftId: normalizedShiftId,
       vanIds: normalizedVanIds,
       active: true,
       source: 'user_profile',

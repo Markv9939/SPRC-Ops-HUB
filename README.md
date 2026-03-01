@@ -19,6 +19,17 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Keyboard flow supports rapid answering (`1` = OK, `2` = Repair, `Enter` = next unresolved).
 - Sticky bottom actions keep `Next Unanswered` and `Submit EOC` accessible on mobile and desktop.
 - Van EOC visibility is constrained to each BHT's assigned van list (`vanIds`); house EOC stays location+shift scoped.
+- EOC template workflow now has a two-step admin/supervisor flow:
+  - `Library`: create templates, edit owned templates, and clone shared templates to make safe editable copies
+  - `Assignments`: set one default template per location + shift (no per-user override path)
+- Reassigning a location+shift default template applies immediately to incomplete/open EOCs for that scope.
+- Shift model is location-aware:
+  - OTC uses `1st Shift` and `2nd Shift`
+  - RES uses `1st Shift - Day`, `1st Shift - Night`, `2nd Shift - Day`, `2nd Shift - Night`
+- RES checklist templates are now split by `templateScope` (`RES Day`, `RES Night`) for both House and Van EOCs.
+- Due-day behavior:
+  - OTC `2nd Shift` remains Wednesday cadence
+  - RES `2nd` day/night shifts use Thursday cadence
 
 ## Recent Login Behavior (Current)
 - PIN login includes timeout guards on backend/auth lookups so degraded connectivity fails with a clear error instead of staying on `Checking...`.
@@ -56,6 +67,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Lint: `npm run lint`
 - Smoke: `npm run smoke:phase9:full`
 - Reset baseline (destructive): `npm run reset:uat`
+- RES shift/template migration: `npm run migrate:res-shift-model`
 - Compliance employee bulk import: `npm run compliance:employees:add`
 - Claims provision: `npm run claims:provision`
 - Claims verify: `npm run claims:verify`

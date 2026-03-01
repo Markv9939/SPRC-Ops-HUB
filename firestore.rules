@@ -52,7 +52,52 @@ service cloud.firestore {
     }
 
     function validShiftId(shiftId) {
-      return shiftId in ['shift_1', 'shift_2'];
+      return shiftId in [
+        'shift_1',
+        'shift_2',
+        'res_shift_1_day',
+        'res_shift_1_night',
+        'res_shift_2_day',
+        'res_shift_2_night'
+      ];
+    }
+
+    function validTemplateScope(templateScope) {
+      return templateScope in ['otc_shared', 'res_day', 'res_night'];
+    }
+
+    function validShiftForMainLocation(mainLocation, shiftId) {
+      return (
+        (mainLocation == 'OTC' && shiftId in ['shift_1', 'shift_2'])
+        || (
+          mainLocation == 'RES'
+          && shiftId in ['res_shift_1_day', 'res_shift_1_night', 'res_shift_2_day', 'res_shift_2_night']
+        )
+      );
+    }
+
+    function normalizedShiftMainLocation(locationId) {
+      return (
+        locationId == 'mesquite'
+        || locationId == 'MESQUITE'
+        || locationId == 'lone_mountain'
+        || locationId == 'LONE_MOUNTAIN'
+        || locationId == 'OTC'
+        || locationId == 'PHP'
+        || locationId == 'RTC'
+      )
+        ? 'OTC'
+        : (
+            locationId == 'res'
+            || locationId == 'RES'
+              ? 'RES'
+              : normalizedMainLocation(locationId)
+          );
+    }
+
+    function validShiftForLocation(locationId, shiftId) {
+      return validShiftId(shiftId)
+        && validShiftForMainLocation(normalizedShiftMainLocation(locationId), shiftId);
     }
 
     function userLocationValue(data) {
@@ -69,7 +114,7 @@ service cloud.firestore {
             && data.vanId is string
             && validVanId(data.vanId)
             && data.shiftId is string
-            && validShiftId(data.shiftId)
+            && validShiftForMainLocation(mainLocation, data.shiftId)
             && data.locationId is string
             && (
               mainLocation == 'OTC'
@@ -290,6 +335,51 @@ service cloud.firestore {
         );
     }
 
+    function validTemplateLibraryData(data) {
+      return data.keys().hasAll(['name', 'eocType', 'items', 'status'])
+        && data.name is string
+        && data.name.size() > 0
+        && data.eocType in ['house', 'van']
+        && data.items is list
+        && data.status in ['active', 'archived']
+        && (!('ownerUserId' in data) || data.ownerUserId == null || data.ownerUserId is string)
+        && (!('ownerAuthUid' in data) || data.ownerAuthUid == null || data.ownerAuthUid is string)
+        && (!('ownerName' in data) || data.ownerName == null || data.ownerName is string);
+    }
+
+    function templateCreateAllowed() {
+      return authRoleAllowed(['admin'])
+        || (
+          authRoleAllowed(['supervisor'])
+          && request.auth != null
+          && request.resource.data.ownerAuthUid is string
+          && request.resource.data.ownerAuthUid == request.auth.uid
+        );
+    }
+
+    function templateUpdateAllowed() {
+      return authRoleAllowed(['admin'])
+        || (
+          authRoleAllowed(['supervisor'])
+          && request.auth != null
+          && resource.data.ownerAuthUid is string
+          && request.auth.uid == resource.data.ownerAuthUid
+          && request.resource.data.ownerAuthUid == resource.data.ownerAuthUid
+          && request.resource.data.ownerUserId == resource.data.ownerUserId
+        );
+    }
+
+    function validTemplateAssignmentData(data) {
+      return data.keys().hasAll(['locationId', 'shiftId', 'eocType', 'defaultTemplateId'])
+        && data.locationId is string
+        && data.shiftId is string
+        && validShiftForLocation(data.locationId, data.shiftId)
+        && data.eocType in ['house', 'van']
+        && data.defaultTemplateId is string
+        && data.defaultTemplateId.size() > 0
+        && (!('defaultTemplateName' in data) || data.defaultTemplateName == null || data.defaultTemplateName is string);
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if true;
@@ -331,7 +421,7 @@ service cloud.firestore {
         && request.resource.data.bhtUserName is string
         && request.resource.data.locationId is string
         && request.resource.data.shiftId is string
-        && validShiftId(request.resource.data.shiftId)
+        && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
         && request.resource.data.vanIds is list
         && request.resource.data.active is bool
         && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
@@ -339,6 +429,11 @@ service cloud.firestore {
 
       allow update: if createdAtUnchanged()
         && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+        && (!('shiftId' in request.resource.data)
+          || (
+            request.resource.data.shiftId is string
+            && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
+          ))
         && validVersionField(request.resource.data);
       allow delete: if authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.locationId);
     }
@@ -349,9 +444,13 @@ service cloud.firestore {
 
       allow create: if request.resource.data.keys().hasAll([
         'taskType', 'locationId', 'shiftId', 'dueDate', 'status', 'cycleKey',
-        'eligibleUserIds'
+        'eligibleUserIds', 'templateScope'
       ])
         && request.resource.data.taskType in ['house', 'van']
+        && request.resource.data.shiftId is string
+        && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
+        && request.resource.data.templateScope is string
+        && validTemplateScope(request.resource.data.templateScope)
         && validEocTaskStatus(request.resource.data.status)
         && validIgnoredTaskPayload(request.resource.data)
         && request.resource.data.eligibleUserIds is list
@@ -360,6 +459,16 @@ service cloud.firestore {
 
       allow update: if validEocTaskStatus(request.resource.data.status)
         && validIgnoredTaskPayload(request.resource.data)
+        && (!('shiftId' in request.resource.data)
+          || (
+            request.resource.data.shiftId is string
+            && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
+          ))
+        && (!('templateScope' in request.resource.data)
+          || (
+            request.resource.data.templateScope is string
+            && validTemplateScope(request.resource.data.templateScope)
+          ))
         && (!('eligibleUserIds' in request.resource.data) || request.resource.data.eligibleUserIds is list)
         && (!('eligibleUserNames' in request.resource.data) || request.resource.data.eligibleUserNames is list)
         && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
@@ -376,9 +485,16 @@ service cloud.firestore {
       allow create: if request.resource.data.keys().hasAll([
         'locationId', 'shiftId', 'dueDate', 'assignedTechId', 'eocType', 'status'
       ])
+        && request.resource.data.shiftId is string
+        && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
         && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId);
 
       allow update: if createdAtUnchanged()
+        && (!('shiftId' in request.resource.data)
+          || (
+            request.resource.data.shiftId is string
+            && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
+          ))
         && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId);
       allow delete: if authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.locationId);
     }
@@ -388,12 +504,26 @@ service cloud.firestore {
       allow read: if true;
 
       allow create: if request.resource.data.keys().hasAll([
-        'locationId', 'shiftId', 'eocType', 'submittedByUserId', 'submittedByName'
+        'locationId', 'shiftId', 'eocType', 'submittedByUserId', 'submittedByName', 'templateScope'
       ])
+        && request.resource.data.shiftId is string
+        && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
+        && request.resource.data.templateScope is string
+        && validTemplateScope(request.resource.data.templateScope)
         && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
       allow update: if createdAtUnchanged()
+        && (!('shiftId' in request.resource.data)
+          || (
+            request.resource.data.shiftId is string
+            && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
+          ))
+        && (!('templateScope' in request.resource.data)
+          || (
+            request.resource.data.templateScope is string
+            && validTemplateScope(request.resource.data.templateScope)
+          ))
         && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
       allow delete: if authRoleAndLocationAllowed(['admin'], resource.data.locationId);
@@ -407,10 +537,14 @@ service cloud.firestore {
         && resource.data.draftByAuthUid == request.auth.uid;
 
       allow create: if request.resource.data.keys().hasAll([
-        'taskId', 'locationId', 'shiftId', 'eocType', 'draftByUserId', 'draftByAuthUid'
+        'taskId', 'locationId', 'shiftId', 'eocType', 'draftByUserId', 'draftByAuthUid', 'templateScope'
       ])
         && request.auth != null
         && request.resource.data.draftByAuthUid == request.auth.uid
+        && request.resource.data.shiftId is string
+        && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
+        && request.resource.data.templateScope is string
+        && validTemplateScope(request.resource.data.templateScope)
         && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
@@ -418,6 +552,16 @@ service cloud.firestore {
         && resource.data.draftByAuthUid == request.auth.uid
         && request.resource.data.draftByAuthUid == request.auth.uid
         && request.resource.data.draftByUserId == resource.data.draftByUserId
+        && (!('shiftId' in request.resource.data)
+          || (
+            request.resource.data.shiftId is string
+            && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
+          ))
+        && (!('templateScope' in request.resource.data)
+          || (
+            request.resource.data.templateScope is string
+            && validTemplateScope(request.resource.data.templateScope)
+          ))
         && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
@@ -503,7 +647,39 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // EOC Checklist Template
+    // EOC Template Library (named templates used by location+shift defaults)
+    match /eocTemplateLibrary/{docId} {
+      allow read: if true;
+
+      allow create: if validTemplateLibraryData(request.resource.data)
+        && templateCreateAllowed()
+        && validVersionField(request.resource.data);
+
+      allow update: if validTemplateLibraryData(request.resource.data)
+        && templateUpdateAllowed()
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+
+      allow delete: if authRoleAllowed(['admin']);
+    }
+
+    // EOC Template Assignments (default template per location+shift+type)
+    match /eocTemplateAssignments/{docId} {
+      allow read: if true;
+
+      allow create: if validTemplateAssignmentData(request.resource.data)
+        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data);
+
+      allow update: if validTemplateAssignmentData(request.resource.data)
+        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+
+      allow delete: if authRoleAllowed(['admin']);
+    }
+
+    // Legacy EOC Checklist Template
     match /eocChecklistTemplate/{docId} {
       allow read: if true;
       allow write: if authRoleAllowed(['admin']);

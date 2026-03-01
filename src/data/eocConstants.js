@@ -13,10 +13,100 @@ export const VANS = [
   { id: 'van_4', label: 'Van 4' }
 ]
 
-export const SHIFTS = [
-  { id: 'shift_1', label: '1st Shift', dueDayOfWeek: 0 }, // Sunday
-  { id: 'shift_2', label: '2nd Shift', dueDayOfWeek: 3 }  // Wednesday
+export const TEMPLATE_SCOPE_OTC_SHARED = 'otc_shared'
+export const TEMPLATE_SCOPE_RES_DAY = 'res_day'
+export const TEMPLATE_SCOPE_RES_NIGHT = 'res_night'
+
+export const TEMPLATE_SCOPE_OPTIONS = [
+  { id: TEMPLATE_SCOPE_OTC_SHARED, label: 'OTC Shared' },
+  { id: TEMPLATE_SCOPE_RES_DAY, label: 'RES Day' },
+  { id: TEMPLATE_SCOPE_RES_NIGHT, label: 'RES Night' }
 ]
+
+export const SHIFTS = [
+  {
+    id: 'shift_1',
+    label: '1st Shift',
+    mainLocation: 'OTC',
+    period: 'shared',
+    templateScope: TEMPLATE_SCOPE_OTC_SHARED,
+    dueDayOfWeek: 0
+  }, // Sunday
+  {
+    id: 'shift_2',
+    label: '2nd Shift',
+    mainLocation: 'OTC',
+    period: 'shared',
+    templateScope: TEMPLATE_SCOPE_OTC_SHARED,
+    dueDayOfWeek: 3
+  }, // Wednesday
+  {
+    id: 'res_shift_1_day',
+    label: '1st Shift - Day',
+    mainLocation: 'RES',
+    period: 'day',
+    templateScope: TEMPLATE_SCOPE_RES_DAY,
+    dueDayOfWeek: 0
+  }, // Sunday
+  {
+    id: 'res_shift_1_night',
+    label: '1st Shift - Night',
+    mainLocation: 'RES',
+    period: 'night',
+    templateScope: TEMPLATE_SCOPE_RES_NIGHT,
+    dueDayOfWeek: 0
+  }, // Sunday
+  {
+    id: 'res_shift_2_day',
+    label: '2nd Shift - Day',
+    mainLocation: 'RES',
+    period: 'day',
+    templateScope: TEMPLATE_SCOPE_RES_DAY,
+    dueDayOfWeek: 4
+  }, // Thursday
+  {
+    id: 'res_shift_2_night',
+    label: '2nd Shift - Night',
+    mainLocation: 'RES',
+    period: 'night',
+    templateScope: TEMPLATE_SCOPE_RES_NIGHT,
+    dueDayOfWeek: 4
+  } // Thursday
+]
+
+const SHIFTS_BY_ID = SHIFTS.reduce((acc, shift) => {
+  acc[shift.id] = shift
+  return acc
+}, {})
+
+export function getShiftById(shiftId) {
+  return SHIFTS_BY_ID[String(shiftId || '').trim()] || null
+}
+
+export function isValidShiftId(shiftId) {
+  return Boolean(getShiftById(shiftId))
+}
+
+export function getShiftLabel(shiftId) {
+  return getShiftById(shiftId)?.label || String(shiftId || '').trim()
+}
+
+export function getShiftOptionsForMainLocation(mainLocation) {
+  const normalizedMainLocation = String(mainLocation || '').trim().toUpperCase()
+  if (!normalizedMainLocation) return []
+  return SHIFTS.filter(shift => shift.mainLocation === normalizedMainLocation)
+}
+
+export function isShiftAllowedForMainLocation(mainLocation, shiftId) {
+  const shift = getShiftById(shiftId)
+  if (!shift) return false
+  const normalizedMainLocation = String(mainLocation || '').trim().toUpperCase()
+  return shift.mainLocation === normalizedMainLocation
+}
+
+export function getTemplateScopeForShift(shiftId) {
+  return getShiftById(shiftId)?.templateScope || TEMPLATE_SCOPE_OTC_SHARED
+}
 
 export const VAN_BY_LOCATION = {
   lone_mountain: 'van_1',

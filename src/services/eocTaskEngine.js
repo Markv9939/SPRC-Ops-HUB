@@ -1,8 +1,9 @@
 import { db } from '../firebase'
-import { SHIFTS } from '../data/eocConstants'
+import { getShiftById, getTemplateScopeForShift } from '../data/eocConstants'
 import { getCurrentCycleDueDate, phoenixNow } from '../utils/eocSchedule'
 import { collection, query, where, getDocs, doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore'
 import { getVersionNumber } from './versioning'
+import { loadTemplateAssignmentsByScope, resolveTemplateForScope } from './eocTemplateService'
 import { getAvailableMainLocationsForUser, isAdminRole, isBhtRole, locationIdToMainLocation } from '../utils/orgModel'
 
 function toPhoenixDateStr() {
@@ -56,16 +57,18 @@ function normalizeAssignment(raw) {
   }
 }
 
-function createTaskRecord(group, taskType, vanId = null) {
+function createTaskRecord(group, taskType, vanId = null, templateMeta = null) {
   const eligibleUserIds = sortUnique(group.eligibleUserIds)
   const eligibleUserNames = sortUnique(group.eligibleUserNames)
   const primaryUserId = eligibleUserIds[0] || ''
   const primaryUserName = eligibleUserNames[0] || ''
+  const templateScope = getTemplateScopeForShift(group.shiftId)
 
   const task = {
     taskType,
     locationId: group.locationId,
     shiftId: group.shiftId,
+    templateScope,
     assigneeUserId: primaryUserId,
     assigneeUserName: primaryUserName,
     eligibleUserIds,
@@ -75,6 +78,14 @@ function createTaskRecord(group, taskType, vanId = null) {
     cycleKey: '',
     active: true,
     scopeKey: buildGroupKey(group.locationId, group.shiftId)
+  }
+
+  if (templateMeta?.templateId) {
+    task.templateId = templateMeta.templateId
+    task.templateName = templateMeta.templateName || ''
+  } else {
+    task.templateId = null
+    task.templateName = ''
   }
 
   if (taskType === 'van') {
@@ -93,11 +104,11 @@ function createTaskRecord(group, taskType, vanId = null) {
   return task
 }
 
-function buildDesiredTasks(assignments) {
+function buildDesiredTasks(assignments, templateAssignmentsByScope) {
   const groups = new Map()
 
   for (const assignment of assignments) {
-    const shift = SHIFTS.find(s => s.id === assignment.shiftId)
+    const shift = getShiftById(assignment.shiftId)
     if (!shift) continue
 
     const groupKey = buildGroupKey(assignment.locationId, assignment.shiftId)
@@ -137,17 +148,27 @@ function buildDesiredTasks(assignments) {
     group.eligibleUserNames = sortUnique(group.eligibleUserNames)
     if (group.eligibleUserIds.length === 0) continue
 
-    tasks.push(createTaskRecord(group, 'house'))
+    const houseTemplateMeta = resolveTemplateForScope(templateAssignmentsByScope, {
+      locationId: group.locationId,
+      shiftId: group.shiftId,
+      eocType: 'house'
+    })
+    tasks.push(createTaskRecord(group, 'house', null, houseTemplateMeta))
 
     for (const [vanId, vanAssignees] of group.vanAssigneesByVanId.entries()) {
       const eligibleUserIds = sortUnique(vanAssignees.eligibleUserIds)
       if (eligibleUserIds.length === 0) continue
       const eligibleUserNames = sortUnique(vanAssignees.eligibleUserNames)
+      const vanTemplateMeta = resolveTemplateForScope(templateAssignmentsByScope, {
+        locationId: group.locationId,
+        shiftId: group.shiftId,
+        eocType: 'van'
+      })
       tasks.push(createTaskRecord({
         ...group,
         eligibleUserIds,
         eligibleUserNames
-      }, 'van', vanId))
+      }, 'van', vanId, vanTemplateMeta))
     }
   }
 
@@ -206,7 +227,8 @@ export async function syncEocTasksForUserScope(user) {
   const assignmentsForScope = normalizedAssignments
     .filter(assignment => scopedGroupKeys.has(buildGroupKey(assignment.locationId, assignment.shiftId)))
 
-  const desiredTasks = buildDesiredTasks(assignmentsForScope)
+  const templateAssignmentsByScope = await loadTemplateAssignmentsByScope()
+  const desiredTasks = buildDesiredTasks(assignmentsForScope, templateAssignmentsByScope)
   const desiredTaskIds = new Set(desiredTasks.map(task => task.cycleKey))
   const batch = writeBatch(db)
   const touched = new Set()
@@ -243,10 +265,13 @@ export async function syncEocTasksForUserScope(user) {
       existing.taskType !== task.taskType
       || existing.locationId !== task.locationId
       || existing.shiftId !== task.shiftId
+      || existing.templateScope !== task.templateScope
       || existing.vanId !== (task.vanId || null)
       || existing.dueDate !== task.dueDate
       || existing.shiftLabel !== task.shiftLabel
       || existing.scopeKey !== scopeKey
+      || String(existing.templateId || '').trim() !== String(task.templateId || '').trim()
+      || String(existing.templateName || '').trim() !== String(task.templateName || '').trim()
       || !arraysEqual(currentEligibleUserIds, nextEligibleUserIds)
       || !arraysEqual(currentEligibleUserNames, nextEligibleUserNames)
       || existing.assigneeUserId !== (task.assigneeUserId || '')
@@ -258,10 +283,13 @@ export async function syncEocTasksForUserScope(user) {
         taskType: task.taskType,
         locationId: task.locationId,
         shiftId: task.shiftId,
+        templateScope: task.templateScope,
         vanId: task.vanId || null,
         dueDate: task.dueDate,
         shiftLabel: task.shiftLabel,
         scopeKey,
+        templateId: task.templateId || null,
+        templateName: task.templateName || '',
         eligibleUserIds: nextEligibleUserIds,
         eligibleUserNames: nextEligibleUserNames,
         assigneeUserId: task.assigneeUserId || '',

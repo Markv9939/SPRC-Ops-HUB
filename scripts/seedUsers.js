@@ -86,6 +86,23 @@ function buildTaskDocId({ locationId, shiftId, taskType, dueDate, vanId }) {
   return `task_${locationId}_${shiftId}_van_${vanId}_${dueDate}`
 }
 
+const SHIFT_META = Object.freeze({
+  shift_1: { label: '1st Shift', templateScope: 'otc_shared' },
+  shift_2: { label: '2nd Shift', templateScope: 'otc_shared' },
+  res_shift_1_day: { label: '1st Shift - Day', templateScope: 'res_day' },
+  res_shift_1_night: { label: '1st Shift - Night', templateScope: 'res_night' },
+  res_shift_2_day: { label: '2nd Shift - Day', templateScope: 'res_day' },
+  res_shift_2_night: { label: '2nd Shift - Night', templateScope: 'res_night' }
+})
+
+function shiftLabelForId(shiftId) {
+  return SHIFT_META[shiftId]?.label || shiftId
+}
+
+function templateScopeForShift(shiftId) {
+  return SHIFT_META[shiftId]?.templateScope || 'otc_shared'
+}
+
 async function clearCollection(name) {
   let deleted = 0
 
@@ -171,14 +188,28 @@ async function seedUsers() {
     },
     {
       id: 'tech_unassigned',
-      name: 'BHT RES',
+      name: 'BHT RES Day',
       pin: '6666',
       role: 'bht',
       site: 'RES',
       location: 'RES',
       house: null,
       locationId: 'res',
-      shiftId: 'shift_1',
+      shiftId: 'res_shift_1_day',
+      vanId: 'van_3',
+      active: true,
+      authorizedLocations: ['RES']
+    },
+    {
+      id: 'tech_res_night',
+      name: 'BHT RES Night',
+      pin: '7777',
+      role: 'bht',
+      site: 'RES',
+      location: 'RES',
+      house: null,
+      locationId: 'res',
+      shiftId: 'res_shift_2_night',
       vanId: 'van_3',
       active: true,
       authorizedLocations: ['RES']
@@ -238,9 +269,19 @@ async function seedAssignments() {
     {
       id: 'asg_tech_unassigned',
       bhtUserId: 'tech_unassigned',
-      bhtUserName: 'BHT RES',
+      bhtUserName: 'BHT RES Day',
       locationId: 'res',
-      shiftId: 'shift_1',
+      shiftId: 'res_shift_1_day',
+      vanIds: ['van_3'],
+      source: 'user_profile',
+      active: true
+    },
+    {
+      id: 'asg_tech_res_night',
+      bhtUserId: 'tech_res_night',
+      bhtUserName: 'BHT RES Night',
+      locationId: 'res',
+      shiftId: 'res_shift_2_night',
       vanIds: ['van_3'],
       source: 'user_profile',
       active: true
@@ -387,12 +428,37 @@ async function seedEocTasks() {
     {
       taskType: 'van',
       locationId: 'res',
-      shiftId: 'shift_1',
+      shiftId: 'res_shift_1_day',
       vanId: 'van_3',
       eligibleUserIds: ['tech_unassigned'],
-      eligibleUserNames: ['BHT RES'],
+      eligibleUserNames: ['BHT RES Day'],
       assigneeUserId: 'tech_unassigned',
-      assigneeUserName: 'BHT RES',
+      assigneeUserName: 'BHT RES Day',
+      dueDate: today,
+      status: 'pending',
+      active: true
+    },
+    {
+      taskType: 'house',
+      locationId: 'res',
+      shiftId: 'res_shift_2_night',
+      eligibleUserIds: ['tech_res_night'],
+      eligibleUserNames: ['BHT RES Night'],
+      assigneeUserId: 'tech_res_night',
+      assigneeUserName: 'BHT RES Night',
+      dueDate: yesterday,
+      status: 'overdue',
+      active: true
+    },
+    {
+      taskType: 'van',
+      locationId: 'res',
+      shiftId: 'res_shift_2_night',
+      vanId: 'van_3',
+      eligibleUserIds: ['tech_res_night'],
+      eligibleUserNames: ['BHT RES Night'],
+      assigneeUserId: 'tech_res_night',
+      assigneeUserName: 'BHT RES Night',
       dueDate: today,
       status: 'pending',
       active: true
@@ -414,7 +480,8 @@ async function seedEocTasks() {
     try {
       await setDoc(doc(db, 'eocTasks', cycleKey), {
         ...task,
-        shiftLabel: task.shiftId === 'shift_1' ? '1st Shift' : '2nd Shift',
+        shiftLabel: shiftLabelForId(task.shiftId),
+        templateScope: templateScopeForShift(task.shiftId),
         cycleKey,
         version: 1,
         generatedAt: serverTimestamp(),
@@ -576,7 +643,8 @@ async function main() {
   console.log('- BHT Mesquite A: PIN 3333')
   console.log('- BHT Mesquite B: PIN 4444')
   console.log('- BHT Lone Mountain (multi-van): PIN 5555')
-  console.log('- BHT RES: PIN 6666')
+  console.log('- BHT RES Day: PIN 6666')
+  console.log('- BHT RES Night: PIN 7777')
 
   process.exit(0)
 }

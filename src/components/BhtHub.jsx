@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
+import { LOCATIONS, VANS, getShiftById, getShiftLabel } from '../data/eocConstants'
 import useEocAssignments from '../hooks/useEocAssignments'
 import useEocTasks from '../hooks/useEocTasks'
 import { getCurrentCycleDueDate } from '../utils/eocSchedule'
@@ -11,7 +11,7 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
 
   const hasAssignment = !!assignment
   const locationLabel = hasAssignment ? LOCATIONS.find(l => l.id === assignment.locationId)?.label : null
-  const shiftLabel = hasAssignment ? SHIFTS.find(s => s.id === assignment.shiftId)?.label : null
+  const shiftLabel = hasAssignment ? getShiftLabel(assignment.shiftId) : null
   const vanLabels = hasAssignment && assignment.vanIds?.length > 0
     ? assignment.vanIds.map(vid => VANS.find(v => v.id === vid)?.label || vid)
     : []
@@ -77,7 +77,7 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
   }
 
   const taskSubtitle = (task) => {
-    const shift = SHIFTS.find(s => s.id === task.shiftId)?.label || task.shiftId
+    const shift = getShiftLabel(task.shiftId)
     return `${shift} - Due ${task.dueDate}`
   }
 
@@ -94,7 +94,7 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
     }
     onNewTransport()
   }
-  const shiftConfig = hasAssignment ? SHIFTS.find(s => s.id === assignment.shiftId) : null
+  const shiftConfig = hasAssignment ? getShiftById(assignment.shiftId) : null
   const currentCycleDueDate = shiftConfig ? getCurrentCycleDueDate(shiftConfig) : null
   const currentCycleTasks = hasAssignment
     ? tasks.filter(t =>
@@ -214,7 +214,7 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
                 >
                   {vanTasks.map(task => {
                     const location = LOCATIONS.find(l => l.id === task.locationId)?.label || task.locationId
-                    const shift = SHIFTS.find(s => s.id === task.shiftId)?.label || task.shiftId
+                    const shift = getShiftLabel(task.shiftId)
                     const van = VANS.find(v => v.id === task.vanId)?.label || task.vanId || 'Van'
                     return (
                       <option key={task.id} value={task.id}>

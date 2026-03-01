@@ -11,6 +11,13 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - Shared modal foundation for app dialogs (`AppModal`, `modalStyles`) to keep overlay/card/button contrast consistent.
 - Dashboard compliance queue `Quick Update` action for inline due-date resolution directly from warning cards (overdue + due soon), including audit logging.
 - Bulk compliance employee import script (`scripts/addComplianceEmployees.js`) and npm command (`npm run compliance:employees:add`) to upsert employee records by `name + site`.
+- Location-aware shift catalog with RES day/night variants and shared helper APIs (`getShiftOptionsForMainLocation`, `isShiftAllowedForMainLocation`, `getShiftById`, `getTemplateScopeForShift`).
+- New `templateScope` support across EOC task generation, checklist draft/submission payloads, and template governance flows.
+- One-time RES rollout migration script (`scripts/migrateResShiftModel.js`) plus npm command (`npm run migrate:res-shift-model`).
+- New EOC template library + assignment manager flow:
+  - centralized library with search and owner-aware grouping (`My Templates`, `Shared Templates`)
+  - cloning path so supervisors can copy shared templates and edit their own versions safely
+  - location+shift default assignment workflow with immediate propagation to incomplete EOCs
 
 ### Changed
 - Compliance mobile item workflow refactored for low-friction editing:
@@ -46,6 +53,26 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - PIN login now applies bounded timeout guards to critical auth/data fetch steps so the login button does not remain indefinitely on `Checking...` when backend requests hang.
 - Transport reminder popup (`REMIND THE CLIENT ABOUT DC PAPERWORK`) now uses the same high-contrast modal pattern as other updated dialogs.
 - Compliance warning queue action buttons now use high-contrast neutral styling for readable text on tinted warning cards.
+- Supervisor BHT create/edit flow now enforces location-specific shift options:
+  - OTC users can only be assigned OTC shifts (`shift_1`, `shift_2`)
+  - RES users can only be assigned RES shifts (`res_shift_1_day`, `res_shift_1_night`, `res_shift_2_day`, `res_shift_2_night`)
+- EOC template management now supports required scope selection (`OTC Shared`, `RES Day`, `RES Night`) for both House and Van templates.
+- Supervisor template governance now follows copy-first ownership:
+  - supervisors can edit templates they own
+  - shared templates are cloned before edits to prevent accidental cross-team template changes
+- EOC checklist runtime now resolves templates by scope in priority order:
+  - exact `templateScope`
+  - fallback `otc_shared`
+  - fallback legacy unscope/default template constants
+- Due-date configuration now supports RES Thursday cadence for `2nd` day/night shifts while keeping OTC Wednesday behavior unchanged.
+- Firestore rules now enforce:
+  - strict shift/location compatibility for users, assignments, and EOC write paths
+  - valid `templateScope` values on scoped EOC records
+- Firestore indexes now include template-scope query coverage for:
+  - `eocChecklistTemplate`
+  - `eocTemplateDrafts`
+  - `eocTemplateVersions`
+- Seed data now includes both RES Day and RES Night BHT examples and scoped task/template metadata.
 
 ### Fixed
 - Resolved EOC submit permission failures caused by draft cleanup edge cases when draft ownership metadata does not match active auth UID.
@@ -64,6 +91,8 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - Firebase Hosting deploy passed to `sprc-tx-l` after compliance/cintas UX restructure (2026-02-19).
 - Firebase Firestore rules deploy passed to `sprc-tx-l` after scope updates for compliance/cintas (2026-02-19).
 - Firebase Hosting deploy passed to `sprc-tx-l` after dashboard warning workflow updates (2026-02-19).
+- `npm run lint` passed with one pre-existing baseline warning in `src/hooks/useEocTasks.js` (2026-02-28).
+- `npm run build` passed after RES shift model + template-scope changes (2026-02-28).
 
 ### Documentation
 - Rebuilt `plan.md` as a clean V2 Core operating blueprint aligned to current runtime state.
@@ -74,6 +103,7 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - Updated `docs/CUTOVER_RUNBOOK.md` with repeatable per-batch deploy + mobile validation steps.
 - Updated `docs/REGRESSION_UAT_PHASE9.md` with explicit iPhone/iPad validation checklist rows.
 - Updated `README.md`, `plan.md`, and `docs/REGRESSION_UAT_PHASE9.md` to document warning-card quick resolution flow and visibility/contrast fixes.
+- Updated `README.md`, `docs/UAT_WALKTHROUGH_PHASE9.md`, `docs/REGRESSION_UAT_PHASE9.md`, `docs/CUTOVER_RUNBOOK.md`, and `plan.md` for RES day/night shift rollout and scoped template behavior.
 
 ## [2026-02-13]
 ### Added

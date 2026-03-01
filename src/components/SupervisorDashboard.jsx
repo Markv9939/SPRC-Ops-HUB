@@ -7,7 +7,7 @@ import SupervisorEocPanel from './SupervisorEocPanel'
 import CompliancePanel from './CompliancePanel'
 import CintasPanel from './CintasPanel'
 import AccessGrantPanel from './AccessGrantPanel'
-import { LOCATIONS, SHIFTS, VANS } from '../data/eocConstants'
+import { LOCATIONS, VANS, getShiftLabel, getShiftOptionsForMainLocation, isShiftAllowedForMainLocation } from '../data/eocConstants'
 import { hashPin } from '../utils/pinHash'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../services/assignmentService'
@@ -807,7 +807,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
         primaryVanId = normalizedVanIds[0]
 
         normalizedShiftId = String(userForm.shiftId || '').trim()
-        if (!normalizedShiftId || !SHIFTS.some(shiftOption => shiftOption.id === normalizedShiftId)) {
+        if (!normalizedShiftId || !isShiftAllowedForMainLocation(normalizedLocation, normalizedShiftId)) {
           alert('Please select a valid shift for this BHT user.')
           return
         }
@@ -1007,6 +1007,9 @@ function SupervisorDashboard({ user, isOffline = false }) {
     const vanOptions = isBhtRole(normalizedFormRole)
       ? VANS.filter(v => getAllowedVanIdsForMainLocation(effectiveLocation).includes(v.id))
       : []
+    const shiftOptions = isBhtRole(normalizedFormRole)
+      ? getShiftOptionsForMainLocation(effectiveLocation)
+      : []
     const locationOptions = isAdmin ? MAIN_LOCATIONS : managedMainLocations
 
     return (
@@ -1127,6 +1130,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                 ...prev,
                 location: nextLocation,
                 house: requiresHouseSelection(nextLocation) ? prev.house : '',
+                shiftId: isShiftAllowedForMainLocation(nextLocation, prev.shiftId) ? prev.shiftId : '',
                 vanIds: normalizeVanIdList(prev.vanIds, prev.vanId).filter(vanId => allowedVans.includes(vanId)),
                 vanId: normalizeVanIdList(prev.vanIds, prev.vanId).find(vanId => allowedVans.includes(vanId)) || ''
               }))
@@ -1249,7 +1253,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
               }}
             >
               <option value="">Select Shift...</option>
-              {SHIFTS.map(shiftOption => (
+              {shiftOptions.map(shiftOption => (
                 <option key={shiftOption.id} value={shiftOption.id}>{shiftOption.label}</option>
               ))}
             </select>
@@ -2186,7 +2190,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                                 ? `${managedUserHouse === 'MESQUITE' ? 'Mesquite House' : (managedUserHouse === 'LONE_MOUNTAIN' ? 'Lone Mountain' : '--')}`
                                 : 'N/A'}
                               {' '} - {' '}
-                              {(SHIFTS.find(s => s.id === managedUser.shiftId)?.label || managedUser.shiftId || '--')}
+                              {(getShiftLabel(managedUser.shiftId) || '--')}
                               {' '} - {' '}
                               {(managedUserVanIds.length > 0
                                 ? managedUserVanIds.map(vanId => (VANS.find(v => v.id === vanId)?.label || vanId)).join(', ')
@@ -2533,7 +2537,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
                     </div>
                     <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
                       {LOCATIONS.find(l => l.id === task.locationId)?.label || task.locationId}
-                      {' '} &bull; {SHIFTS.find(s => s.id === task.shiftId)?.label || task.shiftId}
+                      {' '} &bull; {getShiftLabel(task.shiftId)}
                       {' '} &bull; Due {task.dueDate}
                       {' '} &bull; Eligible {Array.isArray(task.eligibleUserIds) ? task.eligibleUserIds.length : (task.assigneeUserId ? 1 : 0)}
                     </div>
