@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, updateDoc, serverTimestamp, setDoc, increment } from 'firebase/firestore'
+import { doc, getDoc, updateDoc, deleteDoc, serverTimestamp, setDoc, increment } from 'firebase/firestore'
 import DCPaperworkModal from './DCCheckModal'
 import ClientAutocomplete from './ClientAutocomplete'
 import DestinationAutocomplete from './DestinationAutocomplete'
-import AppModal from './AppModal'
 import { requireOnline } from '../utils/networkGuard'
 import { notifySuccess } from '../utils/toast'
-import { MODAL_CANCEL_BUTTON_STYLE } from './modalStyles'
+import { showConfirmDialog } from '../utils/dialogs'
 
 function TransportCard({ transportId, onClose, isOffline = false }) {
   const [loading, setLoading] = useState(true)
@@ -19,12 +18,12 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
   const [destinations, setDestinations] = useState([])
   const [notes, setNotes] = useState('')
   const [showDCPaperwork, setShowDCPaperwork] = useState(false)
-  const [showArriveReminder, setShowArriveReminder] = useState(false)
   const [dcPaperworkStatus, setDcPaperworkStatus] = useState(null)
   const [dcPaperworkOtherNote, setDcPaperworkOtherNote] = useState('')
   const normalizedStatus = String(status || '').trim().toLowerCase()
   const submitLocked = normalizedStatus === 'returned' || normalizedStatus === 'closed'
   const writeLocked = submitLocked || isOffline
+  const activeTransport = normalizedStatus === 'open' || normalizedStatus === 'arrived'
 
   const reasonOptions = [
     'Medical X appointment',
@@ -172,32 +171,40 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
     save({ destinations: updated }).catch(() => {})
   }
 
-  // --- arrive (logs time, shows DC reminder) ---
-  const handleArrive = () => {
+  const handleCancelTransport = async () => {
+    if (!transportId) return
     if (blockIfLocked()) return
-    setShowArriveReminder(true)
-  }
+    const confirmed = await showConfirmDialog(
+      'Cancel this transport? This removes it completely and cannot be undone.',
+      {
+        title: 'Cancel Transport',
+        tone: 'danger',
+        confirmText: 'Yes, Cancel Transport',
+        cancelText: 'Keep Transport'
+      }
+    )
+    if (!confirmed) return
 
-  const handleArriveConfirm = () => {
-    if (blockIfLocked()) return
-    setShowArriveReminder(false)
-    const stop = { arrivedAt: new Date().toISOString() }
-    const updated = [...stops, stop]
-    setStops(updated)
-    setStatus('arrived')
-    save({ stops: updated, status: 'arrived' }).catch(() => {})
+    try {
+      await deleteDoc(doc(db, 'transports', transportId))
+      notifySuccess('Transport cancelled')
+      onClose()
+    } catch (err) {
+      console.error('Cancel transport failed:', err)
+      alert(err?.message || 'Failed to cancel transport. Please try again.')
+    }
   }
 
   // --- finish ---
   const hasDest = destinations.length > 0 && destinations.every(d => d.address?.trim())
   const hasClient = clients.length > 0
-  const hasStop = stops.length > 0
-  const canFinish = hasDest && hasClient && hasStop
+  const hasReason = reasons.length > 0
+  const canFinish = hasDest && hasClient && hasReason
 
   const missingMsg = () => {
     const m = []
-    if (!hasStop) m.push('at least one arrival (click ARRIVE)')
     if (!hasClient) m.push('at least one client')
+    if (!hasReason) m.push('at least one reason')
     if (destinations.length === 0) m.push('at least one destination')
     else if (!hasDest) m.push('address for all destinations')
     return m.join(', ')
@@ -259,16 +266,24 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
         Departed at <strong style={{ marginLeft: '4px' }}>{fmt(departedAt)}</strong>
       </div>
 
-      {/* ARRIVE */}
-      <button
-        className={`btn btn-arrive pulse`}
-        onClick={handleArrive}
-        disabled={writeLocked}
-        style={{ width: '100%', fontSize: '18px', marginBottom: '6px', borderRadius: 'var(--radius)' }}
-      >
-        ARRIVE{stops.length > 0 ? ` (${stops.length} logged)` : ''}
-      </button>
-      <p style={{ textAlign: 'center', fontSize: '11px', color: '#556677', marginBottom: '16px' }}>Tap to log an arrival time</p>
+      {activeTransport && !isOffline && (
+        <button
+          className="btn"
+          onClick={handleCancelTransport}
+          style={{
+            width: '100%',
+            marginBottom: '16px',
+            borderRadius: 'var(--radius)',
+            backgroundColor: '#ffffff',
+            color: '#C94A3F',
+            border: '2px solid #C94A3F',
+            fontSize: '16px',
+            fontWeight: 700
+          }}
+        >
+          Cancel Transport
+        </button>
+      )}
 
       {isOffline && (
         <div style={{ marginBottom: '16px', fontSize: '12px', color: '#B07A28', textAlign: 'center' }}>
@@ -370,7 +385,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
 
       {/* Reasons */}
       <div className="glass-card animate-in" style={{ marginBottom: '16px' }}>
-        <div className="section-label">Reason(s)</div>
+        <div className="section-label">Reason(s) *</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
           {reasonOptions.map((r) => (
             <button key={r} className={`chip ${reasons.includes(r) ? 'chip-selected' : 'chip-unselected'}`} onClick={() => toggleReason(r)} disabled={writeLocked}>
@@ -402,48 +417,14 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
         disabled={!canFinish || writeLocked}
         style={{ width: '100%', fontSize: '18px', padding: '16px', borderRadius: 'var(--radius)' }}
       >
-        Finish TX
+        Finish TX / Log Return Time
       </button>
 
-      {!canFinish && (stops.length > 0 || clients.length > 0 || destinations.length > 0) && (
+      {!canFinish && (clients.length > 0 || destinations.length > 0 || reasons.length > 0) && (
         <p style={{ fontSize: '12px', color: 'var(--orange)', textAlign: 'center', marginTop: '8px' }}>
           Missing: {missingMsg()}
         </p>
       )}
-
-      {/* Arrive DC Reminder Modal */}
-      <AppModal
-        isOpen={showArriveReminder}
-        title="REMIND THE CLIENT ABOUT DC PAPERWORK"
-        tone="danger"
-        maxWidth="430px"
-        footer={(
-          <>
-            <button
-              onClick={() => setShowArriveReminder(false)}
-              style={MODAL_CANCEL_BUTTON_STYLE}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleArriveConfirm}
-              style={{
-                flex: 1,
-                padding: '12px 14px',
-                backgroundColor: '#CD4E42',
-                color: '#FFFFFF',
-                border: 'none',
-                borderRadius: '10px',
-                fontSize: '15px',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              OK
-            </button>
-          </>
-        )}
-      />
 
       {/* DC Paperwork Modal */}
       {showDCPaperwork && (

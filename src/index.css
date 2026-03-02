@@ -130,6 +130,22 @@ body {
   opacity: 0.9;
 }
 
+.header-user-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+
+.header-user-subtitle {
+  font-size: 12px;
+  opacity: 0.82;
+  max-width: 340px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .btn-lock {
   background: rgba(205,78,66,0.12);
   color: #F8F5F1;
