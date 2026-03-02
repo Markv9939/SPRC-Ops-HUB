@@ -1,4 +1,12 @@
-function Header({ userName, onLogout, onChangePin, canChangeOwnPin = false, alertCount = 0, isOffline = false }) {
+function Header({
+  userName,
+  userSubtitle = '',
+  onLogout,
+  onChangePin,
+  canChangeOwnPin = false,
+  alertCount = 0,
+  isOffline = false
+}) {
   return (
     <div className="header">
       <div className="header-brand">
@@ -22,7 +30,10 @@ function Header({ userName, onLogout, onChangePin, canChangeOwnPin = false, aler
             Offline: read-only
           </span>
         )}
-        <span className="header-user">{userName}</span>
+        <div className="header-user-block">
+          <span className="header-user">{userName}</span>
+          {userSubtitle && <span className="header-user-subtitle">{userSubtitle}</span>}
+        </div>
         {canChangeOwnPin && (
           <button className="btn-secondary-action" onClick={onChangePin}>
             Change PIN

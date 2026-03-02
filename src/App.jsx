@@ -21,6 +21,7 @@ import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
 import { installAlertDialogBridge, showPromptDialog } from './utils/dialogs'
 import { isFleetAlertType } from './utils/fleetStatus'
+import { LOCATIONS, VANS, getShiftLabel } from './data/eocConstants'
 import {
   MAIN_LOCATIONS,
   getAvailableMainLocationsForUser,
@@ -105,6 +106,27 @@ function toScopeSignature(sessionUser) {
   })
 }
 
+function buildBhtHeaderSubtitle(sessionUser) {
+  if (!sessionUser || !isBhtRole(sessionUser.role)) return ''
+
+  const locationLabel = LOCATIONS.find((location) => location.id === sessionUser.locationId)?.label
+    || (sessionUser.locationId ? String(sessionUser.locationId) : '')
+    || (sessionUser.site ? String(sessionUser.site) : '')
+  const shiftLabel = sessionUser.shiftId ? getShiftLabel(sessionUser.shiftId) : ''
+  const rawVanIds = Array.isArray(sessionUser.vanIds) && sessionUser.vanIds.length > 0
+    ? sessionUser.vanIds
+    : (sessionUser.vanId ? [sessionUser.vanId] : [])
+  const vanLabel = rawVanIds
+    .map((vanId) => {
+      const normalizedVanId = String(vanId || '').trim().toLowerCase()
+      return VANS.find((van) => van.id === normalizedVanId)?.label || String(vanId || '').trim()
+    })
+    .filter(Boolean)
+    .join(', ')
+
+  return [locationLabel, shiftLabel, vanLabel].filter(Boolean).join(' - ')
+}
+
 function App() {
   const [user, setUser] = useState(() => {
     const saved = sessionStorage.getItem('bhtUser')
@@ -130,6 +152,7 @@ function App() {
   const [issueUpdates, setIssueUpdates] = useState([])
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
   const [isChangePinOpen, setIsChangePinOpen] = useState(false)
+  const bhtHeaderSubtitle = buildBhtHeaderSubtitle(user)
 
   useEffect(() => {
     const restoreAlerts = installAlertDialogBridge()
@@ -140,18 +163,6 @@ function App() {
     if (!user || !isBhtRole(user.role)) return null
     return transports.find(t => isActiveTransportStatus(t.status)) || null
   }, [transports, user])
-
-  const fetchActiveTransportLive = useCallback(async () => {
-    if (!user || !isBhtRole(user.role)) return null
-    const userTransportSnapshot = await getDocs(
-      query(
-        collection(db, 'transports'),
-        where('createdByUserId', '==', user.id)
-      )
-    )
-    const existing = userTransportSnapshot.docs.find((docSnap) => isActiveTransportStatus(docSnap.data()?.status))
-    return existing ? { id: existing.id, ...existing.data() } : null
-  }, [user])
 
   const resumeActiveTransport = useCallback((transport) => {
     if (!transport?.id) return
@@ -185,25 +196,6 @@ function App() {
   }
 
   const handleLogout = useCallback(async () => {
-    const localActiveTransport = getActiveTransport()
-    let activeTransport = null
-    try {
-      activeTransport = await fetchActiveTransportLive()
-    } catch (err) {
-      console.error('Live active transport check failed during logout:', err)
-      activeTransport = localActiveTransport
-    }
-    console.info('Logout transport guard:', {
-      localActiveTransportId: localActiveTransport?.id || null,
-      liveActiveTransportId: activeTransport?.id || null
-    })
-
-    if (activeTransport) {
-      alert('You cannot lock/logout while a transport is active. Close the transport first.')
-      resumeActiveTransport(activeTransport)
-      return
-    }
-
     sessionStorage.removeItem('bhtUser')
     setUser(null)
     setPage('home')
@@ -215,7 +207,7 @@ function App() {
     signOut(auth).catch((err) => {
       console.warn('Auth signOut skipped:', err)
     })
-  }, [fetchActiveTransportLive, getActiveTransport, resumeActiveTransport])
+  }, [])
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false)
@@ -248,12 +240,6 @@ function App() {
       const timeSinceActivity = Date.now() - lastActivityTime
 
       if (timeSinceActivity > AUTO_LOCK_TIMEOUT) {
-        const activeTransport = getActiveTransport()
-        if (activeTransport) {
-          localStorage.setItem('lastActivity', Date.now().toString())
-          resumeActiveTransport(activeTransport)
-          return
-        }
         alert('Session expired due to inactivity. Please log in again.')
         handleLogout()
       }
@@ -265,7 +251,7 @@ function App() {
       })
       clearInterval(inactivityCheck)
     }
-  }, [handleLogout, getActiveTransport, resumeActiveTransport, user])
+  }, [handleLogout, user])
 
   // Keep session scope aligned with live `accessGrants` lifecycle and account deactivation.
   useEffect(() => {
@@ -601,6 +587,7 @@ function App() {
       <div className="app-bg">
         <Header
           userName={user.name}
+          userSubtitle={bhtHeaderSubtitle}
           onLogout={handleLogout}
           onChangePin={() => setIsChangePinOpen(true)}
           canChangeOwnPin={canChangeOwnPin}
@@ -629,6 +616,7 @@ function App() {
       <div className="app-bg">
         <Header
           userName={user.name}
+          userSubtitle={bhtHeaderSubtitle}
           onLogout={handleLogout}
           onChangePin={() => setIsChangePinOpen(true)}
           canChangeOwnPin={canChangeOwnPin}
@@ -659,6 +647,7 @@ function App() {
       <div className="app-bg">
         <Header
           userName={user.name}
+          userSubtitle={bhtHeaderSubtitle}
           onLogout={handleLogout}
           onChangePin={() => setIsChangePinOpen(true)}
           canChangeOwnPin={canChangeOwnPin}
@@ -691,6 +680,7 @@ function App() {
     }}>
       <Header
         userName={user.name}
+        userSubtitle={bhtHeaderSubtitle}
         onLogout={handleLogout}
         onChangePin={() => setIsChangePinOpen(true)}
         canChangeOwnPin={canChangeOwnPin}

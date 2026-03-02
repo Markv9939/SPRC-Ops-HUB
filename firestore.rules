@@ -703,7 +703,11 @@ service cloud.firestore {
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
-      allow delete: if authRoleAllowed(['admin']);
+      allow delete: if authRoleAllowed(['admin'])
+        || (
+          resource.data.status in ['open', 'arrived']
+          && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.site)
+        );
     }
 
     // EOC Template Assignments (default template per location+shift+type)
