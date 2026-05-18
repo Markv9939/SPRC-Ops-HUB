@@ -4,6 +4,15 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 
 ## [Unreleased]
 ### Added
+- One-time BHT onboarding overlay with local completion tracking so first-time users get a guided intro to transport/EOC basics.
+- Header notification entry flow:
+  - bell-style unread badge
+  - compact mobile dropdown menu for account actions
+- Shared notification infrastructure:
+  - `src/components/NotificationCenter.jsx`
+  - `src/services/notificationService.js`
+  - scope-aware hooks: `useUserScope`, `useScopedAlerts`, `useScopedIssues`, `useScopedFleet`
+- Extracted supervisor dashboard summary surface into `src/components/DashboardSummaryPanel.jsx` to isolate KPI/queue workflows from the broader admin dashboard shell.
 - EOC checklist autosave drafts in Firestore (`eocSubmissionDrafts`) with automatic restore on task reopen.
 - EOC draft access controls in Firestore rules, including auth UID ownership checks for draft read/write/delete paths.
 - Self-service PIN rotation UI for BHT and Supervisor users via Header action (`Change PIN`).
@@ -36,6 +45,26 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
   - house EOC status visibility from `eocTasks`
 
 ### Changed
+- BHT home (`BhtHub`) is now structured as an action-first mobile hub with:
+  - greeting + assignment context
+  - urgent/ready/done styling for transport and EOC rows
+  - compact same-day completed transport recap
+- Transport card flow is now more guided on mobile:
+  - progress bar for required setup fields
+  - clearer required section labels
+  - optional notes/arrivals hidden behind an expandable section during active use
+  - finish validation uses simpler user-facing missing-field prompts
+- EOC checklist mobile flow refined again:
+  - simplified header and due/location metadata
+  - progress bar replaces prior top summary pattern
+  - larger touch targets for `OK` / `Repair`
+  - clearer repair-note prompt copy and submit-state feedback
+- Header UX is now simplified for active sessions:
+  - branding shortened to `Ops Hub`
+  - first-name display on the right side
+  - account actions moved into a dropdown menu
+- Alert payload creation is now centralized so EOC issue alerts, issue updates, fleet alerts, and transport-complete alerts share a single schema source.
+- Supervisor/admin scope derivation and alert/task subscriptions were refactored out of `App.jsx` and `SupervisorDashboard.jsx` into shared hooks to reduce duplicated real-time logic.
 - Compliance mobile item workflow refactored for low-friction editing:
   - mobile employee detail now uses sticky bottom action bar (`Back`, `+ Add Item`, `Deactivate/Reactivate`)
   - mobile add/edit actions now open focused bottom sheets with sticky save controls
@@ -107,6 +136,7 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 - Seed data now includes both RES Day and RES Night BHT examples and scoped task/template metadata.
 
 ### Fixed
+- Removed trailing null-byte corruption from `SupervisorDashboard.jsx` so the current working tree can build and diff cleanly again.
 - Resolved EOC submit permission failures caused by draft cleanup edge cases when draft ownership metadata does not match active auth UID.
 - Prevented cross-user PIN change risk on self-service flow by enforcing field-level and identity-level rule checks.
 - Fixed BHT Hub showing unassigned van EOCs (example: Van 4 appearing for a Van 2-only assignment) by aligning task generation and client filtering with canonical `vanIds`.

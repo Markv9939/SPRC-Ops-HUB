@@ -18,6 +18,7 @@ import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber }
 import { updateFleetRuntimeFromEocSubmission } from '../services/fleetRuntimeService'
 import { syncFleetTasksForVehicle } from '../services/fleetTaskEngine'
 import { parseMileageValue } from '../utils/fleetStatus'
+import { buildEocIssueAlertPayload } from '../services/notificationService'
 import { requireOnline } from '../utils/networkGuard'
 
 const DRAFT_SAVE_DEBOUNCE_MS = 700
@@ -692,21 +693,12 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           })
 
           const alertRef = doc(collection(db, 'alerts'))
-          transaction.set(alertRef, {
-            type: 'eoc_issue',
-            issueId: issueRef.id,
-            taskId: task.id,
-            locationId: task.locationId,
-            eocType,
-            severity: 'medium',
-            message: `EOC issue: ${issue.label} - ${issue.description}`,
-            bhtName: user.name,
-            techName: user.name,
-            read: false,
-            version: 1,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          })
+          transaction.set(alertRef, buildEocIssueAlertPayload({
+            issueRefId: issueRef.id,
+            task,
+            issue: { ...issue, eocType, severity: 'medium' },
+            userName: user.name
+          }))
         }
       })
 
@@ -805,8 +797,14 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
   const locationLabel = LOCATIONS.find(l => l.id === task?.locationId)?.label || task?.locationId
 
+  // Progress tracking
+  const totalItems = activeTemplate.length
+  const answeredCount = activeTemplate.filter(item => Boolean(answers[item.id])).length
+  const progressPercent = totalItems > 0 ? Math.round((answeredCount / totalItems) * 100) : 0
+
   return (
-    <div className="eoc-checklist-page" style={{ padding: '18px', maxWidth: '760px', margin: '0 auto', paddingBottom: '150px' }}>
+    <div className="eoc-checklist-page" style={{ padding: '16px', maxWidth: '760px', margin: '0 auto', paddingBottom: '140px' }}>
+      {/* Header with back button */}
       <div className="eoc-header-row">
         <button
           aria-label="Back to BHT hub"
@@ -814,163 +812,171 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           style={{
             background: 'none',
             border: 'none',
-            fontSize: '24px',
+            fontSize: '22px',
             cursor: 'pointer',
             color: 'var(--text-secondary)',
-            padding: '4px'
+            padding: '8px',
+            minWidth: '44px',
+            minHeight: '44px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}
         >
-          {'<-'}
+          ←
         </button>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '32px', lineHeight: 1.1, color: 'var(--text-primary)', fontWeight: 700 }}>
-            {eocType === 'van' ? 'Van EOC Checklist' : 'House EOC Checklist'}
+        <div style={{ flex: 1 }}>
+          <h2 style={{ margin: 0, fontSize: '20px', lineHeight: 1.2, color: 'var(--text-primary)', fontWeight: 700 }}>
+            {eocType === 'van' ? 'Van EOC' : 'House EOC'}
           </h2>
-          <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-            Due: {task?.dueDate} - {locationLabel}
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            {locationLabel} · Due {task?.dueDate}
           </div>
         </div>
       </div>
 
-      <div className="glass-card eoc-shell-card" style={{ padding: '14px', marginBottom: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
-          <div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Completed by</div>
-            <div className="badge badge-eoc-completed" style={{ fontSize: '12px' }}>{user?.name || 'Unknown User'}</div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Draft status</div>
-            <div className="eoc-inline-note">{draftStatusText}</div>
-          </div>
+      {/* Progress bar */}
+      <div style={{ marginBottom: '16px' }}>
+        <div className="eoc-progress-header">
+          <span className="progress-label">{answeredCount} of {totalItems} items</span>
+          <span className="progress-label">{progressPercent}%</span>
         </div>
-
+        <div className="progress-bar-container">
+          <div
+            className={`progress-bar-fill ${progressPercent < 100 ? 'progress-bar-fill-warning' : ''}`}
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
         {draftRestoredNotice && (
-          <div className="eoc-inline-note" style={{ marginBottom: '10px' }}>
-            {draftRestoredNotice}
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+            Draft restored
           </div>
         )}
-
-        {eocType === 'van' ? (
-          <>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>Vehicle Receiving Inspection</div>
-            <div className="eoc-meta-grid">
-              <input className="input" value={vehicleName} readOnly aria-label="Vehicle name" placeholder="Vehicle name" />
-              <input className="input" value={vinNumber} readOnly aria-label="VIN number" placeholder="VIN number" />
-              <input
-                className={`input ${!odometerReading.trim() && error ? 'input-warn' : ''}`}
-                value={odometerReading}
-                onChange={(e) => {
-                  setError('')
-                  setOdometerReading(e.target.value)
-                }}
-                aria-label="Odometer reading"
-                placeholder="Odometer reading"
-              />
-            </div>
-            {(!vehicleName || !vinNumber) && (
-              <div style={{ marginTop: '8px', fontSize: '12px', color: '#B07A28' }}>
-                Vehicle details missing - ask supervisor to set vehicle name/VIN.
-              </div>
-            )}
-          </>
-        ) : (
-          <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            House: {locationLabel}
-          </div>
-        )}
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+          {draftStatusText}
+        </div>
       </div>
 
+      {/* Vehicle info (van only) */}
+      {eocType === 'van' ? (
+        <div className="glass-card eoc-shell-card" style={{ padding: '14px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px', fontWeight: 600 }}>Vehicle info</div>
+          <div className="eoc-meta-grid">
+            <input className="input" value={vehicleName} readOnly aria-label="Vehicle name" placeholder="Vehicle name" />
+            <input className="input" value={vinNumber} readOnly aria-label="VIN number" placeholder="VIN number" />
+            <input
+              className={`input ${!odometerReading.trim() && error ? 'input-warn' : ''}`}
+              value={odometerReading}
+              onChange={(e) => {
+                setError('')
+                setOdometerReading(e.target.value)
+              }}
+              inputMode="numeric"
+              aria-label="Odometer reading"
+              placeholder="Odometer reading"
+            />
+          </div>
+          {(!vehicleName || !vinNumber) && (
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#B07A28' }}>
+              Vehicle details missing — ask supervisor to update.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', padding: '0 4px' }}>
+          House: {locationLabel} · Completed by {user?.name || 'Unknown'}
+        </div>
+      )}
+
+      {/* Checklist items by category */}
       {categories.map(cat => {
         const categoryItems = itemsByCategory.get(cat) || []
 
         return (
-          <div key={cat} style={{ marginBottom: '18px' }}>
+          <div key={cat} style={{ marginBottom: '16px' }}>
             <div className="eoc-category-header">{cat}</div>
-            {categoryItems.map((item, idx) => (
-              <div
-                key={item.id}
-                ref={(node) => { itemRefs.current[item.id] = node }}
-                tabIndex={0}
-                onFocus={() => setFocusedItemId(item.id)}
-                onKeyDown={(event) => handleItemKeyDown(event, item)}
-                className="eoc-item"
-                style={{
-                  background: idx % 2 === 0 ? '#FFFFFF' : '#FCFAF7',
-                  borderRadius: '10px',
-                  padding: '12px',
-                  border: '1px solid rgba(17,47,82,0.16)',
-                  boxShadow: '0 2px 8px rgba(17,47,82,0.08)'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
-                  <div style={{ fontSize: '16px', color: 'var(--text-primary)', fontWeight: 600 }}>
-                    {idx + 1}. {item.label}
+            {categoryItems.map((item) => {
+              const globalIdx = activeTemplate.indexOf(item) + 1
+              return (
+                <div
+                  key={item.id}
+                  ref={(node) => { itemRefs.current[item.id] = node }}
+                  tabIndex={0}
+                  onFocus={() => setFocusedItemId(item.id)}
+                  onKeyDown={(event) => handleItemKeyDown(event, item)}
+                  className="eoc-item"
+                  style={{
+                    background: '#FFFFFF',
+                    borderRadius: '12px',
+                    padding: '14px',
+                    border: answers[item.id]
+                      ? (answers[item.id] === 'repair' ? '2px solid rgba(176,122,40,0.40)' : '2px solid rgba(47,125,87,0.30)')
+                      : '1px solid rgba(17,47,82,0.14)',
+                    boxShadow: '0 1px 4px rgba(17,47,82,0.06)'
+                  }}
+                >
+                  <div style={{ fontSize: '15px', color: 'var(--text-primary)', fontWeight: 600, marginBottom: '10px' }}>
+                    {globalIdx}. {item.label}
                   </div>
-                  <span className={`badge ${answers[item.id] ? (answers[item.id] === 'repair' ? 'badge-overdue' : 'badge-eoc-completed') : 'badge-eoc-pending'}`}>
-                    {answers[item.id] ? answers[item.id].toUpperCase() : 'UNANSWERED'}
-                  </span>
-                </div>
-                <div className="eoc-answer-grid" style={{ marginBottom: answers[item.id] === 'repair' ? '10px' : '0' }}>
-                  <button
-                    className={`chip ${answers[item.id] === 'ok' ? 'chip-ok' : 'chip-unselected'}`}
-                    onClick={() => setAnswer(item.id, 'ok')}
-                    aria-label={`Set ${item.label} to OK`}
-                    style={{ justifyContent: 'center', minHeight: '46px', fontSize: '16px' }}
-                  >
-                    OK
-                  </button>
-                  <button
-                    className={`chip ${answers[item.id] === 'repair' ? 'chip-attention' : 'chip-unselected'}`}
-                    onClick={() => setAnswer(item.id, 'repair')}
-                    aria-label={`Set ${item.label} to repair`}
-                    style={{ justifyContent: 'center', minHeight: '46px', fontSize: '16px' }}
-                  >
-                    Repair
-                  </button>
-                </div>
+                  <div className="eoc-answer-grid" style={{ marginBottom: answers[item.id] === 'repair' ? '10px' : '0' }}>
+                    <button
+                      className={`chip ${answers[item.id] === 'ok' ? 'chip-ok' : 'chip-unselected'}`}
+                      onClick={() => setAnswer(item.id, 'ok')}
+                      aria-label={`Set ${item.label} to OK`}
+                      style={{ justifyContent: 'center', minHeight: '52px', fontSize: '16px', fontWeight: 600, borderRadius: '10px' }}
+                    >
+                      ✓ OK
+                    </button>
+                    <button
+                      className={`chip ${answers[item.id] === 'repair' ? 'chip-attention' : 'chip-unselected'}`}
+                      onClick={() => setAnswer(item.id, 'repair')}
+                      aria-label={`Set ${item.label} to repair`}
+                      style={{ justifyContent: 'center', minHeight: '52px', fontSize: '16px', fontWeight: 600, borderRadius: '10px' }}
+                    >
+                      ⚠ Repair
+                    </button>
+                  </div>
 
-                {answers[item.id] === 'repair' && (
-                  <div className="eoc-item-attention">
-                    <div style={{ fontSize: '12px', color: '#8E611D', marginBottom: '6px' }}>
-                      Repair note required
+                  {answers[item.id] === 'repair' && (
+                    <div className="eoc-item-attention">
+                      <div style={{ fontSize: '13px', color: '#8E611D', marginBottom: '6px', fontWeight: 600 }}>
+                        What needs repair?
+                      </div>
+                      <input
+                        ref={(node) => { repairInputRefs.current[item.id] = node }}
+                        className={`input ${isRepairMissing(item.id) ? 'input-warn' : ''}`}
+                        aria-label={`Repair note for ${item.label}`}
+                        placeholder="Describe the issue..."
+                        value={repairDetails[item.id]?.description || ''}
+                        onChange={(e) => setRepairField(item.id, e.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            jumpToNextOutstanding()
+                          }
+                        }}
+                      />
                     </div>
-                    <input
-                      ref={(node) => { repairInputRefs.current[item.id] = node }}
-                      className={`input ${isRepairMissing(item.id) ? 'input-warn' : ''}`}
-                      aria-label={`Repair note for ${item.label}`}
-                      placeholder="If repair, note changes needed..."
-                      value={repairDetails[item.id]?.description || ''}
-                      onChange={(e) => setRepairField(item.id, e.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault()
-                          jumpToNextOutstanding()
-                        }
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              )
+            })}
           </div>
         )
       })}
 
-      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-        Checklist must be completed on a weekly basis by staff on the first day of each shift. To be turned in to Supervisor following day.
-      </div>
-
       {error && (
-        <div style={{ color: '#C94A3F', fontSize: '13px', marginBottom: '12px', textAlign: 'center' }}>
+        <div style={{ color: '#C94A3F', fontSize: '14px', marginBottom: '12px', textAlign: 'center', padding: '8px', background: 'rgba(205,78,66,0.06)', borderRadius: '8px' }}>
           {error}
         </div>
       )}
       {isOffline && (
-        <div style={{ color: '#B07A28', fontSize: '12px', marginBottom: '12px', textAlign: 'center' }}>
-          Offline mode is active. EOC submission is disabled until connection is restored.
+        <div style={{ color: '#B07A28', fontSize: '13px', marginBottom: '12px', textAlign: 'center', padding: '8px', background: 'rgba(176,122,40,0.06)', borderRadius: '8px' }}>
+          Offline — submission disabled until reconnected
         </div>
       )}
 
+      {/* Sticky bottom actions */}
       <div className="eoc-sticky-actions">
         <button
           type="button"
@@ -978,23 +984,24 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           onClick={jumpToNextOutstanding}
           disabled={!firstOutstandingItem}
           style={{
-            width: '48%',
-            fontSize: '16px',
+            flex: 1,
+            fontSize: '15px',
             borderRadius: 'var(--radius)',
             background: '#F1EFEA',
             color: 'var(--text-secondary)',
-            border: '1px solid #D8D1C6'
+            border: '1px solid #D8D1C6',
+            minHeight: '52px'
           }}
         >
-          Next Unanswered
+          Next unanswered
         </button>
         <button
           className={`btn ${allAnswered ? 'btn-finish' : 'btn-disabled'}`}
           onClick={handleSubmit}
           disabled={submitting || !allAnswered || isOffline}
-          style={{ width: '50%', fontSize: '18px', borderRadius: 'var(--radius)' }}
+          style={{ flex: 1, fontSize: '16px', borderRadius: 'var(--radius)', minHeight: '52px' }}
         >
-          {submitting ? 'Submitting...' : 'Submit EOC'}
+          {submitting ? 'Submitting...' : `Submit${allAnswered ? '' : ` (${totalItems - answeredCount} left)`}`}
         </button>
       </div>
     </div>

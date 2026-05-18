@@ -1,6 +1,6 @@
 # SPRC Ops Hub Blueprint (V2 Core)
 
-Last updated: 2026-03-01
+Last updated: 2026-05-18
 Status: Active
 Primary owner: Product + Engineering
 
@@ -85,12 +85,21 @@ Auth claim contract (enforced by rules/policy):
 - New transport requires valid scoped site.
 - Active transport blocks lock/logout until closed.
 - EOC tasks sync on session start.
+- First-login BHT onboarding can appear as a one-time local-browser walkthrough.
 - EOC checklist UX is optimized for rapid completion:
   - read-only completer identity sourced from active user
+  - mobile-first progress bar + larger answer targets for faster touch completion
   - sticky bottom actions for next-item navigation and submit
   - keyboard progression for fast desktop input
   - repair-note focus guidance when `Repair` is selected
 - EOC draft autosave persists in-progress checklists and restores on reopen for the same user/task.
+- BHT home is intentionally action-first:
+  - greeting + assignment context
+  - primary rows for transport, van EOC, and house EOC
+  - same-day completed transport recap
+- Transport workflow is intentionally guided:
+  - required-step progress bar for client, destination, and reason completion
+  - optional notes/arrival details stay collapsible during active use
 - Multi-van BHT support is canonical:
   - User profile supports `vanIds[]`.
   - Assignment sync preserves `vanIds[]` and primary `vanId` compatibility.
@@ -106,12 +115,16 @@ Auth claim contract (enforced by rules/policy):
 - Issue lifecycle: `open -> in_progress -> resolved`.
 - Transition notes required on lifecycle actions.
 - Assignment/user management is scope-limited.
+- Header unread notifications are scope-aware and should reflect real-time alert visibility for the logged-in role.
 - Supervisors can self-rotate their own PIN from Header.
 - Supervisors retain managed-user PIN reset authority for BHT users in their allowed facility scope.
 - Compliance warnings in dashboard queues can be resolved inline without tab switching:
   - `Quick Update` on warning cards updates `lastCompleted`, `dueDate`, and `notes`
   - due date is required for quick resolution
   - update writes generate audit log entries for traceability
+- Supervisor dashboard architecture is intentionally modular:
+  - high-volume queue/KPI content lives in `DashboardSummaryPanel`
+  - scope derivation and alert/task listeners are shared hooks, not duplicated inline
 - Fleet maintenance is now a top-level supervisor/admin feature:
   - persistent `fleetTasks` power dashboard overdue/upcoming fleet visibility
   - overdue fleet queue rows remain visible until a qualifying service/renewal record resolves them
@@ -150,11 +163,11 @@ Auth claim contract (enforced by rules/policy):
 - `complianceCertificates`
 - `complianceSettings`
 - `authPolicy`
+- `eocProperties`
 - `fleetMaintenanceTemplates`
 - `fleetVehicleRuntime`
 - `fleetTasks`
 - `vehicleServiceRecords`
-- `eocProperties`
 
 ## 7. Guardrails (Must Hold)
 ### Auth/Policy

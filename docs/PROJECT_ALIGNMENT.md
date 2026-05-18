@@ -1,6 +1,6 @@
 # Project Alignment to Master AGENTS.md
 
-Last updated: 2026-02-17
+Last updated: 2026-05-18
 Owner: Product + Engineering
 Status: Active
 
@@ -14,6 +14,7 @@ This document records how SPRC Ops Hub aligns with the master `AGENTS.md` instru
 - Do not commit or push unless explicitly requested.
 - Prioritize mobile/tablet usability and validation.
 - Keep project memory docs updated as behavior changes.
+- Keep release-facing markdowns (`README.md`, `plan.md`, `CHANGELOG.md`, regression notes) synchronized before deploy/push.
 
 ## Approved Project Exceptions
 These exceptions are intentional and approved for this repo.

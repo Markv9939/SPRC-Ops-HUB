@@ -19,8 +19,12 @@ import { changeOwnPin } from './services/userPinService'
 import { getAuthPolicy } from './services/authPolicyService'
 import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
+import Onboarding from './components/Onboarding'
 import { installAlertDialogBridge, showPromptDialog } from './utils/dialogs'
-import { isFleetAlertType } from './utils/fleetStatus'
+import NotificationCenter from './components/NotificationCenter'
+import useUserScope from './hooks/useUserScope'
+import useScopedAlerts from './hooks/useScopedAlerts'
+import { shouldShowOnboarding } from './utils/onboarding'
 import { LOCATIONS, VANS, getShiftLabel } from './data/eocConstants'
 import {
   MAIN_LOCATIONS,
@@ -148,10 +152,18 @@ function App() {
   const [transports, setTransports] = useState([])
   const [currentTransportId, setCurrentTransportId] = useState(null)
   const [currentTaskId, setCurrentTaskId] = useState(null)
-  const [alertCount, setAlertCount] = useState(0)
-  const [issueUpdates, setIssueUpdates] = useState([])
+  // Alert count and issue updates from shared hooks
+  const { inEocScope, inComplianceScope } = useUserScope(user)
+  const { eocAlerts, fleetAlerts, unreadCount: alertCount, issueUpdates } = useScopedAlerts({
+    user,
+    inEocScope,
+    inComplianceScope,
+    enabled: !!user
+  })
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
   const [isChangePinOpen, setIsChangePinOpen] = useState(false)
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
+  const [showOnboarding, setShowOnboarding] = useState(false)
   const bhtHeaderSubtitle = buildBhtHeaderSubtitle(user)
 
   useEffect(() => {
@@ -173,11 +185,11 @@ function App() {
   function handleLogin(userData) {
     sessionStorage.setItem('bhtUser', JSON.stringify(userData))
     setUser(userData)
-    if (!isBhtRole(userData?.role)) {
-      setIssueUpdates([])
-    }
     setPage('home')
     localStorage.setItem('lastActivity', Date.now().toString())
+    if (isBhtRole(userData?.role) && shouldShowOnboarding()) {
+      setShowOnboarding(true)
+    }
   }
 
   const canChangeOwnPin = Boolean(user) && (isBhtRole(user?.role) || isSupervisorRole(user?.role))
@@ -202,7 +214,6 @@ function App() {
     setTransports([])
     setCurrentTransportId(null)
     setCurrentTaskId(null)
-    setIssueUpdates([])
     localStorage.removeItem('lastActivity')
     signOut(auth).catch((err) => {
       console.warn('Auth signOut skipped:', err)
@@ -422,51 +433,7 @@ function App() {
     }
   }, [user, isOffline])
 
-  // Supervisor/admin alert count listener
-  useEffect(() => {
-    if (!user || (!isSupervisorRole(user.role) && !isAdminRole(user.role))) return
-
-    const q = query(
-      collection(db, 'alerts'),
-      where('read', '==', false)
-    )
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const count = snapshot.docs.reduce((acc, alertDoc) => {
-        const type = String(alertDoc.data()?.type || '')
-        return (type === 'eoc_issue' || isFleetAlertType(type)) ? acc + 1 : acc
-      }, 0)
-      setAlertCount(count)
-    })
-
-    return () => unsubscribe()
-  }, [user])
-
-  useEffect(() => {
-    if (!user || !isBhtRole(user.role)) return
-
-    const q = query(
-      collection(db, 'alerts'),
-      where('type', '==', 'eoc_issue_update')
-    )
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const rows = snapshot.docs
-        .map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }))
-        .filter(item => item.targetUserId === user.id)
-      rows.sort((a, b) => {
-        const aMs = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0
-        const bMs = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0
-        return bMs - aMs
-      })
-      setIssueUpdates(rows.slice(0, 8))
-    })
-
-    return () => unsubscribe()
-  }, [user])
+  // Alert count and issue updates are now provided by useScopedAlerts hook above
 
   function handleStartEoc(taskId) {
     setCurrentTaskId(taskId)
@@ -593,6 +560,7 @@ function App() {
           canChangeOwnPin={canChangeOwnPin}
           alertCount={alertCount}
           isOffline={isOffline}
+          onNotificationsOpen={() => setIsNotificationsOpen(true)}
         />
         <TransportCard
           transportId={currentTransportId}
@@ -604,6 +572,13 @@ function App() {
           isOpen={isChangePinOpen}
           onClose={() => setIsChangePinOpen(false)}
           onSubmit={handleChangeOwnPin}
+        />
+        <NotificationCenter
+          isOpen={isNotificationsOpen}
+          onClose={() => setIsNotificationsOpen(false)}
+          eocAlerts={eocAlerts}
+          fleetAlerts={fleetAlerts}
+          issueUpdates={issueUpdates}
         />
         <DialogHost />
         <ToastHost />
@@ -622,6 +597,7 @@ function App() {
           canChangeOwnPin={canChangeOwnPin}
           alertCount={alertCount}
           isOffline={isOffline}
+          onNotificationsOpen={() => setIsNotificationsOpen(true)}
         />
         <EocChecklist
           taskId={currentTaskId}
@@ -634,6 +610,13 @@ function App() {
           isOpen={isChangePinOpen}
           onClose={() => setIsChangePinOpen(false)}
           onSubmit={handleChangeOwnPin}
+        />
+        <NotificationCenter
+          isOpen={isNotificationsOpen}
+          onClose={() => setIsNotificationsOpen(false)}
+          eocAlerts={eocAlerts}
+          fleetAlerts={fleetAlerts}
+          issueUpdates={issueUpdates}
         />
         <DialogHost />
         <ToastHost />
@@ -653,6 +636,7 @@ function App() {
           canChangeOwnPin={canChangeOwnPin}
           alertCount={alertCount}
           isOffline={isOffline}
+          onNotificationsOpen={() => setIsNotificationsOpen(true)}
         />
         <SupervisorDashboard
           user={user}
@@ -665,6 +649,13 @@ function App() {
           isOpen={isChangePinOpen}
           onClose={() => setIsChangePinOpen(false)}
           onSubmit={handleChangeOwnPin}
+        />
+        <NotificationCenter
+          isOpen={isNotificationsOpen}
+          onClose={() => setIsNotificationsOpen(false)}
+          eocAlerts={eocAlerts}
+          fleetAlerts={fleetAlerts}
+          issueUpdates={issueUpdates}
         />
         <DialogHost />
         <ToastHost />
@@ -686,6 +677,7 @@ function App() {
         canChangeOwnPin={canChangeOwnPin}
         alertCount={alertCount}
         isOffline={isOffline}
+        onNotificationsOpen={() => setIsNotificationsOpen(true)}
       />
       <BhtHub
         user={user}
@@ -695,10 +687,20 @@ function App() {
         onContinueTransport={handleContinueTransport}
         onStartEoc={handleStartEoc}
       />
+      {showOnboarding && (
+        <Onboarding onComplete={() => setShowOnboarding(false)} />
+      )}
       <ChangePinModal
         isOpen={isChangePinOpen}
         onClose={() => setIsChangePinOpen(false)}
         onSubmit={handleChangeOwnPin}
+      />
+      <NotificationCenter
+        isOpen={isNotificationsOpen}
+        onClose={() => setIsNotificationsOpen(false)}
+        eocAlerts={eocAlerts}
+        fleetAlerts={fleetAlerts}
+        issueUpdates={issueUpdates}
       />
       <DialogHost />
       <ToastHost />

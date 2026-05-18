@@ -30,6 +30,7 @@ import {
   toIsoDate
 } from '../utils/fleetStatus'
 import { getAvailableMainLocationsForUser, isAdminRole, isSupervisorRole } from '../utils/orgModel'
+import { buildFleetAlertPayload } from './notificationService'
 
 const OPEN_STATUSES = ['upcoming', 'overdue']
 const BATCH_LIMIT = 350
@@ -316,34 +317,9 @@ function needsTaskUpdate(existing, descriptor) {
   )
 }
 
-function buildAlertPayload(taskDocId, descriptor, status) {
-  const isOverdue = status === 'overdue'
-  const typeSuffix = isOverdue ? 'overdue' : 'upcoming'
-  const statusLabel = isOverdue ? 'overdue' : 'upcoming'
-  const dueLabel = descriptor.triggerMode === 'mileage'
-    ? `due at ${descriptor.dueMileage} mi`
-    : `due on ${descriptor.dueDate}`
-  const currentLabel = descriptor.triggerMode === 'mileage'
-    ? `current mileage ${descriptor.currentMileageSnapshot ?? '--'}`
-    : `current date ${descriptor.currentDateSnapshot || '--'}`
-  const vanLabel = normalizeString(descriptor.vanId) ? ` (${descriptor.vanId})` : ''
-
-  return {
-    type: `fleet_${typeSuffix}`,
-    taskId: taskDocId,
-    taskType: descriptor.taskType,
-    vehicleId: descriptor.vehicleId,
-    mainLocation: descriptor.mainLocation || null,
-    locationId: descriptor.locationId || descriptor.mainLocation || null,
-    vanId: descriptor.vanId || null,
-    severity: isOverdue ? 'high' : 'medium',
-    message: `Fleet ${statusLabel}: ${descriptor.title}${vanLabel}, ${dueLabel}, ${currentLabel}.`,
-    read: false,
-    version: 1,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  }
-}
+// Alert payload building is now centralized in notificationService.js
+// Kept as a local alias for backward-compatible call sites within this file.
+const buildAlertPayload = buildFleetAlertPayload
 
 async function commitOperationsInChunks(operations) {
   if (!Array.isArray(operations) || operations.length === 0) return

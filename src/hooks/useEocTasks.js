@@ -26,11 +26,6 @@ export default function useEocTasks(user, assignment) {
   const assignmentVanKey = Array.isArray(assignment?.vanIds)
     ? assignment.vanIds.map(v => String(v || '').trim().toLowerCase()).filter(Boolean).sort().join('|')
     : ''
-  const assignedVanIds = new Set(
-    Array.isArray(assignment?.vanIds)
-      ? assignment.vanIds.map(v => String(v || '').trim().toLowerCase()).filter(Boolean)
-      : []
-  )
   const [tasks, setTasks] = useState([])
   const [loadedUserId, setLoadedUserId] = useState(null)
   const [loadedScopeKey, setLoadedScopeKey] = useState('')
@@ -44,6 +39,7 @@ export default function useEocTasks(user, assignment) {
       where('locationId', '==', assignment.locationId),
       where('shiftId', '==', assignment.shiftId)
     )
+    const assignedVanIds = new Set(assignmentVanKey ? assignmentVanKey.split('|') : [])
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {

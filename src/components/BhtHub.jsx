@@ -1,4 +1,4 @@
-import { getShiftById } from '../data/eocConstants'
+import { getShiftById, LOCATIONS } from '../data/eocConstants'
 import useEocAssignments from '../hooks/useEocAssignments'
 import useEocTasks from '../hooks/useEocTasks'
 import { getCurrentCycleDueDate } from '../utils/eocSchedule'
@@ -8,12 +8,6 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
   const { tasks, loading: tasksLoading } = useEocTasks(user, assignment)
 
   const hasAssignment = !!assignment
-
-  const formatDateTime = (timestamp) => {
-    if (!timestamp) return 'Unknown time'
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
-    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-  }
 
   const toDate = (value) => {
     if (!value) return null
@@ -45,37 +39,19 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
     || toDate(transport?.departedAt)
   )
 
-  const renderIssueUpdatesCard = () => issueUpdates.length > 0 && (
-    <div className="glass-card" style={{ marginBottom: '16px', padding: '14px 16px' }}>
-      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '10px' }}>
-        Issue Updates
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {issueUpdates.map(update => (
-          <div key={update.id} style={{
-            border: '1px solid rgba(17,47,82,0.14)',
-            borderRadius: '8px',
-            padding: '10px',
-            backgroundColor: 'rgba(17,47,82,0.05)'
-          }}>
-            <div style={{ fontSize: '12px', color: '#cfd8dc', marginBottom: '4px', textTransform: 'uppercase' }}>
-              {update.status === 'resolved' ? 'Resolved' : 'In Progress'}
-            </div>
-            <div style={{ fontSize: '13px', color: 'var(--text-primary)', marginBottom: '4px' }}>
-              {update.message || 'Issue status updated.'}
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              Note: {update.statusNote || 'No note provided.'}
-            </div>
-            <div style={{ fontSize: '11px', color: '#556677', marginTop: '4px' }}>
-              {formatDateTime(update.createdAt)}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+  const formatActivityTime = (value) => {
+    const date = toDate(value)
+    if (!date) return '--:--'
+    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  }
 
+  const formatDateTime = (timestamp) => {
+    if (!timestamp) return 'Unknown time'
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
+    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  }
+
+  // --- Compute transport state ---
   const currentTransport = transports.find(isActiveTransport) || null
   const hasCurrentTransport = !!currentTransport
 
@@ -86,6 +62,8 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
     }
     onNewTransport()
   }
+
+  // --- Compute EOC state ---
   const shiftConfig = hasAssignment ? getShiftById(assignment.shiftId) : null
   const currentCycleDueDate = shiftConfig ? getCurrentCycleDueDate(shiftConfig) : null
   const currentCycleTasks = hasAssignment
@@ -101,7 +79,6 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
   const getPriorityTask = (taskList) => {
     const actionable = taskList.filter(t => t.status === 'pending' || t.status === 'overdue')
     if (actionable.length === 0) return null
-
     const priority = (task) => (task.status === 'overdue' ? 0 : 1)
     return [...actionable].sort((a, b) => {
       const pDelta = priority(a) - priority(b)
@@ -115,6 +92,7 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
   const houseCompleted = !houseTask && currentCycleHouseTasks.some(t => t.status === 'completed')
   const vanCompleted = !vanTask && currentCycleVanTasks.some(t => t.status === 'completed')
 
+  // --- Completed transports today ---
   const today = new Date()
   const completedTodayTransports = transports
     .filter(isEndedTransport)
@@ -122,73 +100,22 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
     .filter((transport) => transport.__endedAt && isSameDay(transport.__endedAt, today))
     .sort((a, b) => b.__endedAt.getTime() - a.__endedAt.getTime())
 
-  const statusStyles = {
-    green: { backgroundColor: '#dcfce7', color: '#166534' },
-    red: { backgroundColor: '#fee2e2', color: '#991b1b' },
-    yellow: { backgroundColor: '#fef3c7', color: '#92400e' },
-    grey: { backgroundColor: '#f3f4f6', color: '#6b7280' }
+  // --- Helpers for action row status ---
+  const getEocStatus = (task, completed) => {
+    if (task?.status === 'overdue') return { label: 'Overdue - tap to complete', className: 'hub-action-subtitle-urgent', rowClass: 'hub-action-row-urgent' }
+    if (task?.status === 'pending') return { label: 'Due today', className: 'hub-action-subtitle-warning', rowClass: 'hub-action-row-ready' }
+    if (completed) return { label: 'Completed', className: 'hub-action-subtitle-done', rowClass: 'hub-action-row-done' }
+    return { label: 'No tasks', className: '', rowClass: '' }
   }
 
-  const getEocPillStatus = (taskList) => {
-    if (taskList.some(t => t.status === 'overdue')) return { text: 'Overdue', tone: 'red' }
-    if (taskList.some(t => t.status === 'pending')) return { text: 'Due Today', tone: 'yellow' }
-    if (taskList.some(t => t.status === 'completed')) return { text: 'Done', tone: 'green' }
-    return { text: 'None', tone: 'grey' }
-  }
+  const vanStatus = getEocStatus(vanTask, vanCompleted)
+  const houseStatus = getEocStatus(houseTask, houseCompleted)
 
-  const housePillStatus = getEocPillStatus(currentCycleHouseTasks)
-  const vanPillStatus = getEocPillStatus(currentCycleVanTasks)
-  const transportPillStatus = hasCurrentTransport
-    ? { text: 'Open', tone: 'green' }
-    : (completedTodayTransports.length > 0
-        ? { text: `Completed (${completedTodayTransports.length})`, tone: 'yellow' }
-        : { text: 'None', tone: 'grey' })
+  const locationLabel = hasAssignment
+    ? (LOCATIONS.find(l => l.id === assignment.locationId)?.label || assignment.locationId || '')
+    : ''
 
-  const formatActivityTime = (value) => {
-    const date = toDate(value)
-    if (!date) return '--:--'
-    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-  }
-
-  const renderEocActionButton = ({ label, task, completed, onClick }) => {
-    const overdue = task?.status === 'overdue'
-    const disabled = !task
-    let text = label
-    if (overdue) text = `${label} - OVERDUE`
-    if (!task && completed) text = `${label} \u2713`
-
-    const style = overdue
-      ? {
-          width: '100%',
-          fontSize: '16px',
-          marginBottom: '0',
-          borderRadius: 'var(--radius)',
-          backgroundColor: '#FFFFFF',
-          border: '2px solid #AF291D',
-          color: '#AF291D'
-        }
-      : {
-          width: '100%',
-          fontSize: '16px',
-          marginBottom: '0',
-          borderRadius: 'var(--radius)'
-        }
-
-    return (
-      <button
-        className={`btn ${overdue ? '' : 'btn-eoc'} hub-action-btn`}
-        onClick={onClick}
-        disabled={disabled}
-        style={{
-          ...style,
-          opacity: disabled ? 0.6 : 1,
-          cursor: disabled ? 'not-allowed' : 'pointer'
-        }}
-      >
-        {text}
-      </button>
-    )
-  }
+  const firstName = String(user?.name || '').split(' ')[0]
 
   if (assignmentLoading || tasksLoading) {
     return (
@@ -200,128 +127,162 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
 
   if (!hasAssignment) {
     return (
-      <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
-        {renderIssueUpdatesCard()}
-
-        <div className="glass-card no-assignment-card" style={{
+      <div style={{ padding: '16px', maxWidth: '600px', margin: '0 auto' }}>
+        {renderIssueUpdates()}
+        <div className="glass-card" style={{
           textAlign: 'center',
           padding: '40px 20px',
-          marginBottom: '20px',
           border: '2px solid rgba(255,152,0,0.3)'
         }}>
-          <div style={{ fontSize: '40px', marginBottom: '12px' }}>!</div>
-          <h3 style={{ color: '#B07A28', marginBottom: '8px', fontSize: '18px' }}>No Active Assignment</h3>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: '1.5' }}>
-            You don't have an active assignment. Contact your supervisor to get assigned to a location, shift, and van(s).
+          <div style={{ fontSize: '32px', marginBottom: '12px' }}>!</div>
+          <h3 style={{ color: '#B07A28', marginBottom: '8px', fontSize: '18px' }}>No active assignment</h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '15px', lineHeight: '1.5' }}>
+            Contact your supervisor to get assigned to a location, shift, and van.
           </p>
         </div>
       </div>
     )
   }
 
-  return (
-    <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
-      {renderIssueUpdatesCard()}
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '10px', marginBottom: '16px' }}>
-        <div style={{
-          borderRadius: '12px',
-          padding: '12px 8px',
-          textAlign: 'center',
-          ...statusStyles[housePillStatus.tone]
-        }}>
-          <div style={{ fontSize: '18px', lineHeight: 1, marginBottom: '6px' }}>{'\u{1F3E0}'}</div>
-          <div style={{ fontSize: '13px', marginBottom: '4px' }}>House EOC</div>
-          <div style={{ fontSize: '18px', fontWeight: 700 }}>{housePillStatus.text}</div>
+  function renderIssueUpdates() {
+    if (issueUpdates.length === 0) return null
+    return (
+      <div className="glass-card" style={{ marginBottom: '16px', padding: '14px 16px' }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '10px' }}>
+          Issue updates
         </div>
-        <div style={{
-          borderRadius: '12px',
-          padding: '12px 8px',
-          textAlign: 'center',
-          ...statusStyles[vanPillStatus.tone]
-        }}>
-          <div style={{ fontSize: '18px', lineHeight: 1, marginBottom: '6px' }}>{'\u{1F690}'}</div>
-          <div style={{ fontSize: '13px', marginBottom: '4px' }}>Van EOC</div>
-          <div style={{ fontSize: '18px', fontWeight: 700 }}>{vanPillStatus.text}</div>
-        </div>
-        <div style={{
-          borderRadius: '12px',
-          padding: '12px 8px',
-          textAlign: 'center',
-          ...statusStyles[transportPillStatus.tone]
-        }}>
-          <div style={{ fontSize: '18px', lineHeight: 1, marginBottom: '6px' }}>{'\u{1F697}'}</div>
-          <div style={{ fontSize: '13px', marginBottom: '4px' }}>Transport</div>
-          <div style={{ fontSize: '18px', fontWeight: 700 }}>{transportPillStatus.text}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {issueUpdates.map(update => (
+            <div key={update.id} className="issue-update-card">
+              <div className={`issue-update-status ${update.status === 'resolved' ? 'issue-update-status-resolved' : 'issue-update-status-progress'}`}>
+                {update.status === 'resolved' ? 'Resolved' : 'In progress'}
+              </div>
+              <div style={{ fontSize: '14px', color: 'var(--text-primary)', marginBottom: '4px' }}>
+                {update.message || 'Issue status updated.'}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                {update.statusNote || 'No note provided.'}
+              </div>
+              <div style={{ fontSize: '11px', color: '#556677', marginTop: '4px' }}>
+                {formatDateTime(update.createdAt)}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
+    )
+  }
 
-      {/* Transport button */}
-      <button
-        className="btn btn-primary hub-action-btn"
-        onClick={handlePrimaryTransportAction}
-        style={{ width: '100%', fontSize: '18px', marginBottom: '10px', borderRadius: 'var(--radius)' }}
-      >
-        {hasCurrentTransport ? 'Continue Open Transport' : '+ Start New Transport'}
-      </button>
+  return (
+    <div style={{ padding: '16px', maxWidth: '600px', margin: '0 auto' }}>
+      {/* Greeting */}
+      <div className="hub-greeting">Hi, {firstName}</div>
+      <div className="hub-context">{locationLabel}</div>
 
-      {/* Assignment-driven EOC actions */}
-      {hasAssignment && (
-        <div className="glass-card" style={{ marginBottom: '20px', padding: '16px' }}>
-          <div className="section-label" style={{ marginBottom: '10px' }}>EOCs</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {renderEocActionButton({
-              label: 'Complete Van EOC',
-              task: vanTask,
-              completed: vanCompleted,
-              onClick: () => vanTask && onStartEoc(vanTask.id)
-            })}
-            {renderEocActionButton({
-              label: 'Complete House EOC',
-              task: houseTask,
-              completed: houseCompleted,
-              onClick: () => houseTask && onStartEoc(houseTask.id)
-            })}
+      {/* Issue updates */}
+      {renderIssueUpdates()}
+
+      {/* Main action rows */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+        {/* Transport action */}
+        <button
+          className={`hub-action-row ${hasCurrentTransport ? 'hub-action-row-urgent' : 'hub-action-row-ready'}`}
+          onClick={handlePrimaryTransportAction}
+        >
+          <div className="hub-action-icon hub-action-icon-transport">
+            {'\u{1F697}'}
           </div>
-        </div>
-      )}
+          <div className="hub-action-info">
+            <div className="hub-action-title">
+              {hasCurrentTransport ? 'Continue transport' : 'Start transport'}
+            </div>
+            <div className={`hub-action-subtitle ${hasCurrentTransport ? 'hub-action-subtitle-urgent' : ''}`}>
+              {hasCurrentTransport
+                ? `${currentTransport.clients?.[0] || 'In progress'} - tap to continue`
+                : 'No active transport'}
+            </div>
+          </div>
+          <div className="hub-action-chevron">›</div>
+        </button>
 
-      <div className="section-label" style={{ marginBottom: '10px' }}>Today&apos;s Activity</div>
+        {/* Van EOC action */}
+        {hasAssignment && (
+          <button
+            className={`hub-action-row ${vanStatus.rowClass}`}
+            onClick={() => vanTask && onStartEoc(vanTask.id)}
+            disabled={!vanTask}
+            style={{ opacity: vanTask ? 1 : (vanCompleted ? 0.7 : 0.5) }}
+          >
+            <div className="hub-action-icon hub-action-icon-van">
+              {'\u{1F690}'}
+            </div>
+            <div className="hub-action-info">
+              <div className="hub-action-title">
+                Van EOC {vanCompleted && !vanTask ? '✓' : ''}
+              </div>
+              <div className={`hub-action-subtitle ${vanStatus.className}`}>
+                {vanStatus.label}
+              </div>
+            </div>
+            <div className="hub-action-chevron">›</div>
+          </button>
+        )}
+
+        {/* House EOC action */}
+        {hasAssignment && (
+          <button
+            className={`hub-action-row ${houseStatus.rowClass}`}
+            onClick={() => houseTask && onStartEoc(houseTask.id)}
+            disabled={!houseTask}
+            style={{ opacity: houseTask ? 1 : (houseCompleted ? 0.7 : 0.5) }}
+          >
+            <div className="hub-action-icon hub-action-icon-house">
+              {'\u{1F3E0}'}
+            </div>
+            <div className="hub-action-info">
+              <div className="hub-action-title">
+                House EOC {houseCompleted && !houseTask ? '✓' : ''}
+              </div>
+              <div className={`hub-action-subtitle ${houseStatus.className}`}>
+                {houseStatus.label}
+              </div>
+            </div>
+            <div className="hub-action-chevron">›</div>
+          </button>
+        )}
+      </div>
+
+      {/* Today's completed transports */}
+      <div className="section-label" style={{ marginBottom: '8px' }}>Completed today</div>
       {completedTodayTransports.length === 0 ? (
-        <div className="glass-card" style={{ marginBottom: '20px' }}>
-          <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            No completed transports yet today.
-          </div>
+        <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '20px', padding: '12px 0' }}>
+          No completed transports yet today.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
           {completedTodayTransports.map((transport) => {
             const clientLabel = transport.clients?.[0] || 'No client'
+            const extra = transport.clients?.length > 1 ? ` +${transport.clients.length - 1}` : ''
             const destinationLabel = transport.destinations?.[0]?.name
               || transport.destinations?.[0]?.address
               || 'No destination'
-            const reasonLabel = transport.reasons?.[0] || 'No reason'
-            const closedLabel = String(transport.status || '').toLowerCase() === 'returned' ? 'Returned' : 'Closed'
 
             return (
               <button
                 key={transport.id}
-                className="glass-card"
+                className="activity-item"
                 onClick={() => onContinueTransport(transport.id)}
-                style={{
-                  textAlign: 'left',
-                  border: '1px solid rgba(17,47,82,0.12)',
-                  cursor: 'pointer'
-                }}
               >
-                <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px' }}>
-                  Transport - {clientLabel}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {clientLabel}{extra}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {destinationLabel}
+                  </div>
                 </div>
-                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
-                  {destinationLabel} - {reasonLabel}
-                </div>
-                <span className="badge badge-closed">
-                  {closedLabel} {formatActivityTime(transport.__endedAt)}
+                <span className="badge badge-closed" style={{ flexShrink: 0 }}>
+                  {formatActivityTime(transport.__endedAt)}
                 </span>
               </button>
             )
@@ -333,5 +294,3 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
 }
 
 export default BhtHub
-
-

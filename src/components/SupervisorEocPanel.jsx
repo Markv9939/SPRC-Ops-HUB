@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db } from '../firebase'
 import {
-  addDoc,
   collection,
   doc,
   onSnapshot,
@@ -12,6 +11,7 @@ import {
 } from 'firebase/firestore'
 import { LOCATIONS, VANS } from '../data/eocConstants'
 import { notifySuccess } from '../utils/toast'
+import { createIssueStatusNotification } from '../services/notificationService'
 import EocTemplateManager from './EocTemplateManager'
 
 function SupervisorEocPanel({ user, isOffline = false }) {
@@ -64,27 +64,12 @@ function SupervisorEocPanel({ user, isOffline = false }) {
         resolvedByName: user?.name || null,
         updatedAt: serverTimestamp()
       })
-      if (resolvingIssue?.locationId && resolvingIssue?.reportedByUserId) {
-        await addDoc(collection(db, 'alerts'), {
-          type: 'eoc_issue_update',
-          issueId: resolvingIssue.id,
-          taskId: resolvingIssue.taskId || null,
-          locationId: resolvingIssue.locationId,
-          eocType: resolvingIssue.eocType || null,
-          severity: resolvingIssue.severity || 'medium',
-          targetUserId: resolvingIssue.reportedByUserId,
-          targetUserName: resolvingIssue.reportedByName || null,
-          status: 'resolved',
-          statusNote: resolveNotes.trim(),
-          actorUserId: user?.id || null,
-          actorName: user?.name || 'Supervisor',
-          message: `${user?.name || 'Supervisor'} marked "${resolvingIssue.label || 'Issue'}" as resolved.`,
-          read: false,
-          version: 1,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        })
-      }
+      await createIssueStatusNotification({
+        issue: resolvingIssue,
+        nextStatus: 'resolved',
+        note: resolveNotes.trim(),
+        actorUser: user
+      })
       setResolvingIssue(null)
       setResolveNotes('')
       notifySuccess('Issue resolved')

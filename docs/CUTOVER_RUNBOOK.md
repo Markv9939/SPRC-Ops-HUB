@@ -1,6 +1,6 @@
 # SPRC Cutover Runbook (Free-Tier v1)
 
-Last updated: 2026-03-01
+Last updated: 2026-05-18
 Owner: Admin/Owner + Supervisor
 
 ## Goal
@@ -74,6 +74,23 @@ Use this sequence after each meaningful change batch, not only final cutover:
    - `CHANGELOG.md`
 
 ## Recent Session Updates
+
+### 2026-05-18 - Notification + BHT Mobile Flow Release Prep
+
+Batch summary:
+- Added one-time BHT onboarding overlay and compact action-first BHT hub layout.
+- Added header notification entry flow plus shared notification/scoping hooks.
+- Extracted supervisor dashboard summary logic into a dedicated `DashboardSummaryPanel`.
+- Cleaned publish blockers found in release prep, including null-byte corruption in `SupervisorDashboard.jsx`.
+
+Verification evidence:
+- `npm.cmd run lint`: PASS
+- `npm.cmd run build`: PASS
+
+Owner validation focus (mobile/tablet):
+1. BHT onboarding overlay only appears on first qualifying login and dismisses cleanly.
+2. Header bell/menu interactions are easy to tap on iPhone and iPad.
+3. BHT transport and EOC action rows remain readable and obvious on smaller screens.
 
 ### 2026-02-19 - UI Visibility + Direct Warning Resolution
 

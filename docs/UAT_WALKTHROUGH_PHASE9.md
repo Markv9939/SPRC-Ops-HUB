@@ -1,6 +1,6 @@
 # Phase 9 UAT Walkthrough Script
 
-Last updated: 2026-03-01
+Last updated: 2026-05-18
 Goal: Execute a single guided walkthrough and capture signoff evidence for Phase 9.
 
 ## Preconditions
@@ -99,6 +99,9 @@ For each test case below, capture:
 3. IA-3 Alert remains until resolved/read flow
    - Resolve/read from supervisor queue.
    - Expected: lifecycle behavior consistent with queue actions.
+4. IA-4 Header notification flow
+   - Open the header bell/drawer on supervisor/admin mobile and tablet.
+   - Expected: unread items are grouped correctly, filter tabs work, and dismiss/mark-all-read actions succeed.
 
 ### E. Data Integrity
 
@@ -115,6 +118,9 @@ For each test case below, capture:
 5. DI-5 Offline write protection
    - Disable network and attempt transport/EOC/supervisor write actions.
    - Expected: explicit offline warning and write blocked until reconnect.
+6. DI-6 One-time onboarding persistence
+   - Login with a BHT user that has not completed onboarding, then finish or skip the tour and log back in.
+   - Expected: onboarding shows once and stays dismissed on subsequent logins for that browser/device.
 
 ### F. Scheduler/Idempotency
 

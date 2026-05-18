@@ -275,30 +275,57 @@ function PinLogin({ onLogin }) {
           Enter PIN to access
         </p>
 
+        {/* PIN dots display */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          gap: '14px',
+          marginBottom: '16px'
+        }}>
+          {[0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              style={{
+                width: '18px',
+                height: '18px',
+                borderRadius: '50%',
+                background: i < pin.length ? '#F8F5F1' : 'transparent',
+                border: '2px solid rgba(248,245,241,0.5)',
+                transition: 'all 0.15s'
+              }}
+            />
+          ))}
+        </div>
+
         <input
           type="password"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          autoComplete="one-time-code"
           maxLength={4}
           value={pin}
+          autoFocus
           onChange={(e) => {
             const val = e.target.value.replace(/\D/g, '')
             setPin(val)
             setError('')
           }}
           onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          placeholder="* * * *"
+          placeholder="Enter 4-digit PIN"
           style={{
             width: '100%',
-            padding: '14px',
-            fontSize: '24px',
+            padding: '16px',
+            fontSize: '20px',
             textAlign: 'center',
             border: '2px solid rgba(248,245,241,0.45)',
-            borderRadius: '10px',
+            borderRadius: '12px',
             outline: 'none',
-            letterSpacing: '8px',
+            letterSpacing: '6px',
             boxSizing: 'border-box',
             marginBottom: '12px',
-            backgroundColor: 'rgba(248,245,241,0.24)',
-            color: '#F8F5F1'
+            backgroundColor: 'rgba(248,245,241,0.20)',
+            color: '#F8F5F1',
+            minHeight: '54px'
           }}
         />
 

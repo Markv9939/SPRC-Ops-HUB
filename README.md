@@ -18,6 +18,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - House/Van EOC sections stay expanded (no collapse/hide toggles).
 - Keyboard flow supports rapid answering (`1` = OK, `2` = Repair, `Enter` = next unresolved).
 - Sticky bottom actions keep `Next Unanswered` and `Submit EOC` accessible on mobile and desktop.
+- EOC mobile layout now uses a simplified progress bar, larger answer targets, and a compact mobile-first header.
 - Van EOC visibility is constrained to each BHT's assigned van list (`vanIds`); house EOC stays location+shift scoped.
 - EOC template workflow now has a two-step admin/supervisor flow:
   - `Library`: create templates, edit owned templates, and clone shared templates to make safe editable copies
@@ -35,6 +36,19 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - PIN login includes timeout guards on backend/auth lookups so degraded connectivity fails with a clear error instead of staying on `Checking...`.
 
 ## Recent Dashboard/Modal Behavior (Current)
+- BHT home is now a tighter action-hub experience:
+  - greeting + assignment context at top
+  - prominent action rows for `Start transport`, `Van EOC`, and `House EOC`
+  - same-day completed transports summarized in a compact activity list
+- First-login BHT onboarding is now available as a one-time guided overlay stored in local browser state.
+- Header navigation is simplified on mobile:
+  - short app label (`Ops Hub`)
+  - bell-style notification entry point for unread alerts
+  - dropdown menu for `Change PIN` and `Lock / Sign Out`
+- Notification delivery is now centralized:
+  - shared `notificationService` builds EOC, fleet, transport, and issue-update alert payloads
+  - shared scope hooks drive header counts and supervisor queue filtering
+- Supervisor dashboard summary is now extracted into a dedicated `DashboardSummaryPanel` to isolate queue + KPI logic from the main admin surface.
 - Compliance admin surface is now employee-centric:
   - one searchable employee workspace for add/deactivate/manage flows
   - tap/select employee to manage all their compliance items in one place
@@ -67,6 +81,8 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Cutover: `docs/CUTOVER_RUNBOOK.md`
 - UAT walkthrough: `docs/UAT_WALKTHROUGH_PHASE9.md`
 - Regression matrix: `docs/REGRESSION_UAT_PHASE9.md`
+- Business context: `docs/SPRC_Master_Context.md`
+- SPRC Hub integration reference: `docs/CEO_Hub_Progress.md`
 
 ## Runtime
 - App entry: `src/App.jsx`

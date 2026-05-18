@@ -1,3 +1,5 @@
+import { useState, useEffect, useRef } from 'react'
+
 function Header({
   userName,
   userSubtitle = '',
@@ -5,19 +7,37 @@ function Header({
   onChangePin,
   canChangeOwnPin = false,
   alertCount = 0,
-  isOffline = false
+  isOffline = false,
+  onNotificationsOpen
 }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('touchstart', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+    }
+  }, [menuOpen])
+
+  const firstName = String(userName || '').split(' ')[0]
+
   return (
-    <div className="header">
+    <div className="header" ref={menuRef}>
       <div className="header-brand">
         <img src="/branding/sprc-mark-white.png" alt="SPRC" />
-        <span>SPRC Ops Hub</span>
+        <span>Ops Hub</span>
       </div>
 
       <div className="header-right">
-        {alertCount > 0 && (
-          <span className="alert-dot">{alertCount}</span>
-        )}
         {isOffline && (
           <span style={{
             fontSize: '11px',
@@ -27,25 +47,61 @@ function Header({
             padding: '2px 8px',
             backgroundColor: 'rgba(255,152,0,0.14)'
           }}>
-            Offline: read-only
+            Offline
           </span>
         )}
-        <div className="header-user-block">
-          <span className="header-user">{userName}</span>
-          {userSubtitle && <span className="header-user-subtitle">{userSubtitle}</span>}
-        </div>
-        {canChangeOwnPin && (
-          <button className="btn-secondary-action" onClick={onChangePin}>
-            Change PIN
+        {alertCount > 0 && (
+          <button
+            className="alert-badge-btn"
+            onClick={() => onNotificationsOpen?.()}
+            aria-label={`${alertCount} unread notifications`}
+          >
+            <span className="alert-dot">{alertCount}</span>
           </button>
         )}
-        <button className="btn-lock" onClick={onLogout}>
-          Lock
+        <span className="header-user">{firstName}</span>
+        <button
+          className="header-menu-btn"
+          onClick={() => setMenuOpen(prev => !prev)}
+          aria-label="Menu"
+        >
+          {menuOpen ? '✕' : '☰'}
         </button>
       </div>
+
+      {menuOpen && (
+        <div className="header-dropdown">
+          {userSubtitle && (
+            <div style={{
+              padding: '12px 16px',
+              fontSize: '12px',
+              color: 'rgba(248,245,241,0.65)',
+              borderBottom: '1px solid rgba(248,245,241,0.10)'
+            }}>
+              {userName}
+              <br />
+              <span style={{ opacity: 0.8 }}>{userSubtitle}</span>
+            </div>
+          )}
+          {canChangeOwnPin && (
+            <button
+              className="header-dropdown-item"
+              onClick={() => { setMenuOpen(false); onChangePin() }}
+            >
+              Change PIN
+            </button>
+          )}
+          <button
+            className="header-dropdown-item"
+            onClick={() => { setMenuOpen(false); onLogout() }}
+            style={{ color: '#CD4E42' }}
+          >
+            Lock / Sign Out
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
 export default Header
-

@@ -1,6 +1,6 @@
 # Phase 9 Regression + UAT Checklist
 
-Last updated: 2026-03-01
+Last updated: 2026-05-18
 Owner: Claude Code (engineering run) + Admin/Supervisor (business signoff)
 
 ## Automated Smoke Checks
@@ -40,6 +40,8 @@ This includes ESLint. As of 2026-02-12, lint has existing baseline issues across
 | `npm.cmd run lint` | PASS (warning baseline) | 2026-03-01: one pre-existing warning in `src/hooks/useEocTasks.js` |
 | `npm.cmd run build` | BLOCKED | 2026-03-01: `esbuild` `spawn EPERM` while loading Vite config in this environment |
 | `npm.cmd run smoke:phase9:full` | BLOCKED | 2026-03-01: blocked by the same build `spawn EPERM` issue |
+| `npm.cmd run lint` | PASS | 2026-05-18: clean lint after notification/dashboard/onboarding cleanup |
+| `npm.cmd run build` | PASS | 2026-05-18: Vite production build completed successfully outside sandbox after prior `spawn EPERM` tooling restriction |
 
 ## Blocker Status
 
