@@ -84,11 +84,6 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
   const [drivers, setDrivers] = useState([])
 
-  // ── Real-time data from shared hooks ──
-  const { issues: eocIssues, overdueTasks: eocOverdueTasks } = useScopedIssues({ inEocScope })
-  const { overdueTasks: fleetOverdueTasks, upcomingTasks: fleetUpcomingTasks } = useScopedFleet({ inComplianceScope })
-  const { eocAlerts, fleetAlerts } = useScopedAlerts({ user, inEocScope, inComplianceScope })
-
   // Compliance dashboard summary
   const [complianceItems, setComplianceItems] = useState([])
   const [auditLogs, setAuditLogs] = useState([])
@@ -121,6 +116,12 @@ function SupervisorDashboard({ user, isOffline = false }) {
     inComplianceScope,
     inEocScope
   } = useUserScope(user)
+
+  // ── Real-time data from shared hooks ──
+  // (Must be declared AFTER useUserScope so inEocScope/inComplianceScope are initialized.)
+  const { issues: eocIssues, overdueTasks: eocOverdueTasks } = useScopedIssues({ inEocScope })
+  const { overdueTasks: fleetOverdueTasks, upcomingTasks: fleetUpcomingTasks } = useScopedFleet({ inComplianceScope })
+  const { eocAlerts, fleetAlerts } = useScopedAlerts({ user, inEocScope, inComplianceScope })
 
   const availableTabKeys = isAdmin ? TAB_KEYS : TAB_KEYS.filter(k => k !== 'audit')
   const actorRoleOptions = useMemo(
