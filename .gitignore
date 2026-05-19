@@ -29,3 +29,8 @@ dist-ssr
 
 # Windows
 nul
+
+# Environment variables (keep API keys off GitHub)
+.env
+.env.local
+.env.production
