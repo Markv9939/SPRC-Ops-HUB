@@ -1,8 +1,9 @@
-/* global process */
+﻿/* global process */
 import { initializeApp } from 'firebase/app'
 import {
   getFirestore,
   collection,
+  getDoc,
   getDocs,
   writeBatch,
   doc,
@@ -653,4 +654,5 @@ main().catch((error) => {
   console.error('UAT reset failed:', error)
   process.exit(1)
 })
+
 

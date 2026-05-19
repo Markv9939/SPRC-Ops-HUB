@@ -3,7 +3,7 @@ import { getFirestore } from 'firebase/firestore'
 import { getAuth } from 'firebase/auth'
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDkeTilCGBAxaR9Vz4uiIHsxLENvvRsy7U",
+  apiKey: "AIzaSyDkeTilCGBAXaR9Vz4ujIHsxLENyvRsy7U",
   authDomain: "sprc-tx-l.firebaseapp.com",
   projectId: "sprc-tx-l",
   storageBucket: "sprc-tx-l.firebasestorage.app",
