@@ -331,39 +331,25 @@ function App() {
     }
   }, [user?.id, isOffline])
 
-  // Load transports from Firestore based on user role
+  // Load transports from Firestore — BHT only.
+  // Supervisor/Admin manage their own transport state inside SupervisorDashboard,
+  // so we skip this listener for those roles to avoid duplicate subscriptions.
   useEffect(() => {
     if (!user) return
+    if (isSupervisorRole(user.role) || isAdminRole(user.role)) return
 
     const transportsRef = collection(db, 'transports')
-    let q
-
-    if (isSupervisorRole(user.role) || isAdminRole(user.role)) {
-      // Supervisor and admin see all transports
-      q = query(transportsRef, orderBy('departedAt', 'desc'))
-    } else {
-      // BHT sees only their own transports
-      q = query(
-        transportsRef,
-        where('createdByUserId', '==', user.id),
-        orderBy('departedAt', 'desc')
-      )
-    }
+    const q = query(
+      transportsRef,
+      where('createdByUserId', '==', user.id),
+      orderBy('departedAt', 'desc')
+    )
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      let transportData = snapshot.docs.map(doc => ({
+      const transportData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }))
-
-      if (isSupervisorRole(user.role)) {
-        const scopedSites = getScopedTransportSites(user)
-        if (scopedSites.length > 0) {
-          const siteSet = new Set(scopedSites)
-          transportData = transportData.filter(t => siteSet.has(normalizeTransportSite(t.site)))
-        }
-      }
-
       setTransports(transportData)
     })
 
@@ -644,6 +630,8 @@ function App() {
           onNewTransport={handleNewTransport}
           onLogout={handleLogout}
           userName={user.name}
+          eocAlerts={eocAlerts}
+          fleetAlerts={fleetAlerts}
         />
         <ChangePinModal
           isOpen={isChangePinOpen}

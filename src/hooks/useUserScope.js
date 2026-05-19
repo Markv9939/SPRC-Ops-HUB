@@ -46,17 +46,24 @@ export default function useUserScope(user) {
   const isSupervisor = isSupervisorRole(user?.role)
   const isBht = isBhtRole(user?.role)
 
-  const rawScopes = Array.isArray(user?.authorizedLocations) ? user.authorizedLocations : []
+  // Memoized to prevent new array references on every render, which would
+  // cascade into inTransportScope / inComplianceScope changing every render
+  // and cause all dependent Firestore listeners to re-subscribe continuously.
+  const normalizedScopes = useMemo(
+    () => normalizeScopeValues([
+      ...(user?.site ? [user.site] : []),
+      ...(Array.isArray(user?.authorizedLocations) ? user.authorizedLocations : [])
+    ]),
+    [user]
+  )
 
-  const normalizedScopes = normalizeScopeValues([
-    ...(user?.site ? [user.site] : []),
-    ...rawScopes
-  ])
-
-  const primaryScopes = normalizeScopeValues([
-    ...(Array.isArray(user?.primaryScopes) ? user.primaryScopes : []),
-    ...(user?.site ? [user.site] : [])
-  ])
+  const primaryScopes = useMemo(
+    () => normalizeScopeValues([
+      ...(Array.isArray(user?.primaryScopes) ? user.primaryScopes : []),
+      ...(user?.site ? [user.site] : [])
+    ]),
+    [user]
+  )
 
   const activeBackupGrants = Array.isArray(user?.activeBackupGrants)
     ? user.activeBackupGrants.filter(grant => grant?.state === 'active')

@@ -120,7 +120,9 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
   if (assignmentLoading || tasksLoading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: '#556677' }}>
-        Loading...
+        <div style={{ fontSize: '28px', marginBottom: '12px', opacity: 0.5 }}>⏳</div>
+        <div style={{ fontSize: '15px', fontWeight: 600 }}>Loading your shift...</div>
+        <div style={{ fontSize: '13px', marginTop: '6px', opacity: 0.7 }}>Checking assignments and tasks</div>
       </div>
     )
   }

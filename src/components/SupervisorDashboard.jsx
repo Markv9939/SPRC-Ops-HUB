@@ -17,7 +17,6 @@ import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
 import { writeAuditLog as writeAuditEntry } from '../services/notificationService'
 import useUserScope from '../hooks/useUserScope'
-import useScopedAlerts from '../hooks/useScopedAlerts'
 import useScopedIssues from '../hooks/useScopedIssues'
 import useScopedFleet from '../hooks/useScopedFleet'
 import {
@@ -64,7 +63,7 @@ function normalizeVanIdList(values, fallbackVanId = '') {
   return [...new Set(merged)]
 }
 
-function SupervisorDashboard({ user, isOffline = false }) {
+function SupervisorDashboard({ user, isOffline = false, eocAlerts = [], fleetAlerts = [] }) {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
   const [headerOffset, setHeaderOffset] = useState(64)
@@ -119,9 +118,10 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
   // ── Real-time data from shared hooks ──
   // (Must be declared AFTER useUserScope so inEocScope/inComplianceScope are initialized.)
+  // Note: eocAlerts and fleetAlerts are passed as props from App.jsx (already subscribed there)
+  // to avoid duplicate Firestore listeners.
   const { issues: eocIssues, overdueTasks: eocOverdueTasks } = useScopedIssues({ inEocScope })
   const { overdueTasks: fleetOverdueTasks, upcomingTasks: fleetUpcomingTasks } = useScopedFleet({ inComplianceScope })
-  const { eocAlerts, fleetAlerts } = useScopedAlerts({ user, inEocScope, inComplianceScope })
 
   const availableTabKeys = isAdmin ? TAB_KEYS : TAB_KEYS.filter(k => k !== 'audit')
   const actorRoleOptions = useMemo(
@@ -924,6 +924,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
 
     if (transportStatusFilter === 'completed') {
       filtered = filtered.filter(t => isCompletedTransport(t))
+    } else if (transportStatusFilter === 'active') {
+      filtered = filtered.filter(t => !isCompletedTransport(t))
     }
 
     if (transportReasonFilter) {
@@ -1714,6 +1716,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
               }}
             >
               <option value="all">All Statuses</option>
+              <option value="active">Active Only</option>
               <option value="completed">Completed Only</option>
             </select>
           </div>

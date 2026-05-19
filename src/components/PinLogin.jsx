@@ -122,7 +122,8 @@ function PinLogin({ onLogin }) {
     }
   }
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (pinOverride) => {
+    const currentPin = typeof pinOverride === 'string' ? pinOverride : pin
     if (isLoading) return
 
     if (lockoutUntil && Date.now() < lockoutUntil) {
@@ -131,7 +132,7 @@ function PinLogin({ onLogin }) {
       return
     }
 
-    if (pin.length !== 4) {
+    if (currentPin.length !== 4) {
       setError('PIN must be 4 digits')
       return
     }
@@ -146,7 +147,7 @@ function PinLogin({ onLogin }) {
         return
       }
 
-      const pinHash = await hashPin(pin)
+      const pinHash = await hashPin(currentPin)
       const usersRef = collection(db, 'users')
       const hashQuery = query(usersRef, where('pinHash', '==', pinHash), where('active', '==', true))
       const querySnapshot = await withTimeout(
@@ -309,6 +310,10 @@ function PinLogin({ onLogin }) {
             const val = e.target.value.replace(/\D/g, '')
             setPin(val)
             setError('')
+            // Auto-submit when 4th digit is entered — standard PIN pad behaviour
+            if (val.length === 4) {
+              handleSubmit(val)
+            }
           }}
           onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
           placeholder="Enter 4-digit PIN"
