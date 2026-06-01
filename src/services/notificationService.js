@@ -148,15 +148,15 @@ export function buildFleetAlertPayload(taskDocId, descriptor, status) {
  * Write a transport-completed alert visible to supervisors.
  *
  * @param {{ transport, userName }} params
- *   - transport: { id, site, clients, stops, status }
+ *   - transport: { id, site, clients, status }
  *   - userName: name of the BHT who completed the transport
  */
 export async function createTransportCompletedAlert({ transport, userName }) {
   if (!transport?.id) return
 
   const clientCount = Array.isArray(transport.clients) ? transport.clients.length : 0
-  const stopCount = Array.isArray(transport.stops) ? transport.stops.length : 0
   const site = transport.site || ''
+  const clientLabel = `${clientCount} client${clientCount !== 1 ? 's' : ''}`
 
   await addDoc(collection(db, 'alerts'), {
     type: 'transport_completed',
@@ -164,7 +164,7 @@ export async function createTransportCompletedAlert({ transport, userName }) {
     site,
     locationId: site,
     severity: 'low',
-    message: `${userName || 'BHT'} completed transport — ${clientCount} client${clientCount !== 1 ? 's' : ''}, ${stopCount} stop${stopCount !== 1 ? 's' : ''}, ${site}.`,
+    message: `${userName || 'BHT'} completed transport - ${clientLabel}, ${site}.`,
     bhtName: userName || null,
     ...basePayload()
   })

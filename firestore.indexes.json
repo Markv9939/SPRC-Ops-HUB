@@ -30,6 +30,20 @@
     }
     ,
     {
+      "collectionGroup": "transports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "createdByUserId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "departedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "eocIssues",
       "queryScope": "COLLECTION",
       "fields": [

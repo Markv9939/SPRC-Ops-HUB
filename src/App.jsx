@@ -163,6 +163,8 @@ function App() {
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
   const [isChangePinOpen, setIsChangePinOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
+  const [dashboardNavigationTarget, setDashboardNavigationTarget] = useState(null)
+  const [focusedIssueUpdateId, setFocusedIssueUpdateId] = useState(null)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const bhtHeaderSubtitle = buildBhtHeaderSubtitle(user)
 
@@ -192,7 +194,7 @@ function App() {
     }
   }
 
-  const canChangeOwnPin = Boolean(user) && (isBhtRole(user?.role) || isSupervisorRole(user?.role))
+  const canChangeOwnPin = Boolean(user) && (isBhtRole(user?.role) || isSupervisorRole(user?.role) || isAdminRole(user?.role))
 
   async function handleChangeOwnPin({ currentPin, newPin, confirmPin }) {
     if (!requireOnline('changing PIN')) {
@@ -520,9 +522,48 @@ function App() {
     setPage('home')
   }
 
+  function handleTransportClosed(closedTransport) {
+    if (closedTransport?.id) {
+      setTransports(prev => {
+        const existingIndex = prev.findIndex(transport => transport.id === closedTransport.id)
+        if (existingIndex === -1) return [closedTransport, ...prev]
+        return prev.map(transport => (
+          transport.id === closedTransport.id
+            ? { ...transport, ...closedTransport }
+            : transport
+        ))
+      })
+    }
+    setCurrentTransportId(null)
+    setPage('home')
+  }
+
   function handleContinueTransport(transportId) {
     setCurrentTransportId(transportId)
     setPage('transport')
+  }
+
+  function handleNavigateToIssue(alert) {
+    if (isSupervisorRole(user?.role) || isAdminRole(user?.role)) {
+      setDashboardNavigationTarget({
+        type: 'issue',
+        issueId: alert?.issueId || null,
+        createdAt: Date.now()
+      })
+      return
+    }
+
+    setFocusedIssueUpdateId(alert?.id || null)
+    setPage('home')
+  }
+
+  function handleNavigateToFleet() {
+    if (isSupervisorRole(user?.role) || isAdminRole(user?.role)) {
+      setDashboardNavigationTarget({
+        type: 'fleet',
+        createdAt: Date.now()
+      })
+    }
   }
 
   if (user === null) {
@@ -553,6 +594,7 @@ function App() {
           user={user}
           isOffline={isOffline}
           onClose={handleCloseTransportCard}
+          onTransportClosed={handleTransportClosed}
         />
         <ChangePinModal
           isOpen={isChangePinOpen}
@@ -565,6 +607,8 @@ function App() {
           eocAlerts={eocAlerts}
           fleetAlerts={fleetAlerts}
           issueUpdates={issueUpdates}
+          onNavigateToIssue={handleNavigateToIssue}
+          onNavigateToFleet={handleNavigateToFleet}
         />
         <DialogHost />
         <ToastHost />
@@ -603,6 +647,8 @@ function App() {
           eocAlerts={eocAlerts}
           fleetAlerts={fleetAlerts}
           issueUpdates={issueUpdates}
+          onNavigateToIssue={handleNavigateToIssue}
+          onNavigateToFleet={handleNavigateToFleet}
         />
         <DialogHost />
         <ToastHost />
@@ -632,6 +678,8 @@ function App() {
           userName={user.name}
           eocAlerts={eocAlerts}
           fleetAlerts={fleetAlerts}
+          navigationTarget={dashboardNavigationTarget}
+          onNavigationHandled={() => setDashboardNavigationTarget(null)}
         />
         <ChangePinModal
           isOpen={isChangePinOpen}
@@ -644,6 +692,8 @@ function App() {
           eocAlerts={eocAlerts}
           fleetAlerts={fleetAlerts}
           issueUpdates={issueUpdates}
+          onNavigateToIssue={handleNavigateToIssue}
+          onNavigateToFleet={handleNavigateToFleet}
         />
         <DialogHost />
         <ToastHost />
@@ -671,6 +721,7 @@ function App() {
         user={user}
         transports={transports}
         issueUpdates={issueUpdates}
+        focusedIssueUpdateId={focusedIssueUpdateId}
         onNewTransport={handleNewTransport}
         onContinueTransport={handleContinueTransport}
         onStartEoc={handleStartEoc}
@@ -689,6 +740,8 @@ function App() {
         eocAlerts={eocAlerts}
         fleetAlerts={fleetAlerts}
         issueUpdates={issueUpdates}
+        onNavigateToIssue={handleNavigateToIssue}
+        onNavigateToFleet={handleNavigateToFleet}
       />
       <DialogHost />
       <ToastHost />

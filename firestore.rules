@@ -262,7 +262,7 @@ service cloud.firestore {
     }
 
     function roleCanSelfRotatePin(role) {
-      return roleIsBht(role) || role == 'supervisor';
+      return roleIsBht(role) || role == 'supervisor' || role == 'admin';
     }
 
     function authUidMatchesTargetUser() {

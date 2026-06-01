@@ -9,7 +9,7 @@ function isFourDigitPin(value) {
 
 function roleCanSelfRotate(role) {
   const normalizedRole = normalizeRole(role)
-  return normalizedRole === 'bht' || normalizedRole === 'supervisor'
+  return normalizedRole === 'bht' || normalizedRole === 'supervisor' || normalizedRole === 'admin'
 }
 
 function toError(message) {

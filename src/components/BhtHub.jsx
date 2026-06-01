@@ -1,9 +1,10 @@
+import { useEffect } from 'react'
 import { getShiftById, LOCATIONS } from '../data/eocConstants'
 import useEocAssignments from '../hooks/useEocAssignments'
 import useEocTasks from '../hooks/useEocTasks'
 import { getCurrentCycleDueDate } from '../utils/eocSchedule'
 
-function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinueTransport, onStartEoc }) {
+function BhtHub({ user, transports, issueUpdates = [], focusedIssueUpdateId = null, onNewTransport, onContinueTransport, onStartEoc }) {
   const { assignment, loading: assignmentLoading } = useEocAssignments(user)
   const { tasks, loading: tasksLoading } = useEocTasks(user, assignment)
 
@@ -117,6 +118,15 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
 
   const firstName = String(user?.name || '').split(' ')[0]
 
+  useEffect(() => {
+    if (!focusedIssueUpdateId) return
+    const timerId = setTimeout(() => {
+      const updateEl = document.getElementById(`issue-update-${focusedIssueUpdateId}`)
+      updateEl?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 100)
+    return () => clearTimeout(timerId)
+  }, [focusedIssueUpdateId])
+
   if (assignmentLoading || tasksLoading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: '#556677' }}>
@@ -155,7 +165,12 @@ function BhtHub({ user, transports, issueUpdates = [], onNewTransport, onContinu
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {issueUpdates.map(update => (
-            <div key={update.id} className="issue-update-card">
+            <div
+              key={update.id}
+              id={`issue-update-${update.id}`}
+              className="issue-update-card"
+              style={focusedIssueUpdateId === update.id ? { border: '3px solid #CD4E42' } : undefined}
+            >
               <div className={`issue-update-status ${update.status === 'resolved' ? 'issue-update-status-resolved' : 'issue-update-status-progress'}`}>
                 {update.status === 'resolved' ? 'Resolved' : 'In progress'}
               </div>
