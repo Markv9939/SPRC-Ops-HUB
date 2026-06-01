@@ -194,7 +194,7 @@ function App() {
     }
   }
 
-  const canChangeOwnPin = Boolean(user) && (isBhtRole(user?.role) || isSupervisorRole(user?.role))
+  const canChangeOwnPin = Boolean(user) && (isBhtRole(user?.role) || isSupervisorRole(user?.role) || isAdminRole(user?.role))
 
   async function handleChangeOwnPin({ currentPin, newPin, confirmPin }) {
     if (!requireOnline('changing PIN')) {
