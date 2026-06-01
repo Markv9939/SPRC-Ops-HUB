@@ -3,7 +3,6 @@ import { initializeApp } from 'firebase/app'
 import {
   getFirestore,
   collection,
-  getDoc,
   getDocs,
   writeBatch,
   doc,

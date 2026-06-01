@@ -14,10 +14,11 @@ import { notifySuccess } from '../utils/toast'
 import { createIssueStatusNotification } from '../services/notificationService'
 import EocTemplateManager from './EocTemplateManager'
 
-function SupervisorEocPanel({ user, isOffline = false }) {
+function SupervisorEocPanel({ user, isOffline = false, targetIssueId = null, onTargetIssueHandled }) {
   const [subTab, setSubTab] = useState('template') // template | issues
   const [issues, setIssues] = useState([])
   const [loadingIssues, setLoadingIssues] = useState(true)
+  const [highlightedIssueId, setHighlightedIssueId] = useState(null)
 
   const [filterLocation, setFilterLocation] = useState('all')
   const [filterSeverity, setFilterSeverity] = useState('all')
@@ -34,6 +35,30 @@ function SupervisorEocPanel({ user, isOffline = false }) {
     })
     return unsub
   }, [])
+
+  useEffect(() => {
+    if (!targetIssueId) return
+    const timerId = setTimeout(() => {
+      setSubTab('issues')
+      setFilterLocation('all')
+      setFilterSeverity('all')
+      setFilterIssueStatus('all')
+      setHighlightedIssueId(targetIssueId)
+    }, 0)
+    return () => clearTimeout(timerId)
+  }, [targetIssueId])
+
+  useEffect(() => {
+    if (!highlightedIssueId || loadingIssues) return
+    const timerId = setTimeout(() => {
+      const issueEl = document.getElementById(`eoc-issue-${highlightedIssueId}`)
+      if (issueEl) {
+        issueEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        onTargetIssueHandled?.()
+      }
+    }, 100)
+    return () => clearTimeout(timerId)
+  }, [highlightedIssueId, loadingIssues, onTargetIssueHandled])
 
   const filteredIssues = useMemo(() => {
     return issues.filter((issue) => {
@@ -146,10 +171,12 @@ function SupervisorEocPanel({ user, isOffline = false }) {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {filteredIssues.map(issue => (
-                <div key={issue.id} style={{
+                <div key={issue.id} id={`eoc-issue-${issue.id}`} style={{
                   padding: '14px',
                   borderRadius: '8px',
-                  border: issue.severity === 'high' ? '2px solid #B75E54' : '1px solid rgba(17,47,82,0.14)',
+                  border: highlightedIssueId === issue.id
+                    ? '3px solid #CD4E42'
+                    : (issue.severity === 'high' ? '2px solid #B75E54' : '1px solid rgba(17,47,82,0.14)'),
                   backgroundColor: 'rgba(17,47,82,0.08)'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>

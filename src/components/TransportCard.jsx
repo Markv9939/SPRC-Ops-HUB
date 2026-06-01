@@ -7,8 +7,9 @@ import DestinationAutocomplete from './DestinationAutocomplete'
 import { requireOnline } from '../utils/networkGuard'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
+import { createTransportCompletedAlert, writeAuditLog } from '../services/notificationService'
 
-function TransportCard({ transportId, onClose, isOffline = false }) {
+function TransportCard({ transportId, user, onClose, onTransportClosed, isOffline = false }) {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('open')
   const [departedAt, setDepartedAt] = useState(null)
@@ -224,6 +225,7 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
     setDcPaperworkStatus(result.status)
     setDcPaperworkOtherNote(result.otherNote || '')
     try {
+      const closedAt = new Date()
       await save({
         status: 'closed',
         returnedAt: serverTimestamp(),
@@ -232,6 +234,38 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
         dcPaperworkStatus: result.status,
         dcPaperworkOtherNote: result.otherNote || ''
       })
+      setStatus('closed')
+      const closedTransport = {
+        id: transportId,
+        status: 'closed',
+        departedAt,
+        returnedAt: closedAt,
+        closedAt,
+        clients,
+        reasons,
+        stops,
+        destinations,
+        notes,
+        dcPaperworkStatus: result.status,
+        dcPaperworkOtherNote: result.otherNote || ''
+      }
+      onTransportClosed?.(closedTransport)
+      try {
+        await createTransportCompletedAlert({
+          transport: { ...closedTransport, site: user?.site || user?.location || '' },
+          userName: user?.name
+        })
+        await writeAuditLog({
+          action: 'transport_closed',
+          collectionPath: 'transports',
+          documentId: transportId,
+          reason: `DC paperwork: ${dcStatusLabel(result.status)}`,
+          actorUser: user,
+          extra: { dcPaperworkStatus: result.status }
+        })
+      } catch (notificationError) {
+        console.warn('Transport closed, but follow-up alert/audit write failed:', notificationError)
+      }
       notifySuccess('Transport closed')
       onClose()
     } catch {
@@ -441,9 +475,10 @@ function TransportCard({ transportId, onClose, isOffline = false }) {
               onChange={(e) => setNotes(e.target.value)}
               onBlur={() => { if (!writeLocked) save({ notes }).catch(() => {}) }}
               readOnly={writeLocked}
+              disabled={writeLocked}
               placeholder="Any additional notes..."
               rows={3}
-              style={{ resize: 'vertical', fontFamily: 'inherit' }}
+              style={{ resize: 'vertical', fontFamily: 'inherit', opacity: writeLocked ? 0.72 : 1 }}
             />
           </div>
         </>

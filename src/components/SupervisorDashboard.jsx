@@ -63,7 +63,14 @@ function normalizeVanIdList(values, fallbackVanId = '') {
   return [...new Set(merged)]
 }
 
-function SupervisorDashboard({ user, isOffline = false, eocAlerts = [], fleetAlerts = [] }) {
+function SupervisorDashboard({
+  user,
+  isOffline = false,
+  eocAlerts = [],
+  fleetAlerts = [],
+  navigationTarget = null,
+  onNavigationHandled
+}) {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
   const [headerOffset, setHeaderOffset] = useState(64)
@@ -154,6 +161,18 @@ function SupervisorDashboard({ user, isOffline = false, eocAlerts = [], fleetAle
       setActiveTab('dashboard')
     }
   }, [activeTab, isAdmin])
+
+  useEffect(() => {
+    if (!navigationTarget?.type) return
+    if (navigationTarget.type === 'issue') {
+      setActiveTab('eoc')
+      return
+    }
+    if (navigationTarget.type === 'fleet') {
+      setActiveTab('fleet')
+      onNavigationHandled?.()
+    }
+  }, [navigationTarget, onNavigationHandled])
 
 
 
@@ -1054,7 +1073,6 @@ function SupervisorDashboard({ user, isOffline = false, eocAlerts = [], fleetAle
         'Clients': sanitizeForExcelCell(t.clients?.join(', ') || ''),
         'Reasons': sanitizeForExcelCell(t.reasons?.join(', ') || ''),
         'Destinations': sanitizeForExcelCell(destinationsText),
-        'Arrivals': t.stops?.length || 0,
         'Status': sanitizeForExcelCell(t.status || ''),
         'Overdue': isOverdue(t) ? 'YES' : 'NO',
         'Notes': sanitizeForExcelCell(t.notes || '')
@@ -1219,7 +1237,14 @@ function SupervisorDashboard({ user, isOffline = false, eocAlerts = [], fleetAle
       </div>
 
       {/* EOC Tab */}
-      {activeTab === 'eoc' && <SupervisorEocPanel user={user} isOffline={isOffline} />}
+      {activeTab === 'eoc' && (
+        <SupervisorEocPanel
+          user={user}
+          isOffline={isOffline}
+          targetIssueId={navigationTarget?.type === 'issue' ? navigationTarget.issueId : null}
+          onTargetIssueHandled={onNavigationHandled}
+        />
+      )}
 
       {/* Compliance Tab */}
       {activeTab === 'compliance' && (
@@ -1896,10 +1921,6 @@ function SupervisorDashboard({ user, isOffline = false, eocAlerts = [], fleetAle
                   <div>
                     <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Client(s)</div>
                     <div style={{ fontSize: '14px' }}>{t.clients?.join(', ') || 'None'}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Stops</div>
-                    <div style={{ fontSize: '14px' }}>{t.stops?.length || 0}</div>
                   </div>
                   <div>
                     <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Status</div>

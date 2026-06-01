@@ -316,6 +316,7 @@ export async function syncEocTasksForUserScope(user) {
     batch.update(taskDoc.ref, {
       active: false,
       status: 'ignored',
+      ignoredReason: 'Task no longer matches the current assignment scope.',
       version: getVersionNumber(data) + 1,
       updatedAt: serverTimestamp()
     })
