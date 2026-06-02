@@ -1,0 +1,20 @@
+{
+  "name": "SPRC Ops Hub",
+  "short_name": "Ops Hub",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F8F5F1",
+  "theme_color": "#112F52",
+  "icons": [
+    {
+      "src": "/branding/sprc-mark-red-solid.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/branding/sprc-mark-red-solid.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

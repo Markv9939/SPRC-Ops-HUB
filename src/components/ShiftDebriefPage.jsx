@@ -20,7 +20,8 @@ import {
   createExtraNote,
   upsertSharedClientName
 } from '../services/shiftDebriefService'
-import { requireOnline } from '../utils/networkGuard'
+import { deleteOfflineDraft, getOfflineDraft, saveOfflineDraft } from '../services/offlineStore'
+import { getDebriefDraftId, queueShiftDebriefSubmission } from '../services/offlineSyncService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
 
@@ -472,6 +473,7 @@ export default function ShiftDebriefPage({
   const [items, setItems] = useState([])
   const [dirty, setDirty] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState(null)
+  const [hasLocalDraft, setHasLocalDraft] = useState(false)
   const [manualSaving, setManualSaving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [showGuide, setShowGuide] = useState(() => !localStorage.getItem(GUIDE_KEY))
@@ -496,16 +498,35 @@ export default function ShiftDebriefPage({
   }, [context?.id, debriefId])
 
   useEffect(() => {
-    if (dirty) return
+    if (!context?.id || debriefId) return undefined
+    let cancelled = false
+    ;(async () => {
+      const localDraft = await getOfflineDraft(getDebriefDraftId(context.id)).catch(() => null)
+      if (cancelled || !localDraft?.payload) return
+      setItems(sortItems(localDraft.payload.items || []))
+      setLastSavedAt(localDraft.updatedAtIso ? new Date(localDraft.updatedAtIso) : new Date())
+      setHasLocalDraft(true)
+      setDirty(false)
+    })()
+    return () => { cancelled = true }
+  }, [context?.id, debriefId])
+
+  useEffect(() => {
+    if (dirty || hasLocalDraft) return
     setItems(sortItems(draft?.items || []))
-  }, [draft, dirty])
+  }, [draft, dirty, hasLocalDraft])
 
   useEffect(() => {
     if (!dirty || submitted || mode === 'quick' || !context) return undefined
     const timer = setTimeout(async () => {
       try {
-        if (isOffline) return
-        await saveDebriefDraft(context, items)
+        await saveOfflineDraft(getDebriefDraftId(context.id), 'debrief', { context, items })
+        setHasLocalDraft(true)
+        if (!isOffline) {
+          await saveDebriefDraft(context, items)
+          await deleteOfflineDraft(getDebriefDraftId(context.id))
+          setHasLocalDraft(false)
+        }
         setLastSavedAt(new Date())
         setDirty(false)
       } catch (err) {
@@ -530,13 +551,18 @@ export default function ShiftDebriefPage({
 
   const saveManualDraft = async () => {
     if (!context) return
-    if (!requireOnline('saving shift debrief')) return
     setManualSaving(true)
     try {
-      await saveDebriefDraft(context, items)
+      await saveOfflineDraft(getDebriefDraftId(context.id), 'debrief', { context, items })
+      setHasLocalDraft(true)
+      if (!isOffline) {
+        await saveDebriefDraft(context, items)
+        await deleteOfflineDraft(getDebriefDraftId(context.id))
+        setHasLocalDraft(false)
+      }
       setLastSavedAt(new Date())
       setDirty(false)
-      notifySuccess('Draft saved')
+      notifySuccess(isOffline ? 'Draft saved on this device' : 'Draft saved')
     } finally {
       setManualSaving(false)
     }
@@ -544,7 +570,6 @@ export default function ShiftDebriefPage({
 
   const handleSubmit = async () => {
     if (!context) return
-    if (!requireOnline('submitting shift debrief')) return
     const validItems = items.filter(item => item.note?.trim() && (item.type !== 'client' || item.clientName?.trim()))
     if (validItems.length === 0) {
       alert('Please add at least one complete debrief note before submitting.')
@@ -561,9 +586,18 @@ export default function ShiftDebriefPage({
     }
     setSubmitting(true)
     try {
-      await submitShiftDebrief(context, validItems, user)
+      if (isOffline) {
+        await saveOfflineDraft(getDebriefDraftId(context.id), 'debrief', { context, items: validItems })
+        await queueShiftDebriefSubmission({ context, items: validItems, user })
+        setHasLocalDraft(true)
+        notifySuccess('Shift debrief saved on this device. It will sync when internet returns.')
+      } else {
+        await submitShiftDebrief(context, validItems, user)
+        await deleteOfflineDraft(getDebriefDraftId(context.id))
+        setHasLocalDraft(false)
+        notifySuccess('Shift debrief submitted')
+      }
       setDirty(false)
-      notifySuccess('Shift debrief submitted')
     } finally {
       setSubmitting(false)
     }
@@ -571,7 +605,18 @@ export default function ShiftDebriefPage({
 
   const handleQuickSave = async (item) => {
     if (!context) return
-    if (!requireOnline('saving debrief note')) return
+    if (isOffline) {
+      const localDraft = await getOfflineDraft(getDebriefDraftId(context.id)).catch(() => null)
+      const existingItems = Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items : items
+      const nextItems = [...existingItems, item]
+      await saveOfflineDraft(getDebriefDraftId(context.id), 'debrief', { context, items: nextItems })
+      setItems(sortItems(nextItems))
+      setHasLocalDraft(true)
+      setLastSavedAt(new Date())
+      setQuickStatus('Saved on this device. It will sync when internet returns.')
+      notifySuccess('Debrief note saved on this device')
+      return
+    }
     const result = await saveQuickDebriefNote(context, item, user)
     setQuickStatus(result.mode === 'extra'
       ? 'Saved as an extra note because today\'s debrief is already submitted.'
@@ -634,6 +679,8 @@ export default function ShiftDebriefPage({
                 <div style={styles.metaLine}>
                   {dirty
                     ? 'Unsaved changes'
+                    : hasLocalDraft
+                      ? 'Saved on this device'
                     : lastSavedAt
                       ? `Autosaved ${formatTime(lastSavedAt)}`
                       : draft?.updatedAt
@@ -647,7 +694,7 @@ export default function ShiftDebriefPage({
                 disabled={manualSaving}
                 style={styles.secondaryButton}
               >
-                {manualSaving ? 'Saving...' : 'Save Draft'}
+                {manualSaving ? 'Saving...' : (isOffline ? 'Save Local Draft' : 'Save Draft')}
               </button>
             </div>
 
@@ -673,7 +720,7 @@ export default function ShiftDebriefPage({
             disabled={submitting || items.length === 0}
             style={styles.submitButton}
           >
-            {submitting ? 'Submitting...' : 'Submit For Handoff'}
+            {submitting ? 'Submitting...' : (isOffline ? 'Queue Handoff' : 'Submit For Handoff')}
           </button>
         </div>
       )}

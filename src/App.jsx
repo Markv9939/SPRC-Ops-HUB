@@ -18,6 +18,8 @@ import { syncDerivedAssignmentForUser } from './services/assignmentService'
 import { refreshScopedSessionUser } from './services/accessGrantService'
 import { changeOwnPin } from './services/userPinService'
 import { getAuthPolicy } from './services/authPolicyService'
+import { listAllOfflineActions } from './services/offlineStore'
+import { syncOfflineOutbox } from './services/offlineSyncService'
 import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
 import Onboarding from './components/Onboarding'
@@ -167,12 +169,14 @@ function App() {
     enabled: !!user
   })
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
+  const [offlineOutboxSummary, setOfflineOutboxSummary] = useState({ pending: 0, syncing: 0, failed: 0, needsReview: 0 })
   const [isChangePinOpen, setIsChangePinOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [dashboardNavigationTarget, setDashboardNavigationTarget] = useState(null)
   const [focusedIssueUpdateId, setFocusedIssueUpdateId] = useState(null)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const bhtHeaderSubtitle = buildBhtHeaderSubtitle(user)
+  const pendingSyncCount = offlineOutboxSummary.pending + offlineOutboxSummary.syncing + offlineOutboxSummary.failed
   const bhtDebriefContext = useMemo(
     () => (user && isBhtRole(user.role) ? getBhtDebriefContext(user, new Date(), bhtDebriefAssignment) : null),
     [bhtDebriefAssignment, user]
@@ -253,6 +257,52 @@ function App() {
       window.removeEventListener('offline', handleOffline)
     }
   }, [])
+
+  const refreshOfflineOutboxSummary = useCallback(async () => {
+    try {
+      const actions = await listAllOfflineActions()
+      const next = { pending: 0, syncing: 0, failed: 0, needsReview: 0 }
+      for (const action of Array.isArray(actions) ? actions : []) {
+        if (action.status === 'pending') next.pending += 1
+        if (action.status === 'syncing') next.syncing += 1
+        if (action.status === 'failed') next.failed += 1
+        if (action.status === 'needsReview') next.needsReview += 1
+      }
+      setOfflineOutboxSummary(next)
+    } catch (err) {
+      console.warn('Offline outbox summary unavailable:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!user) return undefined
+    const refreshTimer = window.setTimeout(() => refreshOfflineOutboxSummary(), 0)
+    const handleOutboxChange = () => refreshOfflineOutboxSummary()
+    window.addEventListener('offline-outbox-changed', handleOutboxChange)
+    return () => {
+      window.clearTimeout(refreshTimer)
+      window.removeEventListener('offline-outbox-changed', handleOutboxChange)
+    }
+  }, [refreshOfflineOutboxSummary, user])
+
+  useEffect(() => {
+    if (!user || isOffline) return undefined
+    let cancelled = false
+    ;(async () => {
+      const result = await syncOfflineOutbox()
+      if (cancelled) return
+      await refreshOfflineOutboxSummary()
+      if (result.synced > 0) {
+        notifySuccess(`${result.synced} offline item${result.synced === 1 ? '' : 's'} synced`)
+      }
+      if (result.needsReview > 0) {
+        alert(`${result.needsReview} offline item${result.needsReview === 1 ? '' : 's'} need supervisor review before they can be accepted.`)
+      }
+    })().catch(err => {
+      console.warn('Offline sync failed:', err)
+    })
+    return () => { cancelled = true }
+  }, [isOffline, refreshOfflineOutboxSummary, user])
 
   // Track user activity for auto-lock
   useEffect(() => {
@@ -696,6 +746,8 @@ function App() {
           canChangeOwnPin={canChangeOwnPin}
           alertCount={alertCount}
           isOffline={isOffline}
+          pendingSyncCount={pendingSyncCount}
+          needsReviewCount={offlineOutboxSummary.needsReview}
           onNotificationsOpen={() => setIsNotificationsOpen(true)}
         />
         <TransportCard
@@ -738,6 +790,8 @@ function App() {
           canChangeOwnPin={canChangeOwnPin}
           alertCount={alertCount}
           isOffline={isOffline}
+          pendingSyncCount={pendingSyncCount}
+          needsReviewCount={offlineOutboxSummary.needsReview}
           onNotificationsOpen={() => setIsNotificationsOpen(true)}
         />
         <EocChecklist
@@ -780,6 +834,8 @@ function App() {
           canChangeOwnPin={canChangeOwnPin}
           alertCount={alertCount}
           isOffline={isOffline}
+          pendingSyncCount={pendingSyncCount}
+          needsReviewCount={offlineOutboxSummary.needsReview}
           onNotificationsOpen={() => setIsNotificationsOpen(true)}
         />
         <ShiftDebriefPage
@@ -824,6 +880,8 @@ function App() {
           canChangeOwnPin={canChangeOwnPin}
           alertCount={alertCount}
           isOffline={isOffline}
+          pendingSyncCount={pendingSyncCount}
+          needsReviewCount={offlineOutboxSummary.needsReview}
           onNotificationsOpen={() => setIsNotificationsOpen(true)}
         />
         <SupervisorDashboard
@@ -874,6 +932,8 @@ function App() {
         canChangeOwnPin={canChangeOwnPin}
         alertCount={alertCount}
         isOffline={isOffline}
+        pendingSyncCount={pendingSyncCount}
+        needsReviewCount={offlineOutboxSummary.needsReview}
         onNotificationsOpen={() => setIsNotificationsOpen(true)}
       />
       <BhtHub
