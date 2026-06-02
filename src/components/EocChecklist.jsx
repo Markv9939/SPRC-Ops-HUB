@@ -8,18 +8,16 @@ import {
   onSnapshot,
   orderBy,
   query,
-  runTransaction,
   serverTimestamp,
   setDoc,
   where
 } from 'firebase/firestore'
 import { EOC_HOUSE_TEMPLATE, EOC_VAN_TEMPLATE, LOCATIONS, TEMPLATE_SCOPE_OTC_SHARED, VANS, getTemplateScopeForShift } from '../data/eocConstants'
-import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
-import { updateFleetRuntimeFromEocSubmission } from '../services/fleetRuntimeService'
-import { syncFleetTasksForVehicle } from '../services/fleetTaskEngine'
+import { formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { parseMileageValue } from '../utils/fleetStatus'
-import { buildEocIssueAlertPayload } from '../services/notificationService'
-import { requireOnline } from '../utils/networkGuard'
+import { deleteOfflineDraft, getOfflineDraft, saveOfflineDraft } from '../services/offlineStore'
+import { getEocDraftId, queueEocSubmission, submitEocSubmissionOnline } from '../services/offlineSyncService'
+import { notifySuccess } from '../utils/toast'
 
 const DRAFT_SAVE_DEBOUNCE_MS = 700
 
@@ -417,19 +415,20 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       setDraftStatus('idle')
 
       try {
+        const localDraft = await getOfflineDraft(getEocDraftId(task.id, normalizedUserId)).catch(() => null)
         const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
-        const snap = await getDoc(draftRef)
+        const snap = isOffline ? null : await getDoc(draftRef)
 
         if (cancelled) return
-        if (snap.exists()) {
-          const data = snap.data()
+        const data = localDraft?.payload || (snap?.exists() ? snap.data() : null)
+        if (data) {
           if (data.answers && typeof data.answers === 'object') setAnswers(data.answers)
           if (data.repairDetails && typeof data.repairDetails === 'object') setRepairDetails(data.repairDetails)
           if (typeof data.odometerReading === 'string') setOdometerReading(data.odometerReading)
           if (typeof data.vehicleName === 'string' && data.vehicleName.trim()) setVehicleName(data.vehicleName)
           if (typeof data.vinNumber === 'string' && data.vinNumber.trim()) setVinNumber(data.vinNumber)
           if (typeof data.vehicleId === 'string' && data.vehicleId.trim()) setVehicleId(data.vehicleId)
-          setDraftRestoredNotice('Draft restored')
+          setDraftRestoredNotice(localDraft ? 'Local draft restored' : 'Draft restored')
           setDraftStatus('saved')
         }
       } catch (err) {
@@ -444,7 +443,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
     loadDraft()
     return () => { cancelled = true }
-  }, [task?.id, normalizedUserId])
+  }, [isOffline, task?.id, normalizedUserId])
 
   useEffect(() => {
     if (!draftRestoredNotice) return undefined
@@ -454,7 +453,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
   useEffect(() => {
     if (!task?.id || !normalizedUserId || !draftReady || !isDraftLoadedRef.current) return undefined
-    if (submitting || isOffline) return undefined
+    if (submitting) return undefined
 
     const payload = {
       taskId: task.id,
@@ -486,6 +485,12 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     setDraftStatus('saving')
     draftTimerRef.current = window.setTimeout(async () => {
       try {
+        await saveOfflineDraft(getEocDraftId(task.id, normalizedUserId), 'eoc', payload)
+        if (isOffline) {
+          lastSavedPayloadRef.current = serialized
+          setDraftStatus('local')
+          return
+        }
         const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
         await setDoc(draftRef, {
           ...payload,
@@ -494,6 +499,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         }, { merge: true })
+        await deleteOfflineDraft(getEocDraftId(task.id, normalizedUserId))
         lastSavedPayloadRef.current = serialized
         setDraftStatus('saved')
       } catch (err) {
@@ -548,12 +554,22 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
   const allAnswered = activeTemplate.every(item => Boolean(answers[item.id]))
 
-  const handleSubmit = async () => {
-    if (isOffline) {
-      requireOnline('submitting EOC')
-      return
-    }
+  const buildSubmissionPayload = () => ({
+    task,
+    user,
+    normalizedUserId,
+    normalizedAuthUid,
+    eocType,
+    vehicleId,
+    vehicleName,
+    vinNumber,
+    odometerReading,
+    activeTemplate,
+    answers,
+    repairDetails
+  })
 
+  const handleSubmit = async () => {
     const invalid = findFirstInvalid()
     if (invalid) {
       setError(invalid.message)
@@ -568,161 +584,34 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       return
     }
 
+    if (isOffline) {
+      setSubmitting(true)
+      try {
+        const payload = buildSubmissionPayload()
+        await saveOfflineDraft(getEocDraftId(task.id, normalizedUserId), 'eoc', payload)
+        await queueEocSubmission(payload)
+        notifySuccess('EOC saved on this device. It will sync when internet returns.')
+        onComplete()
+      } catch (err) {
+        console.error('Error queueing offline EOC:', err)
+        setError(err?.message || 'Failed to save offline EOC. Please try again.')
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+
     setSubmitting(true)
     setError('')
 
     try {
-      const normalizedOdometerMileage = eocType === 'van'
-        ? parseMileageValue(odometerReading)
-        : null
-      if (eocType === 'van' && normalizedOdometerMileage === null) {
+      if (eocType === 'van' && parseMileageValue(odometerReading) === null) {
         setError('Odometer reading must be a valid number')
         setSubmitting(false)
         return
       }
 
-      const answersData = activeTemplate.map(item => ({
-        itemId: item.id,
-        label: item.label,
-        category: item.category,
-        status: answers[item.id],
-        ...(answers[item.id] === 'repair'
-          ? { description: repairDetails[item.id]?.description || '' }
-          : {})
-      }))
-
-      const issueItems = answersData.filter(a => a.status === 'repair')
-      let submittedEocSubmissionId = ''
-
-      await runTransaction(db, async (transaction) => {
-        const taskRef = doc(db, 'eocTasks', task.id)
-        const taskSnap = await transaction.get(taskRef)
-        if (!taskSnap.exists()) {
-          throw new Error('Task no longer exists.')
-        }
-
-        const latestTask = taskSnap.data()
-        if (latestTask.status !== 'pending' && latestTask.status !== 'overdue') {
-          throw new Error(`This EOC task is already ${latestTask.status}.`)
-        }
-
-        const latestEligibleUserIds = Array.isArray(latestTask.eligibleUserIds) ? latestTask.eligibleUserIds : []
-        const canCurrentUserComplete = latestEligibleUserIds.length > 0
-          ? latestEligibleUserIds.map(v => String(v || '').trim()).includes(normalizedUserId)
-          : (!latestTask.assigneeUserId || String(latestTask.assigneeUserId || '').trim() === normalizedUserId)
-        if (!canCurrentUserComplete) {
-          throw new Error('You are not eligible to complete this EOC task.')
-        }
-
-        const { nextVersion } = assertExpectedVersion({
-          expectedVersion: getVersionNumber(task),
-          currentVersion: getVersionNumber(latestTask),
-          documentId: task.id,
-          recordLabel: 'EOC Task'
-        })
-
-        const submissionRef = doc(collection(db, 'eocSubmissions'))
-        submittedEocSubmissionId = submissionRef.id
-        transaction.set(submissionRef, {
-          taskId: task.id,
-          locationId: task.locationId,
-          shiftId: task.shiftId,
-          templateScope: task.templateScope || getTemplateScopeForShift(task.shiftId) || TEMPLATE_SCOPE_OTC_SHARED,
-          templateId: task.templateId || null,
-          templateName: task.templateName || '',
-          vanId: task.vanId || null,
-          dueDate: task.dueDate,
-          staffCompleting: user.name,
-          eocType,
-          vehicleId: vehicleId || null,
-          vehicleName: vehicleName.trim(),
-          vinNumber: vinNumber.trim(),
-          odometerReading: eocType === 'van' ? odometerReading.trim() : '',
-          odometerMileage: normalizedOdometerMileage,
-          answers: answersData,
-          issueCount: issueItems.length,
-          submittedByUserId: normalizedUserId,
-          submittedByName: user.name,
-          version: 1,
-          submittedAt: serverTimestamp(),
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        })
-
-        transaction.update(taskRef, {
-          status: 'completed',
-          submissionId: submissionRef.id,
-          completedAt: serverTimestamp(),
-          completedByUserId: normalizedUserId,
-          completedByName: user.name,
-          version: nextVersion,
-          updatedAt: serverTimestamp()
-        })
-
-        if (normalizedAuthUid) {
-          const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
-          const draftSnap = await transaction.get(draftRef)
-          if (draftSnap.exists()) {
-            const draftData = draftSnap.data()
-            if (String(draftData?.draftByAuthUid || '').trim() === normalizedAuthUid) {
-              transaction.delete(draftRef)
-            }
-          }
-        }
-
-        for (const issue of issueItems) {
-          const issueRef = doc(collection(db, 'eocIssues'))
-          transaction.set(issueRef, {
-            taskId: task.id,
-            submissionId: submissionRef.id,
-            locationId: task.locationId,
-            shiftId: task.shiftId,
-            vanId: task.vanId || null,
-            eocType,
-            itemId: issue.itemId,
-            label: issue.label,
-            category: issue.category,
-            description: issue.description,
-            severity: 'medium',
-            status: 'open',
-            reportedByUserId: normalizedUserId,
-            reportedByName: user.name,
-            version: 1,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          })
-
-          const alertRef = doc(collection(db, 'alerts'))
-          transaction.set(alertRef, buildEocIssueAlertPayload({
-            issueRefId: issueRef.id,
-            task,
-            issue: { ...issue, eocType, severity: 'medium' },
-            userName: user.name
-          }))
-        }
-      })
-
-      if (eocType === 'van' && submittedEocSubmissionId) {
-        try {
-          const runtimeResult = await updateFleetRuntimeFromEocSubmission({
-            submissionId: submittedEocSubmissionId,
-            vehicleId: vehicleId || task.vehicleId || null,
-            vanId: task.vanId || null,
-            locationId: task.locationId || null,
-            odometerReading: String(normalizedOdometerMileage)
-          })
-          if (runtimeResult?.updated && runtimeResult.vehicleId) {
-            try {
-              await syncFleetTasksForVehicle({ vehicleId: runtimeResult.vehicleId })
-            } catch (syncErr) {
-              console.warn('Fleet task refresh after EOC submit failed:', syncErr)
-            }
-          }
-        } catch (runtimeErr) {
-          console.warn('Fleet runtime update after EOC submit failed:', runtimeErr)
-        }
-      }
-
+      await submitEocSubmissionOnline(buildSubmissionPayload())
       onComplete()
     } catch (err) {
       console.error('Error submitting EOC:', err)
@@ -787,7 +676,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   }
 
   const draftStatusText = (() => {
-    if (isOffline) return 'Offline: draft autosave paused'
+    if (draftStatus === 'local') return 'Saved on this device'
     if (!draftReady) return 'Preparing draft...'
     if (draftStatus === 'saving') return 'Saving...'
     if (draftStatus === 'saved') return 'Saved just now'
@@ -972,7 +861,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       )}
       {isOffline && (
         <div style={{ color: '#B07A28', fontSize: '13px', marginBottom: '12px', textAlign: 'center', padding: '8px', background: 'rgba(176,122,40,0.06)', borderRadius: '8px' }}>
-          Offline — submission disabled until reconnected
+          Offline - submit will be saved on this device and synced when internet returns.
         </div>
       )}
 
@@ -998,10 +887,10 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         <button
           className={`btn ${allAnswered ? 'btn-finish' : 'btn-disabled'}`}
           onClick={handleSubmit}
-          disabled={submitting || !allAnswered || isOffline}
+          disabled={submitting || !allAnswered}
           style={{ flex: 1, fontSize: '16px', borderRadius: 'var(--radius)', minHeight: '52px' }}
         >
-          {submitting ? 'Submitting...' : `Submit${allAnswered ? '' : ` (${totalItems - answeredCount} left)`}`}
+          {submitting ? 'Submitting...' : `${isOffline ? 'Queue Submit' : 'Submit'}${allAnswered ? '' : ` (${totalItems - answeredCount} left)`}`}
         </button>
       </div>
     </div>

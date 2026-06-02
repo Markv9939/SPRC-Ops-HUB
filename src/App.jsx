@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { db, auth } from './firebase'
-import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, getDocs } from 'firebase/firestore'
+import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, getDocs, doc } from 'firebase/firestore'
 import { signOut } from 'firebase/auth'
 import PinLogin from './components/PinLogin'
 import Header from './components/Header'
 import BhtHub from './components/BhtHub'
 import TransportCard from './components/TransportCard'
 import EocChecklist from './components/EocChecklist'
+import ShiftDebriefPage from './components/ShiftDebriefPage'
 import SupervisorDashboard from './components/SupervisorDashboard'
 import ChangePinModal from './components/ChangePinModal'
 import ToastHost from './components/ToastHost'
@@ -17,6 +18,8 @@ import { syncDerivedAssignmentForUser } from './services/assignmentService'
 import { refreshScopedSessionUser } from './services/accessGrantService'
 import { changeOwnPin } from './services/userPinService'
 import { getAuthPolicy } from './services/authPolicyService'
+import { listAllOfflineActions } from './services/offlineStore'
+import { syncOfflineOutbox } from './services/offlineSyncService'
 import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
 import Onboarding from './components/Onboarding'
@@ -26,6 +29,7 @@ import useUserScope from './hooks/useUserScope'
 import useScopedAlerts from './hooks/useScopedAlerts'
 import { shouldShowOnboarding } from './utils/onboarding'
 import { LOCATIONS, VANS, getShiftLabel } from './data/eocConstants'
+import { DEBRIEF_DRAFTS_COLLECTION, DEBRIEFS_COLLECTION, getBhtDebriefContext } from './services/shiftDebriefService'
 import {
   MAIN_LOCATIONS,
   getAvailableMainLocationsForUser,
@@ -152,21 +156,40 @@ function App() {
   const [transports, setTransports] = useState([])
   const [currentTransportId, setCurrentTransportId] = useState(null)
   const [currentTaskId, setCurrentTaskId] = useState(null)
+  const [currentDebriefId, setCurrentDebriefId] = useState(null)
+  const [currentDebriefMode, setCurrentDebriefMode] = useState('full')
+  const [bhtDebriefAssignment, setBhtDebriefAssignment] = useState(null)
+  const [bhtDebriefSummary, setBhtDebriefSummary] = useState({ available: false, status: 'none', itemCount: 0 })
   // Alert count and issue updates from shared hooks
   const { inEocScope, inComplianceScope } = useUserScope(user)
-  const { eocAlerts, fleetAlerts, unreadCount: alertCount, issueUpdates } = useScopedAlerts({
+  const { eocAlerts, fleetAlerts, debriefAlerts, unreadCount: alertCount, issueUpdates } = useScopedAlerts({
     user,
     inEocScope,
     inComplianceScope,
     enabled: !!user
   })
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
+  const [offlineOutboxSummary, setOfflineOutboxSummary] = useState({ pending: 0, syncing: 0, failed: 0, needsReview: 0 })
   const [isChangePinOpen, setIsChangePinOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [dashboardNavigationTarget, setDashboardNavigationTarget] = useState(null)
   const [focusedIssueUpdateId, setFocusedIssueUpdateId] = useState(null)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const bhtHeaderSubtitle = buildBhtHeaderSubtitle(user)
+  const pendingSyncCount = offlineOutboxSummary.pending + offlineOutboxSummary.syncing + offlineOutboxSummary.failed
+  const bhtDebriefContext = useMemo(
+    () => (user && isBhtRole(user.role) ? getBhtDebriefContext(user, new Date(), bhtDebriefAssignment) : null),
+    [bhtDebriefAssignment, user]
+  )
+  const effectiveBhtDebriefSummary = bhtDebriefContext
+    ? {
+        available: true,
+        status: 'none',
+        itemCount: 0,
+        debriefId: bhtDebriefContext.id,
+        ...(bhtDebriefSummary.debriefId === bhtDebriefContext.id ? bhtDebriefSummary : {})
+      }
+    : { available: false, status: 'none', itemCount: 0 }
 
   useEffect(() => {
     const restoreAlerts = installAlertDialogBridge()
@@ -216,6 +239,8 @@ function App() {
     setTransports([])
     setCurrentTransportId(null)
     setCurrentTaskId(null)
+    setCurrentDebriefId(null)
+    setBhtDebriefAssignment(null)
     localStorage.removeItem('lastActivity')
     signOut(auth).catch((err) => {
       console.warn('Auth signOut skipped:', err)
@@ -232,6 +257,52 @@ function App() {
       window.removeEventListener('offline', handleOffline)
     }
   }, [])
+
+  const refreshOfflineOutboxSummary = useCallback(async () => {
+    try {
+      const actions = await listAllOfflineActions()
+      const next = { pending: 0, syncing: 0, failed: 0, needsReview: 0 }
+      for (const action of Array.isArray(actions) ? actions : []) {
+        if (action.status === 'pending') next.pending += 1
+        if (action.status === 'syncing') next.syncing += 1
+        if (action.status === 'failed') next.failed += 1
+        if (action.status === 'needsReview') next.needsReview += 1
+      }
+      setOfflineOutboxSummary(next)
+    } catch (err) {
+      console.warn('Offline outbox summary unavailable:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!user) return undefined
+    const refreshTimer = window.setTimeout(() => refreshOfflineOutboxSummary(), 0)
+    const handleOutboxChange = () => refreshOfflineOutboxSummary()
+    window.addEventListener('offline-outbox-changed', handleOutboxChange)
+    return () => {
+      window.clearTimeout(refreshTimer)
+      window.removeEventListener('offline-outbox-changed', handleOutboxChange)
+    }
+  }, [refreshOfflineOutboxSummary, user])
+
+  useEffect(() => {
+    if (!user || isOffline) return undefined
+    let cancelled = false
+    ;(async () => {
+      const result = await syncOfflineOutbox()
+      if (cancelled) return
+      await refreshOfflineOutboxSummary()
+      if (result.synced > 0) {
+        notifySuccess(`${result.synced} offline item${result.synced === 1 ? '' : 's'} synced`)
+      }
+      if (result.needsReview > 0) {
+        alert(`${result.needsReview} offline item${result.needsReview === 1 ? '' : 's'} need supervisor review before they can be accepted.`)
+      }
+    })().catch(err => {
+      console.warn('Offline sync failed:', err)
+    })
+    return () => { cancelled = true }
+  }, [isOffline, refreshOfflineOutboxSummary, user])
 
   // Track user activity for auto-lock
   useEffect(() => {
@@ -288,6 +359,8 @@ function App() {
           setTransports([])
           setCurrentTransportId(null)
           setCurrentTaskId(null)
+          setCurrentDebriefId(null)
+          setBhtDebriefAssignment(null)
           return
         }
 
@@ -310,6 +383,8 @@ function App() {
             setTransports([])
             setCurrentTransportId(null)
             setCurrentTaskId(null)
+            setCurrentDebriefId(null)
+            setBhtDebriefAssignment(null)
             return null
           }
 
@@ -357,6 +432,57 @@ function App() {
 
     return () => unsubscribe()
   }, [user])
+
+  useEffect(() => {
+    if (!bhtDebriefContext?.id) {
+      const resetTimer = window.setTimeout(() => {
+        setBhtDebriefSummary({ available: false, status: 'none', itemCount: 0 })
+      }, 0)
+      return () => window.clearTimeout(resetTimer)
+    }
+
+    const initialTimer = window.setTimeout(() => {
+      setBhtDebriefSummary({ available: true, status: 'none', itemCount: 0, debriefId: bhtDebriefContext.id })
+    }, 0)
+    let latestDraft = null
+    let latestSubmitted = null
+    const updateSummary = () => {
+      if (latestSubmitted) {
+        setBhtDebriefSummary({
+          available: true,
+          status: 'submitted',
+          itemCount: Array.isArray(latestSubmitted.items) ? latestSubmitted.items.length : 0,
+          debriefId: latestSubmitted.id
+        })
+        return
+      }
+      if (latestDraft) {
+        setBhtDebriefSummary({
+          available: true,
+          status: 'draft',
+          itemCount: Array.isArray(latestDraft.items) ? latestDraft.items.length : 0,
+          debriefId: latestDraft.id
+        })
+        return
+      }
+      setBhtDebriefSummary({ available: true, status: 'none', itemCount: 0, debriefId: bhtDebriefContext.id })
+    }
+
+    const unsubDraft = onSnapshot(doc(db, DEBRIEF_DRAFTS_COLLECTION, bhtDebriefContext.id), (snap) => {
+      latestDraft = snap.exists() ? { id: snap.id, ...snap.data() } : null
+      updateSummary()
+    })
+    const unsubSubmitted = onSnapshot(doc(db, DEBRIEFS_COLLECTION, bhtDebriefContext.id), (snap) => {
+      latestSubmitted = snap.exists() ? { id: snap.id, ...snap.data() } : null
+      updateSummary()
+    })
+
+    return () => {
+      window.clearTimeout(initialTimer)
+      unsubDraft()
+      unsubSubmitted()
+    }
+  }, [bhtDebriefContext])
 
   // Sync EOC task generation + overdue status on session start.
   useEffect(() => {
@@ -543,6 +669,24 @@ function App() {
     setPage('transport')
   }
 
+  function handleAddDebriefNote() {
+    setCurrentDebriefMode('quick')
+    setCurrentDebriefId(null)
+    setPage('debrief')
+  }
+
+  function handleEditDebrief() {
+    setCurrentDebriefMode('full')
+    setCurrentDebriefId(null)
+    setPage('debrief')
+  }
+
+  function handleDebriefBack() {
+    setCurrentDebriefId(null)
+    setCurrentDebriefMode('full')
+    setPage('home')
+  }
+
   function handleNavigateToIssue(alert) {
     if (isSupervisorRole(user?.role) || isAdminRole(user?.role)) {
       setDashboardNavigationTarget({
@@ -566,6 +710,21 @@ function App() {
     }
   }
 
+  function handleNavigateToDebrief(alert) {
+    if (isSupervisorRole(user?.role) || isAdminRole(user?.role)) {
+      setDashboardNavigationTarget({
+        type: 'debrief',
+        debriefId: alert?.debriefId || null,
+        createdAt: Date.now()
+      })
+      return
+    }
+
+    setCurrentDebriefId(alert?.debriefId || null)
+    setCurrentDebriefMode('full')
+    setPage('debrief')
+  }
+
   if (user === null) {
     return (
       <>
@@ -587,6 +746,8 @@ function App() {
           canChangeOwnPin={canChangeOwnPin}
           alertCount={alertCount}
           isOffline={isOffline}
+          pendingSyncCount={pendingSyncCount}
+          needsReviewCount={offlineOutboxSummary.needsReview}
           onNotificationsOpen={() => setIsNotificationsOpen(true)}
         />
         <TransportCard
@@ -606,9 +767,11 @@ function App() {
           onClose={() => setIsNotificationsOpen(false)}
           eocAlerts={eocAlerts}
           fleetAlerts={fleetAlerts}
+          debriefAlerts={debriefAlerts}
           issueUpdates={issueUpdates}
           onNavigateToIssue={handleNavigateToIssue}
           onNavigateToFleet={handleNavigateToFleet}
+          onNavigateToDebrief={handleNavigateToDebrief}
         />
         <DialogHost />
         <ToastHost />
@@ -627,6 +790,8 @@ function App() {
           canChangeOwnPin={canChangeOwnPin}
           alertCount={alertCount}
           isOffline={isOffline}
+          pendingSyncCount={pendingSyncCount}
+          needsReviewCount={offlineOutboxSummary.needsReview}
           onNotificationsOpen={() => setIsNotificationsOpen(true)}
         />
         <EocChecklist
@@ -646,9 +811,56 @@ function App() {
           onClose={() => setIsNotificationsOpen(false)}
           eocAlerts={eocAlerts}
           fleetAlerts={fleetAlerts}
+          debriefAlerts={debriefAlerts}
           issueUpdates={issueUpdates}
           onNavigateToIssue={handleNavigateToIssue}
           onNavigateToFleet={handleNavigateToFleet}
+          onNavigateToDebrief={handleNavigateToDebrief}
+        />
+        <DialogHost />
+        <ToastHost />
+      </div>
+    )
+  }
+
+  if (page === 'debrief') {
+    return (
+      <div className="app-bg">
+        <Header
+          userName={user.name}
+          userSubtitle={bhtHeaderSubtitle}
+          onLogout={handleLogout}
+          onChangePin={() => setIsChangePinOpen(true)}
+          canChangeOwnPin={canChangeOwnPin}
+          alertCount={alertCount}
+          isOffline={isOffline}
+          pendingSyncCount={pendingSyncCount}
+          needsReviewCount={offlineOutboxSummary.needsReview}
+          onNotificationsOpen={() => setIsNotificationsOpen(true)}
+        />
+        <ShiftDebriefPage
+          user={user}
+          assignment={bhtDebriefAssignment}
+          mode={currentDebriefMode}
+          debriefId={currentDebriefId}
+          isOffline={isOffline}
+          onBack={handleDebriefBack}
+        />
+        <ChangePinModal
+          isOpen={isChangePinOpen}
+          onClose={() => setIsChangePinOpen(false)}
+          onSubmit={handleChangeOwnPin}
+        />
+        <NotificationCenter
+          isOpen={isNotificationsOpen}
+          onClose={() => setIsNotificationsOpen(false)}
+          eocAlerts={eocAlerts}
+          fleetAlerts={fleetAlerts}
+          debriefAlerts={debriefAlerts}
+          issueUpdates={issueUpdates}
+          onNavigateToIssue={handleNavigateToIssue}
+          onNavigateToFleet={handleNavigateToFleet}
+          onNavigateToDebrief={handleNavigateToDebrief}
         />
         <DialogHost />
         <ToastHost />
@@ -668,6 +880,8 @@ function App() {
           canChangeOwnPin={canChangeOwnPin}
           alertCount={alertCount}
           isOffline={isOffline}
+          pendingSyncCount={pendingSyncCount}
+          needsReviewCount={offlineOutboxSummary.needsReview}
           onNotificationsOpen={() => setIsNotificationsOpen(true)}
         />
         <SupervisorDashboard
@@ -678,6 +892,7 @@ function App() {
           userName={user.name}
           eocAlerts={eocAlerts}
           fleetAlerts={fleetAlerts}
+          debriefAlerts={debriefAlerts}
           navigationTarget={dashboardNavigationTarget}
           onNavigationHandled={() => setDashboardNavigationTarget(null)}
         />
@@ -691,9 +906,11 @@ function App() {
           onClose={() => setIsNotificationsOpen(false)}
           eocAlerts={eocAlerts}
           fleetAlerts={fleetAlerts}
+          debriefAlerts={debriefAlerts}
           issueUpdates={issueUpdates}
           onNavigateToIssue={handleNavigateToIssue}
           onNavigateToFleet={handleNavigateToFleet}
+          onNavigateToDebrief={handleNavigateToDebrief}
         />
         <DialogHost />
         <ToastHost />
@@ -715,6 +932,8 @@ function App() {
         canChangeOwnPin={canChangeOwnPin}
         alertCount={alertCount}
         isOffline={isOffline}
+        pendingSyncCount={pendingSyncCount}
+        needsReviewCount={offlineOutboxSummary.needsReview}
         onNotificationsOpen={() => setIsNotificationsOpen(true)}
       />
       <BhtHub
@@ -725,6 +944,10 @@ function App() {
         onNewTransport={handleNewTransport}
         onContinueTransport={handleContinueTransport}
         onStartEoc={handleStartEoc}
+        onAddDebriefNote={handleAddDebriefNote}
+        onEditDebrief={handleEditDebrief}
+        onDebriefAssignmentChange={setBhtDebriefAssignment}
+        debriefSummary={effectiveBhtDebriefSummary}
       />
       {showOnboarding && (
         <Onboarding onComplete={() => setShowOnboarding(false)} />
@@ -739,9 +962,11 @@ function App() {
         onClose={() => setIsNotificationsOpen(false)}
         eocAlerts={eocAlerts}
         fleetAlerts={fleetAlerts}
+        debriefAlerts={debriefAlerts}
         issueUpdates={issueUpdates}
         onNavigateToIssue={handleNavigateToIssue}
         onNavigateToFleet={handleNavigateToFleet}
+        onNavigateToDebrief={handleNavigateToDebrief}
       />
       <DialogHost />
       <ToastHost />

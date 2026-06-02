@@ -50,6 +50,7 @@ function severityLabel(severity) {
 }
 
 function alertTypeIcon(type) {
+  if (type === 'shift_debrief_submitted') return 'D'
   if (type === 'eoc_issue') return '⚠️'
   if (type === 'eoc_issue_update') return '📋'
   if (type?.startsWith('fleet_')) return '🚐'
@@ -58,6 +59,7 @@ function alertTypeIcon(type) {
 }
 
 function alertTypeLabel(type) {
+  if (type === 'shift_debrief_submitted') return 'Shift Debrief'
   if (type === 'eoc_issue') return 'EOC Issue'
   if (type === 'eoc_issue_update') return 'Issue Update'
   if (type === 'fleet_overdue') return 'Fleet Overdue'
@@ -73,6 +75,7 @@ function alertTypeLabel(type) {
 const FILTER_TABS = [
   { key: 'all', label: 'All' },
   { key: 'eoc', label: 'EOC' },
+  { key: 'debriefs', label: 'Debriefs' },
   { key: 'fleet', label: 'Fleet' },
   { key: 'updates', label: 'Updates' }
 ]
@@ -80,6 +83,7 @@ const FILTER_TABS = [
 function filterAlerts(alerts, filterKey) {
   if (filterKey === 'all') return alerts
   if (filterKey === 'eoc') return alerts.filter(a => a.type === 'eoc_issue')
+  if (filterKey === 'debriefs') return alerts.filter(a => a.type === 'shift_debrief_submitted')
   if (filterKey === 'fleet') return alerts.filter(a => a.type?.startsWith('fleet_') || a.type === 'transport_completed')
   if (filterKey === 'updates') return alerts.filter(a => a.type === 'eoc_issue_update')
   return alerts
@@ -94,9 +98,11 @@ export default function NotificationCenter({
   onClose,
   eocAlerts = [],
   fleetAlerts = [],
+  debriefAlerts = [],
   issueUpdates = [],
   onNavigateToIssue,
   onNavigateToFleet,
+  onNavigateToDebrief,
   isMobile = false
 }) {
   const [activeFilter, setActiveFilter] = useState('all')
@@ -104,7 +110,7 @@ export default function NotificationCenter({
   const panelRef = useRef(null)
 
   // Combine all alerts into a single sorted list
-  const allAlerts = [...eocAlerts, ...fleetAlerts, ...issueUpdates]
+  const allAlerts = [...eocAlerts, ...fleetAlerts, ...debriefAlerts, ...issueUpdates]
     .sort((a, b) => {
       const tsA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0
       const tsB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0
@@ -185,6 +191,8 @@ export default function NotificationCenter({
   const handleAlertAction = (alert) => {
     if (alert.type === 'eoc_issue' || alert.type === 'eoc_issue_update') {
       onNavigateToIssue?.(alert)
+    } else if (alert.type === 'shift_debrief_submitted') {
+      onNavigateToDebrief?.(alert)
     } else if (alert.type?.startsWith('fleet_') || alert.type === 'transport_completed') {
       onNavigateToFleet?.(alert)
     }
@@ -289,7 +297,9 @@ export default function NotificationCenter({
                   >
                     {alert.type === 'eoc_issue' || alert.type === 'eoc_issue_update'
                       ? 'View Issue'
-                      : 'View Details'}
+                      : alert.type === 'shift_debrief_submitted'
+                        ? 'View Debrief'
+                        : 'View Details'}
                   </button>
                   <button
                     onClick={() => handleDismiss(alert.id)}

@@ -12,6 +12,7 @@ import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { isFleetAlertType } from '../utils/fleetStatus'
+import { isBhtRole } from '../utils/orgModel'
 
 function tsMs(ts) {
   if (!ts) return 0
@@ -28,6 +29,7 @@ function tsMs(ts) {
 export default function useScopedAlerts({ user, inEocScope, inComplianceScope, enabled = true }) {
   const [eocAlerts, setEocAlerts] = useState([])
   const [fleetAlerts, setFleetAlerts] = useState([])
+  const [debriefAlerts, setDebriefAlerts] = useState([])
   const [issueUpdates, setIssueUpdates] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
 
@@ -54,11 +56,34 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
       scopedFleet.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
       setFleetAlerts(scopedFleet)
 
+      // Shift debrief alerts
+      const scopedDebriefs = rows
+        .filter(a => a.type === 'shift_debrief_submitted')
+        .filter(a => (
+          inEocScope(a.locationId)
+          && (
+            isBhtRole(user.role)
+              ? a.targetUserId === user.id
+              : !a.targetUserId
+          )
+        ))
+      scopedDebriefs.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
+      setDebriefAlerts(scopedDebriefs)
+
       // Total badge count (eoc issues + fleet)
       const count = rows.reduce((acc, alertDoc) => {
         const type = String(alertDoc.type || '')
         if (type === 'eoc_issue' && inEocScope(alertDoc.locationId)) return acc + 1
         if (isFleetAlertType(type) && inComplianceScope(alertDoc.mainLocation || alertDoc.locationId || '')) return acc + 1
+        if (
+          type === 'shift_debrief_submitted'
+          && inEocScope(alertDoc.locationId)
+          && (
+            isBhtRole(user.role)
+              ? alertDoc.targetUserId === user.id
+              : !alertDoc.targetUserId
+          )
+        ) return acc + 1
         return acc
       }, 0)
       setUnreadCount(count)
@@ -90,6 +115,7 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
   return {
     eocAlerts,
     fleetAlerts,
+    debriefAlerts,
     issueUpdates,
     unreadCount
   }

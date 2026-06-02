@@ -4,10 +4,11 @@ import { doc, getDoc, updateDoc, deleteDoc, serverTimestamp, setDoc, increment }
 import DCPaperworkModal from './DCCheckModal'
 import ClientAutocomplete from './ClientAutocomplete'
 import DestinationAutocomplete from './DestinationAutocomplete'
-import { requireOnline } from '../utils/networkGuard'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
 import { createTransportCompletedAlert, writeAuditLog } from '../services/notificationService'
+import { deleteOfflineDraft, getOfflineDraft, saveOfflineDraft } from '../services/offlineStore'
+import { getTransportDraftId, queueTransportClose, queueTransportUpdate } from '../services/offlineSyncService'
 
 function TransportCard({ transportId, user, onClose, onTransportClosed, isOffline = false }) {
   const [loading, setLoading] = useState(true)
@@ -22,10 +23,12 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
   const [dcPaperworkStatus, setDcPaperworkStatus] = useState(null)
   const [dcPaperworkOtherNote, setDcPaperworkOtherNote] = useState('')
   const [showMore, setShowMore] = useState(false)
+  const [version, setVersion] = useState(1)
+  const [hasLocalDraft, setHasLocalDraft] = useState(false)
 
   const normalizedStatus = String(status || '').trim().toLowerCase()
   const submitLocked = normalizedStatus === 'returned' || normalizedStatus === 'closed'
-  const writeLocked = submitLocked || isOffline
+  const writeLocked = submitLocked
   const activeTransport = normalizedStatus === 'open' || normalizedStatus === 'arrived'
 
   const reasonOptions = [
@@ -54,6 +57,21 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
         setNotes(d.notes || '')
         setDcPaperworkStatus(d.dcPaperworkStatus || null)
         setDcPaperworkOtherNote(d.dcPaperworkOtherNote || '')
+        setVersion(Number(d.version || 1))
+
+        const localDraft = await getOfflineDraft(getTransportDraftId(transportId)).catch(() => null)
+        const local = localDraft?.payload?.snapshot
+        if (local) {
+          setStatus(String(local.status || d.status || 'open').trim().toLowerCase())
+          setClients(local.clients || [])
+          setReasons(local.reasons || [])
+          setStops(local.stops || [])
+          setDestinations(local.destinations || [])
+          setNotes(local.notes || '')
+          setDcPaperworkStatus(local.dcPaperworkStatus || null)
+          setDcPaperworkOtherNote(local.dcPaperworkOtherNote || '')
+          setHasLocalDraft(true)
+        }
       }
     } catch (err) {
       console.error('Error loading transport:', err)
@@ -74,9 +92,45 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
 
   const norm = (t) => t.toLowerCase().trim().replace(/\s+/g, ' ')
 
+  const buildSnapshot = (updates = {}) => ({
+    status,
+    departedAt,
+    clients,
+    reasons,
+    stops,
+    destinations,
+    notes,
+    dcPaperworkStatus,
+    dcPaperworkOtherNote,
+    ...updates
+  })
+
   const save = async (updates) => {
     if (!transportId) return
     if (writeLocked) return
+    const snapshot = buildSnapshot({ ...updates, notes: updates?.notes ?? notes })
+    if (isOffline) {
+      const offlineUpdates = {
+        clients,
+        reasons,
+        stops,
+        destinations,
+        dcPaperworkStatus,
+        dcPaperworkOtherNote,
+        ...updates,
+        notes: updates?.notes ?? notes
+      }
+      await saveOfflineDraft(getTransportDraftId(transportId), 'transport', { snapshot, expectedVersion: version })
+      await queueTransportUpdate({
+        transportId,
+        expectedVersion: version,
+        updates: offlineUpdates,
+        snapshot,
+        user
+      })
+      setHasLocalDraft(true)
+      return
+    }
     try {
       await updateDoc(doc(db, 'transports', transportId), {
         ...updates,
@@ -84,6 +138,9 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
         version: increment(1),
         updatedAt: serverTimestamp()
       })
+      setVersion(prev => Number(prev || 1) + 1)
+      setHasLocalDraft(false)
+      await deleteOfflineDraft(getTransportDraftId(transportId))
     } catch (err) {
       console.error('Save error:', err)
       const message = err?.message || 'Failed to save transport changes.'
@@ -94,10 +151,6 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
   }
 
   const blockIfLocked = () => {
-    if (isOffline) {
-      requireOnline('editing transport records')
-      return true
-    }
     if (!submitLocked) return false
     if (normalizedStatus === 'closed') {
       alert('This transport is finished and locked from further edits.')
@@ -108,6 +161,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
   }
 
   const touchClientUsage = async (clientName) => {
+    if (isOffline) return
     try {
       const n = norm(clientName)
       await setDoc(
@@ -224,8 +278,58 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
     setShowDCPaperwork(false)
     setDcPaperworkStatus(result.status)
     setDcPaperworkOtherNote(result.otherNote || '')
+    const closedAt = new Date()
+    const closeUpdates = {
+      status: 'closed',
+      returnedAt: closedAt.toISOString(),
+      closedAt: closedAt.toISOString(),
+      destinations,
+      dcPaperworkStatus: result.status,
+      dcPaperworkOtherNote: result.otherNote || ''
+    }
+    const closedTransport = {
+      id: transportId,
+      status: 'closed',
+      departedAt,
+      returnedAt: closedAt,
+      closedAt,
+      clients,
+      reasons,
+      stops,
+      destinations,
+      notes,
+      dcPaperworkStatus: result.status,
+      dcPaperworkOtherNote: result.otherNote || ''
+    }
+
+    if (isOffline) {
+      setStatus('closed')
+      const snapshot = buildSnapshot(closeUpdates)
+      await saveOfflineDraft(getTransportDraftId(transportId), 'transport', { snapshot, expectedVersion: version })
+      await queueTransportClose({
+        transportId,
+        expectedVersion: version,
+        updates: {
+          destinations,
+          dcPaperworkStatus: result.status,
+          dcPaperworkOtherNote: result.otherNote || '',
+          clients,
+          reasons,
+          stops,
+          notes
+        },
+        closedTransport,
+        user,
+        auditReason: `DC paperwork: ${dcStatusLabel(result.status)}`
+      })
+      setHasLocalDraft(true)
+      onTransportClosed?.(closedTransport)
+      notifySuccess('Transport saved on this device. It will sync when internet returns.')
+      onClose()
+      return
+    }
+
     try {
-      const closedAt = new Date()
       await save({
         status: 'closed',
         returnedAt: serverTimestamp(),
@@ -235,20 +339,6 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
         dcPaperworkOtherNote: result.otherNote || ''
       })
       setStatus('closed')
-      const closedTransport = {
-        id: transportId,
-        status: 'closed',
-        departedAt,
-        returnedAt: closedAt,
-        closedAt,
-        clients,
-        reasons,
-        stops,
-        destinations,
-        notes,
-        dcPaperworkStatus: result.status,
-        dcPaperworkOtherNote: result.otherNote || ''
-      }
       onTransportClosed?.(closedTransport)
       try {
         await createTransportCompletedAlert({
@@ -309,7 +399,12 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
       {/* Status messages */}
       {isOffline && (
         <div style={{ marginBottom: '12px', fontSize: '13px', color: '#B07A28', textAlign: 'center', padding: '8px', background: 'rgba(176,122,40,0.08)', borderRadius: '8px' }}>
-          Offline - changes disabled until connection is restored
+          Offline - transport changes will be saved on this device and synced when internet returns.
+        </div>
+      )}
+      {hasLocalDraft && (
+        <div style={{ marginBottom: '12px', fontSize: '13px', color: '#2F7D57', textAlign: 'center', padding: '8px', background: 'rgba(47,125,87,0.08)', borderRadius: '8px' }}>
+          Pending sync
         </div>
       )}
       {submitLocked && (

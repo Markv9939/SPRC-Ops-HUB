@@ -4,11 +4,27 @@ import useEocAssignments from '../hooks/useEocAssignments'
 import useEocTasks from '../hooks/useEocTasks'
 import { getCurrentCycleDueDate } from '../utils/eocSchedule'
 
-function BhtHub({ user, transports, issueUpdates = [], focusedIssueUpdateId = null, onNewTransport, onContinueTransport, onStartEoc }) {
+function BhtHub({
+  user,
+  transports,
+  issueUpdates = [],
+  focusedIssueUpdateId = null,
+  onNewTransport,
+  onContinueTransport,
+  onStartEoc,
+  onAddDebriefNote,
+  onEditDebrief,
+  onDebriefAssignmentChange,
+  debriefSummary = { available: false, status: 'none', itemCount: 0 }
+}) {
   const { assignment, loading: assignmentLoading } = useEocAssignments(user)
   const { tasks, loading: tasksLoading } = useEocTasks(user, assignment)
 
   const hasAssignment = !!assignment
+
+  useEffect(() => {
+    onDebriefAssignmentChange?.(assignment || null)
+  }, [assignment, onDebriefAssignmentChange])
 
   const toDate = (value) => {
     if (!value) return null
@@ -111,6 +127,10 @@ function BhtHub({ user, transports, issueUpdates = [], focusedIssueUpdateId = nu
 
   const vanStatus = getEocStatus(vanTask, vanCompleted)
   const houseStatus = getEocStatus(houseTask, houseCompleted)
+  const debriefAvailable = debriefSummary?.available === true
+  const debriefSubmitted = debriefSummary?.status === 'submitted'
+  const debriefHasDraft = debriefSummary?.status === 'draft'
+  const debriefItemCount = debriefSummary?.itemCount || 0
 
   const locationLabel = hasAssignment
     ? (LOCATIONS.find(l => l.id === assignment.locationId)?.label || assignment.locationId || '')
@@ -221,6 +241,52 @@ function BhtHub({ user, transports, issueUpdates = [], focusedIssueUpdateId = nu
           </div>
           <div className="hub-action-chevron">›</div>
         </button>
+
+        {/* Shift Debrief quick note */}
+        {debriefAvailable && (
+          <button
+            className="hub-action-row hub-action-row-ready"
+            onClick={onAddDebriefNote}
+          >
+            <div className="hub-action-icon hub-action-icon-house">
+              {'+'}
+            </div>
+            <div className="hub-action-info">
+              <div className="hub-action-title">
+                Add Debrief Note
+              </div>
+              <div className="hub-action-subtitle">
+                Quick client or handoff note
+              </div>
+            </div>
+            <div className="hub-action-chevron">&gt;</div>
+          </button>
+        )}
+
+        {/* Shift Debrief editor/viewer */}
+        {debriefAvailable && (
+          <button
+            className={`hub-action-row ${debriefSubmitted ? 'hub-action-row-done' : (debriefHasDraft ? 'hub-action-row-ready' : '')}`}
+            onClick={onEditDebrief}
+          >
+            <div className="hub-action-icon hub-action-icon-house">
+              {'D'}
+            </div>
+            <div className="hub-action-info">
+              <div className="hub-action-title">
+                {debriefSubmitted ? 'View Shift Debrief' : 'Edit Shift Debrief'}
+              </div>
+              <div className={`hub-action-subtitle ${debriefSubmitted ? 'hub-action-subtitle-done' : ''}`}>
+                {debriefSubmitted
+                  ? 'Submitted and locked'
+                  : debriefHasDraft
+                    ? `${debriefItemCount} draft item${debriefItemCount === 1 ? '' : 's'}`
+                    : 'No draft notes yet'}
+              </div>
+            </div>
+            <div className="hub-action-chevron">&gt;</div>
+          </button>
+        )}
 
         {/* Van EOC action */}
         {hasAssignment && (

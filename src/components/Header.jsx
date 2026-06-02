@@ -8,6 +8,8 @@ function Header({
   canChangeOwnPin = false,
   alertCount = 0,
   isOffline = false,
+  pendingSyncCount = 0,
+  needsReviewCount = 0,
   onNotificationsOpen
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -48,6 +50,30 @@ function Header({
             backgroundColor: 'rgba(255,152,0,0.14)'
           }}>
             Offline
+          </span>
+        )}
+        {pendingSyncCount > 0 && (
+          <span style={{
+            fontSize: '11px',
+            color: '#2F7D57',
+            border: '1px solid rgba(47,125,87,0.34)',
+            borderRadius: '999px',
+            padding: '2px 8px',
+            backgroundColor: 'rgba(47,125,87,0.12)'
+          }}>
+            Sync {pendingSyncCount}
+          </span>
+        )}
+        {needsReviewCount > 0 && (
+          <span style={{
+            fontSize: '11px',
+            color: '#9D362E',
+            border: '1px solid rgba(205,78,66,0.34)',
+            borderRadius: '999px',
+            padding: '2px 8px',
+            backgroundColor: 'rgba(205,78,66,0.12)'
+          }}>
+            Review {needsReviewCount}
           </span>
         )}
         {alertCount > 0 && (
