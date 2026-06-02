@@ -10,6 +10,7 @@ import PropertiesPanel from './PropertiesPanel'
 import FleetPanel from './FleetPanel'
 import CintasPanel from './CintasPanel'
 import AccessGrantPanel from './AccessGrantPanel'
+import SupervisorDebriefsPanel from './SupervisorDebriefsPanel'
 import { LOCATIONS, VANS, getShiftLabel, getShiftOptionsForMainLocation, isShiftAllowedForMainLocation } from '../data/eocConstants'
 import { hashPin } from '../utils/pinHash'
 import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../services/assignmentService'
@@ -43,6 +44,7 @@ import {
 const TAB_LABELS = {
   dashboard: '\u{1F4C8} Dashboard',
   transports: '\u{1F4CA} Transports',
+  debriefs: 'Debriefs',
   users: '\u{1F465} Users',
   eoc: '\u{1F527} EOC',
   compliance: '\u{1F4CB} Compliance',
@@ -87,6 +89,7 @@ function SupervisorDashboard({
   const [selectedDriver, setSelectedDriver] = useState('')
   const [overdueFilter, setOverdueFilter] = useState('all')
   const [clientSearch, setClientSearch] = useState('')
+  const [focusedDebriefId, setFocusedDebriefId] = useState(null)
 
   const [drivers, setDrivers] = useState([])
 
@@ -170,6 +173,11 @@ function SupervisorDashboard({
     }
     if (navigationTarget.type === 'fleet') {
       setActiveTab('fleet')
+      onNavigationHandled?.()
+    }
+    if (navigationTarget.type === 'debrief') {
+      setFocusedDebriefId(navigationTarget.debriefId || null)
+      setActiveTab('debriefs')
       onNavigationHandled?.()
     }
   }, [navigationTarget, onNavigationHandled])
@@ -1243,6 +1251,14 @@ function SupervisorDashboard({
           isOffline={isOffline}
           targetIssueId={navigationTarget?.type === 'issue' ? navigationTarget.issueId : null}
           onTargetIssueHandled={onNavigationHandled}
+        />
+      )}
+
+      {/* Debriefs Tab */}
+      {activeTab === 'debriefs' && (
+        <SupervisorDebriefsPanel
+          inEocScope={inEocScope}
+          focusedDebriefId={focusedDebriefId}
         />
       )}
 

@@ -423,6 +423,41 @@ service cloud.firestore {
       return mode in ['mileage', 'date'];
     }
 
+    function validDebriefLocationId(locationId) {
+      return locationId in ['mesquite', 'lone_mountain'];
+    }
+
+    function validShiftDebriefBase(data) {
+      return data.locationId is string
+        && validDebriefLocationId(data.locationId)
+        && data.shiftId is string
+        && validShiftForLocation(data.locationId, data.shiftId)
+        && data.dateKey is string
+        && data.mainLocation == 'OTC'
+        && validVersionField(data);
+    }
+
+    function validShiftDebriefDraftData(data) {
+      return validShiftDebriefBase(data)
+        && data.draftByUserId is string
+        && data.draftByName is string
+        && data.draftByAuthUid is string
+        && data.status in ['draft', 'submitted']
+        && (!('items' in data) || data.items is list)
+        && (!('itemCount' in data) || data.itemCount is int);
+    }
+
+    function validSubmittedShiftDebriefData(data) {
+      return validShiftDebriefBase(data)
+        && data.status == 'submitted'
+        && data.submittedByUserId is string
+        && data.submittedByName is string
+        && data.items is list
+        && data.extraNotes is list
+        && data.confirmation is map
+        && data.confirmed is bool;
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if true;
@@ -614,6 +649,57 @@ service cloud.firestore {
         && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
     }
 
+    // Shift Debrief Drafts (BHT-owned autosave before handoff submit)
+    match /shiftDebriefDrafts/{docId} {
+      allow read: if request.auth != null
+        && resource.data.draftByAuthUid == request.auth.uid
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
+
+      allow create: if request.auth != null
+        && validShiftDebriefDraftData(request.resource.data)
+        && request.resource.data.draftByAuthUid == request.auth.uid
+        && authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId);
+
+      allow update: if request.auth != null
+        && validShiftDebriefDraftData(request.resource.data)
+        && resource.data.draftByAuthUid == request.auth.uid
+        && request.resource.data.draftByAuthUid == resource.data.draftByAuthUid
+        && request.resource.data.draftByUserId == resource.data.draftByUserId
+        && authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId)
+        && createdAtUnchanged();
+
+      allow delete: if false;
+    }
+
+    // Shift Debriefs (submitted handoff records)
+    match /shiftDebriefs/{docId} {
+      allow read: if authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
+
+      allow create: if validSubmittedShiftDebriefData(request.resource.data)
+        && authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId);
+
+      allow update: if validSubmittedShiftDebriefData(request.resource.data)
+        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.items == resource.data.items
+        && request.resource.data.submittedByUserId == resource.data.submittedByUserId
+        && request.resource.data.submittedByName == resource.data.submittedByName
+        && request.resource.data.locationId == resource.data.locationId
+        && request.resource.data.shiftId == resource.data.shiftId
+        && request.resource.data.dateKey == resource.data.dateKey
+        && request.resource.data.mainLocation == resource.data.mainLocation
+        && request.resource.data
+          .diff(resource.data)
+          .affectedKeys()
+          .hasOnly(['extraNotes', 'confirmation', 'confirmed', 'updatedAt', 'version'])
+        && request.resource.data.extraNotes is list
+        && request.resource.data.extraNotes.size() >= resource.data.extraNotes.size()
+        && request.resource.data.confirmation is map
+        && createdAtUnchanged();
+
+      allow delete: if false;
+    }
+
     // EOC Issues
     match /eocIssues/{docId} {
       allow read: if true;
@@ -652,7 +738,16 @@ service cloud.firestore {
         && validVersionField(request.resource.data);
 
       allow update: if createdAtUnchanged()
-        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+        && (
+          authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+          || (
+            authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId)
+            && request.resource.data
+              .diff(resource.data)
+              .affectedKeys()
+              .hasOnly(['read', 'updatedAt', 'version'])
+          )
+        )
         && validVersionField(request.resource.data);
       allow delete: if authRoleAndLocationAllowed(['admin'], resource.data.locationId);
     }
