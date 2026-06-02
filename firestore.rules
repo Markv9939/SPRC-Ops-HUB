@@ -458,6 +458,15 @@ service cloud.firestore {
         && data.confirmed is bool;
     }
 
+    function debriefDraftAuthUidAllowed(data) {
+      return hasLegacyAuthSession()
+        || (
+          request.auth != null
+          && data.draftByAuthUid is string
+          && data.draftByAuthUid == request.auth.uid
+        );
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if true;
@@ -651,18 +660,19 @@ service cloud.firestore {
 
     // Shift Debrief Drafts (BHT-owned autosave before handoff submit)
     match /shiftDebriefDrafts/{docId} {
-      allow read: if request.auth != null
-        && resource.data.draftByAuthUid == request.auth.uid
+      allow get: if authRoleAllowed(['bht', 'tech', 'supervisor', 'admin']);
+      allow list: if false;
+
+      allow read: if debriefDraftAuthUidAllowed(resource.data)
         && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
 
-      allow create: if request.auth != null
-        && validShiftDebriefDraftData(request.resource.data)
-        && request.resource.data.draftByAuthUid == request.auth.uid
+      allow create: if validShiftDebriefDraftData(request.resource.data)
+        && debriefDraftAuthUidAllowed(request.resource.data)
         && authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId);
 
-      allow update: if request.auth != null
-        && validShiftDebriefDraftData(request.resource.data)
-        && resource.data.draftByAuthUid == request.auth.uid
+      allow update: if validShiftDebriefDraftData(request.resource.data)
+        && debriefDraftAuthUidAllowed(resource.data)
+        && debriefDraftAuthUidAllowed(request.resource.data)
         && request.resource.data.draftByAuthUid == resource.data.draftByAuthUid
         && request.resource.data.draftByUserId == resource.data.draftByUserId
         && authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId)
@@ -673,7 +683,8 @@ service cloud.firestore {
 
     // Shift Debriefs (submitted handoff records)
     match /shiftDebriefs/{docId} {
-      allow read: if authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
+      allow get: if authRoleAllowed(['bht', 'tech', 'supervisor', 'admin']);
+      allow list: if authRoleAllowed(['supervisor', 'admin']);
 
       allow create: if validSubmittedShiftDebriefData(request.resource.data)
         && authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId);
