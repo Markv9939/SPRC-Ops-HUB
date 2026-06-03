@@ -77,6 +77,14 @@ export async function deleteOfflineDraft(id) {
   })
 }
 
+export async function deleteOfflineAction(id) {
+  if (!id) return
+  await withStore(OUTBOX_STORE, 'readwrite', (store) => {
+    store.delete(id)
+  })
+  window.dispatchEvent(new CustomEvent('offline-outbox-changed'))
+}
+
 export async function queueOfflineAction({ id, type, payload }) {
   const nowIso = new Date().toISOString()
   const action = {
@@ -124,8 +132,8 @@ export async function updateOfflineAction(id, patch) {
   return updated
 }
 
-export function markOfflineActionSynced(id) {
-  return updateOfflineAction(id, { status: 'synced', lastError: '' })
+export function markOfflineActionSynced(id, patch = {}) {
+  return updateOfflineAction(id, { status: 'synced', lastError: '', ...patch })
 }
 
 export function markOfflineActionNeedsReview(id, message) {

@@ -18,8 +18,15 @@ import { syncDerivedAssignmentForUser } from './services/assignmentService'
 import { refreshScopedSessionUser } from './services/accessGrantService'
 import { changeOwnPin } from './services/userPinService'
 import { getAuthPolicy } from './services/authPolicyService'
-import { listAllOfflineActions } from './services/offlineStore'
-import { syncOfflineOutbox } from './services/offlineSyncService'
+import { listAllOfflineActions, saveOfflineDraft } from './services/offlineStore'
+import {
+  OFFLINE_ACTION_TYPES,
+  getTransportDraftId,
+  isLocalTransportId,
+  makeLocalTransportId,
+  queueTransportCreate,
+  syncOfflineOutbox
+} from './services/offlineSyncService'
 import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
 import Onboarding from './components/Onboarding'
@@ -59,6 +66,64 @@ function getScopedTransportSites(user) {
   if (!user) return []
   if (isAdminRole(user.role)) return Array.from(TRANSPORT_SITES)
   return getAvailableMainLocationsForUser(user).filter(v => TRANSPORT_SITES.has(v))
+}
+
+function toTransportDate(value) {
+  if (!value) return null
+  if (typeof value?.toDate === 'function') return value.toDate()
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function transportSortTime(transport) {
+  return (
+    toTransportDate(transport?.departedAt)
+    || toTransportDate(transport?.createdAt)
+    || toTransportDate(transport?.updatedAt)
+    || new Date(0)
+  ).getTime()
+}
+
+function mergeTransportLists(onlineTransports, localTransports) {
+  const byId = new Map()
+  for (const transport of Array.isArray(onlineTransports) ? onlineTransports : []) {
+    if (transport?.id) byId.set(transport.id, transport)
+  }
+  for (const transport of Array.isArray(localTransports) ? localTransports : []) {
+    if (transport?.id) byId.set(transport.id, transport)
+  }
+  return Array.from(byId.values()).sort((a, b) => transportSortTime(b) - transportSortTime(a))
+}
+
+function getPendingLocalTransports(actions, sessionUser) {
+  const allowedStatuses = new Set(['pending', 'failed', 'syncing', 'needsReview'])
+  return (Array.isArray(actions) ? actions : [])
+    .filter(action => action.type === OFFLINE_ACTION_TYPES.TRANSPORT_CREATE && allowedStatuses.has(action.status))
+    .map(action => {
+      const snapshot = action.payload?.snapshot || action.payload?.transport || null
+      const localTransportId = action.payload?.localTransportId || ''
+      if (!snapshot || !localTransportId) return null
+      if (String(snapshot.createdByUserId || action.payload?.user?.id || '') !== String(sessionUser?.id || '')) return null
+      return {
+        id: localTransportId,
+        ...snapshot,
+        localOnly: true,
+        pendingSync: true
+      }
+    })
+    .filter(Boolean)
+}
+
+function getSyncedTransportIdForLocal(actions, localTransportId) {
+  if (!localTransportId) return ''
+  const match = (Array.isArray(actions) ? actions : []).find(action => (
+    action.type === OFFLINE_ACTION_TYPES.TRANSPORT_CREATE
+    && action.status === 'synced'
+    && action.payload?.localTransportId === localTransportId
+    && action.syncedDocumentId
+  ))
+  return match?.syncedDocumentId || ''
 }
 
 async function promptForTransportSite(sites, defaultSite) {
@@ -274,6 +339,30 @@ function App() {
     }
   }, [])
 
+  const loadPendingLocalTransports = useCallback(async () => {
+    if (!user || !isBhtRole(user.role)) return []
+    const actions = await listAllOfflineActions()
+    return getPendingLocalTransports(actions, user)
+  }, [user])
+
+  const refreshPendingLocalTransports = useCallback(async () => {
+    if (!user || !isBhtRole(user.role)) return
+    try {
+      const actions = await listAllOfflineActions()
+      const localTransports = getPendingLocalTransports(actions, user)
+      const syncedTransportId = getSyncedTransportIdForLocal(actions, currentTransportId)
+      if (syncedTransportId) {
+        setCurrentTransportId(syncedTransportId)
+      }
+      setTransports(prev => mergeTransportLists(
+        prev.filter(transport => !transport?.localOnly && !isLocalTransportId(transport?.id)),
+        localTransports
+      ))
+    } catch (err) {
+      console.warn('Pending offline transports unavailable:', err)
+    }
+  }, [currentTransportId, user])
+
   useEffect(() => {
     if (!user) return undefined
     const refreshTimer = window.setTimeout(() => refreshOfflineOutboxSummary(), 0)
@@ -284,6 +373,17 @@ function App() {
       window.removeEventListener('offline-outbox-changed', handleOutboxChange)
     }
   }, [refreshOfflineOutboxSummary, user])
+
+  useEffect(() => {
+    if (!user || !isBhtRole(user.role)) return undefined
+    const refreshTimer = window.setTimeout(() => refreshPendingLocalTransports(), 0)
+    const handleOutboxChange = () => refreshPendingLocalTransports()
+    window.addEventListener('offline-outbox-changed', handleOutboxChange)
+    return () => {
+      window.clearTimeout(refreshTimer)
+      window.removeEventListener('offline-outbox-changed', handleOutboxChange)
+    }
+  }, [refreshPendingLocalTransports, user])
 
   useEffect(() => {
     if (!user || isOffline) return undefined
@@ -422,16 +522,28 @@ function App() {
       orderBy('departedAt', 'desc')
     )
 
+    let cancelled = false
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const transportData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }))
-      setTransports(transportData)
+      ;(async () => {
+        const localTransports = await loadPendingLocalTransports()
+        if (!cancelled) {
+          setTransports(mergeTransportLists(transportData, localTransports))
+        }
+      })().catch(err => {
+        console.warn('Pending offline transports unavailable:', err)
+        if (!cancelled) setTransports(transportData)
+      })
     })
 
-    return () => unsubscribe()
-  }, [user])
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [loadPendingLocalTransports, user])
 
   useEffect(() => {
     if (!bhtDebriefContext?.id) {
@@ -565,8 +677,6 @@ function App() {
   }
 
   async function handleNewTransport() {
-    if (!requireOnline('starting a new transport')) return
-
     try {
       const activeTransport = getActiveTransport()
       if (activeTransport) {
@@ -595,6 +705,46 @@ function App() {
       }
 
       if (!TRANSPORT_SITES.has(transportSite)) return
+
+      if (isOffline) {
+        const localTransportId = makeLocalTransportId()
+        const now = new Date()
+        const newTransport = {
+          id: localTransportId,
+          site: transportSite,
+          createdByUserId: user.id,
+          createdByName: user.name,
+          status: 'open',
+          version: 1,
+          departedAt: now,
+          clients: [],
+          reasons: [],
+          stops: [],
+          destinations: [],
+          notes: '',
+          createdAt: now,
+          updatedAt: now,
+          localOnly: true,
+          pendingSync: true
+        }
+
+        await saveOfflineDraft(getTransportDraftId(localTransportId), 'transport', {
+          snapshot: newTransport,
+          expectedVersion: 1,
+          localOnly: true
+        })
+        await queueTransportCreate({
+          localTransportId,
+          snapshot: newTransport,
+          user
+        })
+        localStorage.setItem(lastSiteKey, transportSite)
+        setTransports(prev => mergeTransportLists(prev, [newTransport]))
+        setCurrentTransportId(localTransportId)
+        setPage('transport')
+        notifySuccess('Transport saved on this device')
+        return
+      }
 
       // Write-layer guard (client-enforced in free-tier v1): prevent duplicate active transport creation.
       const userTransportSnapshot = await getDocs(
@@ -659,6 +809,14 @@ function App() {
             : transport
         ))
       })
+    }
+    setCurrentTransportId(null)
+    setPage('home')
+  }
+
+  function handleTransportCancelled(transportId) {
+    if (transportId) {
+      setTransports(prev => prev.filter(transport => transport.id !== transportId))
     }
     setCurrentTransportId(null)
     setPage('home')
@@ -756,6 +914,7 @@ function App() {
           isOffline={isOffline}
           onClose={handleCloseTransportCard}
           onTransportClosed={handleTransportClosed}
+          onTransportCancelled={handleTransportCancelled}
         />
         <ChangePinModal
           isOpen={isChangePinOpen}
