@@ -1091,6 +1091,431 @@ body {
   margin-left: 4px;
 }
 
+/* --- Shift Debrief section-tab editor --- */
+.debrief-page {
+  max-width: 680px;
+  background: #F0EBE3;
+  min-height: calc(100vh - var(--header-height));
+}
+
+.debrief-page .transport-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #1B2D4F;
+}
+
+.debrief-edit-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.debrief-tabbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 5px;
+  border-radius: 14px;
+  border: 1px solid rgba(27,45,79,0.10);
+  background: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(27,45,79,0.08);
+}
+
+.debrief-tab {
+  min-width: 0;
+  min-height: 74px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  align-items: center;
+  justify-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.debrief-tab:active {
+  transform: scale(0.98);
+}
+
+.debrief-tab-active {
+  background: #1B2D4F;
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(27,45,79,0.25);
+}
+
+.debrief-tab-active.debrief-tab-slate {
+  background: #3D5A80;
+  box-shadow: 0 2px 8px rgba(61,90,128,0.25);
+}
+
+.debrief-tab-icon {
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.debrief-tab-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.debrief-tab-badge {
+  min-width: 22px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0 7px;
+  background: #E8E2DA;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.debrief-tab-active .debrief-tab-badge {
+  background: rgba(255,255,255,0.20);
+  color: #FFFFFF;
+}
+
+.debrief-section-panel {
+  background: #FFFFFF;
+  border: 1px solid rgba(27,45,79,0.10);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(27,45,79,0.08);
+  animation: debriefFadeIn 0.15s ease-out both;
+}
+
+.debrief-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 16px;
+  background: #1B2D4F;
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.debrief-section-header-slate {
+  background: #3D5A80;
+}
+
+.debrief-client-area {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 58vh;
+  overflow-y: auto;
+  padding: 12px 16px;
+  background: #FFFFFF;
+}
+
+.debrief-client-card {
+  position: relative;
+  padding: 12px 14px 13px;
+  border: 1.5px solid #E8E2DA;
+  border-left: 4px solid #3D7A5C;
+  border-radius: 8px;
+  background: #F8F7F5;
+}
+
+.debrief-client-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.debrief-client-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #1B2D4F;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.debrief-icon-remove,
+.debrief-note-remove {
+  border: none;
+  background: transparent;
+  color: #999999;
+  cursor: pointer;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 4px;
+}
+
+.debrief-icon-remove:hover,
+.debrief-note-remove:hover {
+  color: #C0392B;
+}
+
+.debrief-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.debrief-note-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 24px;
+  align-items: start;
+  gap: 6px;
+}
+
+.debrief-note-dash {
+  color: #BBBBBB;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.debrief-note-edit {
+  width: 100%;
+  min-height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #444444;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  resize: vertical;
+  outline: none;
+  overflow-wrap: anywhere;
+}
+
+.debrief-note-edit:focus {
+  background: #FFFFFF;
+  box-shadow: 0 0 0 3px rgba(61,122,92,0.10);
+}
+
+.debrief-add-note-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.debrief-note-input {
+  min-height: 40px;
+  padding: 9px 11px;
+  border-width: 1.5px;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.debrief-note-input:focus {
+  border-color: #3D7A5C;
+  box-shadow: 0 0 0 3px rgba(61,122,92,0.10);
+}
+
+.debrief-note-button {
+  min-height: 40px;
+  border: none;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #3D7A5C;
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.debrief-add-client-zone {
+  position: sticky;
+  bottom: 0;
+  padding: 14px 16px 18px;
+  border-top: 2px solid #DDE4F0;
+  background: #EEF2F8;
+}
+
+.debrief-add-client-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+  color: #4A6FA5;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.debrief-add-client-plus {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #4A6FA5;
+  color: #FFFFFF;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.debrief-add-client-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.debrief-client-input {
+  min-height: 42px;
+  padding: 10px 12px;
+  border-color: #B8C9DD;
+  font-size: 14px;
+}
+
+.debrief-client-input:focus {
+  border-color: #4A6FA5;
+  box-shadow: 0 0 0 3px rgba(74,111,165,0.12);
+}
+
+.debrief-add-client-button {
+  min-height: 42px;
+  border: none;
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #4A6FA5;
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.debrief-general-body {
+  padding: 14px 16px 18px;
+  background: #FFFFFF;
+}
+
+.debrief-general-textarea {
+  min-height: 120px;
+  resize: vertical;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.debrief-general-textarea:focus {
+  border-color: #3D5A80;
+  box-shadow: 0 0 0 3px rgba(61,90,128,0.12);
+}
+
+.debrief-empty-state {
+  padding: 28px 12px 30px;
+  text-align: center;
+  color: #667085;
+}
+
+.debrief-empty-icon {
+  margin-bottom: 8px;
+  font-size: 26px;
+  font-weight: 900;
+  opacity: 0.42;
+}
+
+.debrief-empty-title {
+  color: #556070;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.debrief-empty-hint {
+  margin-top: 4px;
+  color: #8992A0;
+  font-size: 13px;
+}
+
+.debrief-editor-actions {
+  position: sticky;
+  bottom: 8px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(27,45,79,0.12);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.96);
+  box-shadow: 0 4px 14px rgba(27,45,79,0.12);
+}
+
+.debrief-save-status {
+  color: #556070;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.debrief-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.debrief-input-shake {
+  animation: debriefShake 0.18s ease-in-out;
+  border-color: #C0392B !important;
+}
+
+@keyframes debriefFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes debriefShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+@media (max-width: 600px) {
+  .debrief-page {
+    padding: 12px;
+  }
+
+  .debrief-client-area {
+    max-height: 54vh;
+    padding: 12px;
+  }
+
+  .debrief-add-client-zone,
+  .debrief-general-body {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .debrief-add-note-row,
+  .debrief-add-client-row,
+  .debrief-editor-actions,
+  .debrief-action-buttons {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .debrief-editor-actions .btn {
+    width: 100%;
+  }
+}
+
 /* --- EOC: progress header --- */
 .eoc-progress-header {
   display: flex;

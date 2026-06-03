@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../firebase'
 import ClientAutocomplete from './ClientAutocomplete'
@@ -50,6 +50,51 @@ function sortItems(items) {
   return [...(Array.isArray(items) ? items : [])].sort((a, b) => (
     String(a.createdAtIso || '').localeCompare(String(b.createdAtIso || ''))
   ))
+}
+
+const GENERAL_EDIT_SECTION_ID = 'notes_discrepancies'
+
+const EDIT_SECTION_TABS = [
+  {
+    id: 'medication_health_updates',
+    label: 'Medication',
+    icon: 'Rx',
+    header: 'Medication & Health Updates',
+    emptyTitle: 'No medication clients yet',
+    emptyHint: 'Use the form below to add the first one',
+    tone: 'navy'
+  },
+  {
+    id: 'client_progress_concerns',
+    label: 'Progress',
+    icon: 'List',
+    header: 'Client Progress & Concerns',
+    emptyTitle: 'No progress clients yet',
+    emptyHint: 'Use the form below to add the first one',
+    tone: 'navy'
+  },
+  {
+    id: 'general',
+    label: 'General',
+    icon: 'Note',
+    header: 'General Handoff',
+    tone: 'slate'
+  }
+]
+
+function normalizeClientKey(value) {
+  return String(value || 'Client').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function getClientGroupKey(sectionId, clientName) {
+  return `${sectionId}:${normalizeClientKey(clientName)}`
+}
+
+function makeUiId(prefix = 'draft') {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return `${prefix}_${crypto.randomUUID()}`
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
 function ShiftDebriefGuide({ onComplete }) {
@@ -242,65 +287,6 @@ function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = fa
   )
 }
 
-function DraftItemEditor({ item, onChange, onRemove }) {
-  const sections = item.type === 'client' ? CLIENT_NOTE_SECTIONS : GENERAL_HANDOFF_SECTIONS
-
-  const update = (patch) => {
-    onChange({
-      ...item,
-      ...patch,
-      updatedAtIso: new Date().toISOString()
-    })
-  }
-
-  return (
-    <div style={styles.itemCard}>
-      <div style={styles.itemHeader}>
-        <div>
-          <div style={styles.itemType}>{item.type === 'client' ? 'Client Note' : 'General Handoff'}</div>
-          <div style={styles.itemTime}>{formatTime(item.createdAtIso)}</div>
-        </div>
-        <button type="button" onClick={onRemove} style={styles.secondaryDangerButton}>
-          Remove
-        </button>
-      </div>
-
-      {item.type === 'client' && (
-        <div>
-          <div style={styles.fieldLabel}>Client</div>
-          <input
-            className="input"
-            value={item.clientName || ''}
-            onChange={(e) => update({ clientName: e.target.value })}
-            onBlur={() => upsertSharedClientName(item.clientName).catch(err => console.warn('Client save skipped:', err))}
-            placeholder="First name, last initial optional"
-          />
-        </div>
-      )}
-
-      <div>
-        <div style={styles.fieldLabel}>Section</div>
-        <select className="input" value={item.section} onChange={(e) => update({ section: e.target.value })}>
-          {sections.map(section => (
-            <option key={section.id} value={section.id}>{section.label}</option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <div style={styles.fieldLabel}>Note</div>
-        <textarea
-          className="input"
-          value={item.note || ''}
-          onChange={(e) => update({ note: e.target.value })}
-          rows={4}
-          style={styles.textarea}
-        />
-      </div>
-    </div>
-  )
-}
-
 function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
   const [extraNoteText, setExtraNoteText] = useState('')
   const [confirmation, setConfirmation] = useState(() => debrief?.confirmation || createEmptyConfirmation())
@@ -427,6 +413,407 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
         >
           {savingConfirmation ? 'Saving...' : 'Save Confirmation'}
         </button>
+      </div>
+    </div>
+  )
+}
+
+function buildClientGroups(items, emptyClients) {
+  const groupsBySection = EDIT_SECTION_TABS
+    .filter(tab => tab.id !== 'general')
+    .reduce((acc, tab) => ({ ...acc, [tab.id]: [] }), {})
+  const groupLookup = new Map()
+
+  items.forEach((item, index) => {
+    if (item?.type !== 'client' || !groupsBySection[item.section]) return
+    const clientName = item.clientName?.trim() || 'Client'
+    const groupKey = getClientGroupKey(item.section, clientName)
+
+    if (!groupLookup.has(groupKey)) {
+      const group = {
+        key: groupKey,
+        sectionId: item.section,
+        clientName,
+        notes: [],
+        emptyOnly: false
+      }
+      groupLookup.set(groupKey, group)
+      groupsBySection[item.section].push(group)
+    }
+
+    groupLookup.get(groupKey).notes.push({ item, index })
+  })
+
+  emptyClients.forEach(client => {
+    if (!groupsBySection[client.sectionId]) return
+    const groupKey = getClientGroupKey(client.sectionId, client.clientName)
+    if (groupLookup.has(groupKey)) return
+
+    const group = {
+      key: groupKey,
+      sectionId: client.sectionId,
+      clientName: client.clientName,
+      notes: [],
+      emptyOnly: true
+    }
+    groupLookup.set(groupKey, group)
+    groupsBySection[client.sectionId].push(group)
+  })
+
+  return groupsBySection
+}
+
+function SectionTabsDraftEditor({
+  items,
+  user,
+  onItemsChange,
+  statusText,
+  onSaveDraft,
+  manualSaving,
+  isOffline,
+  onSubmit,
+  submitting
+}) {
+  const [activeTab, setActiveTab] = useState(EDIT_SECTION_TABS[0].id)
+  const [emptyClients, setEmptyClients] = useState([])
+  const [clientDrafts, setClientDrafts] = useState({})
+  const [noteDrafts, setNoteDrafts] = useState({})
+  const [invalidClientSections, setInvalidClientSections] = useState({})
+  const clientInputRefs = useRef({})
+  const noteInputRefs = useRef({})
+  const generalTextareaRef = useRef(null)
+
+  const clientGroups = useMemo(
+    () => buildClientGroups(items, emptyClients),
+    [emptyClients, items]
+  )
+
+  const generalItems = useMemo(
+    () => items.filter(item => item?.type === 'general'),
+    [items]
+  )
+
+  const generalText = generalItems
+    .map(item => item.note || '')
+    .filter(Boolean)
+    .join('\n\n')
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (activeTab === 'general') {
+        generalTextareaRef.current?.focus()
+        return
+      }
+      clientInputRefs.current[activeTab]?.focus()
+    }, 80)
+    return () => clearTimeout(timer)
+  }, [activeTab])
+
+  const applyItemsChange = (updater) => {
+    onItemsChange(updater)
+  }
+
+  const focusNoteInput = (groupKey) => {
+    setTimeout(() => noteInputRefs.current[groupKey]?.focus(), 80)
+  }
+
+  const getExistingClientNames = (sectionId) => (
+    (clientGroups[sectionId] || []).map(group => normalizeClientKey(group.clientName))
+  )
+
+  const addClient = (sectionId) => {
+    const rawName = clientDrafts[sectionId] || ''
+    const clientName = rawName.trim()
+    if (!clientName) {
+      setInvalidClientSections(prev => ({ ...prev, [sectionId]: true }))
+      clientInputRefs.current[sectionId]?.focus()
+      return
+    }
+
+    const normalized = normalizeClientKey(clientName)
+    const existingNames = getExistingClientNames(sectionId)
+    const groupKey = getClientGroupKey(sectionId, clientName)
+
+    if (existingNames.includes(normalized)) {
+      setClientDrafts(prev => ({ ...prev, [sectionId]: '' }))
+      focusNoteInput(groupKey)
+      return
+    }
+
+    setEmptyClients(prev => [
+      ...prev,
+      { id: makeUiId('client'), sectionId, clientName }
+    ])
+    setClientDrafts(prev => ({ ...prev, [sectionId]: '' }))
+    setInvalidClientSections(prev => ({ ...prev, [sectionId]: false }))
+    upsertSharedClientName(clientName).catch(err => console.warn('Client save skipped:', err))
+    focusNoteInput(groupKey)
+  }
+
+  const addNote = (group) => {
+    const noteText = (noteDrafts[group.key] || '').trim()
+    if (!noteText) {
+      focusNoteInput(group.key)
+      return
+    }
+
+    const item = createDebriefItem({
+      type: 'client',
+      section: group.sectionId,
+      clientName: group.clientName,
+      note: noteText,
+      user
+    })
+
+    applyItemsChange(prev => [...prev, item])
+    setNoteDrafts(prev => ({ ...prev, [group.key]: '' }))
+    focusNoteInput(group.key)
+  }
+
+  const updateNote = (itemIndex, note) => {
+    applyItemsChange(prev => prev.map((item, index) => (
+      index === itemIndex
+        ? { ...item, note, updatedAtIso: new Date().toISOString() }
+        : item
+    )))
+  }
+
+  const removeNote = (itemIndex, groupKey) => {
+    applyItemsChange(prev => prev.filter((_, index) => index !== itemIndex))
+    focusNoteInput(groupKey)
+  }
+
+  const removeClient = (group) => {
+    applyItemsChange(prev => prev.filter(item => !(
+      item?.type === 'client'
+      && item.section === group.sectionId
+      && getClientGroupKey(group.sectionId, item.clientName || 'Client') === group.key
+    )))
+    setEmptyClients(prev => prev.filter(client => getClientGroupKey(client.sectionId, client.clientName) !== group.key))
+    setNoteDrafts(prev => {
+      const next = { ...prev }
+      delete next[group.key]
+      return next
+    })
+    clientInputRefs.current[group.sectionId]?.focus()
+  }
+
+  const updateGeneralText = (value) => {
+    applyItemsChange(prev => {
+      const existingGeneral = prev.find(item => item?.type === 'general')
+      const otherItems = prev.filter(item => item?.type !== 'general')
+      const trimmedValue = value.trim()
+
+      if (!trimmedValue) {
+        return otherItems
+      }
+
+      const nextGeneral = existingGeneral
+        ? {
+            ...existingGeneral,
+            section: existingGeneral.section || GENERAL_EDIT_SECTION_ID,
+            clientName: '',
+            note: value,
+            updatedAtIso: new Date().toISOString()
+          }
+        : createDebriefItem({
+            type: 'general',
+            section: GENERAL_EDIT_SECTION_ID,
+            clientName: '',
+            note: value,
+            user
+          })
+
+      return [...otherItems, nextGeneral]
+    })
+  }
+
+  const renderTabBadge = (tab) => {
+    if (tab.id === 'general') return generalText.trim() ? '\u2713' : '-'
+    return clientGroups[tab.id]?.length || 0
+  }
+
+  const activeTabConfig = EDIT_SECTION_TABS.find(tab => tab.id === activeTab) || EDIT_SECTION_TABS[0]
+  const activeGroups = clientGroups[activeTabConfig.id] || []
+  const canSubmit = items.some(item => item.note?.trim() && (item.type !== 'client' || item.clientName?.trim()))
+
+  return (
+    <div className="debrief-edit-shell">
+      <div className="debrief-tabbar" role="tablist" aria-label="Debrief sections">
+        {EDIT_SECTION_TABS.map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            className={`debrief-tab ${activeTab === tab.id ? 'debrief-tab-active' : ''} ${tab.tone === 'slate' ? 'debrief-tab-slate' : ''}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            <span className="debrief-tab-icon">{tab.icon}</span>
+            <span className="debrief-tab-label">{tab.label}</span>
+            <span className="debrief-tab-badge">{renderTabBadge(tab)}</span>
+          </button>
+        ))}
+      </div>
+
+      <div key={activeTabConfig.id} className="debrief-section-panel">
+        <div className={`debrief-section-header ${activeTabConfig.tone === 'slate' ? 'debrief-section-header-slate' : ''}`}>
+          <span>{activeTabConfig.icon}</span>
+          <span>{activeTabConfig.header}</span>
+        </div>
+
+        {activeTabConfig.id === 'general' ? (
+          <div className="debrief-general-body">
+            <textarea
+              ref={generalTextareaRef}
+              className="input debrief-general-textarea"
+              value={generalText}
+              onChange={(e) => updateGeneralText(e.target.value)}
+              placeholder="Anything the incoming shift needs to know - house mood, upcoming appointments, anything that doesn't belong to a specific client..."
+            />
+          </div>
+        ) : (
+          <>
+            <div className="debrief-client-area">
+              {activeGroups.length === 0 ? (
+                <div className="debrief-empty-state">
+                  <div className="debrief-empty-icon">{activeTabConfig.icon}</div>
+                  <div className="debrief-empty-title">{activeTabConfig.emptyTitle}</div>
+                  <div className="debrief-empty-hint">{activeTabConfig.emptyHint}</div>
+                </div>
+              ) : (
+                activeGroups.map(group => (
+                  <div key={group.key} className="debrief-client-card">
+                    <div className="debrief-client-header">
+                      <div className="debrief-client-name" title={group.clientName}>{group.clientName}</div>
+                      <button
+                        type="button"
+                        className="debrief-icon-remove"
+                        onClick={() => removeClient(group)}
+                        aria-label={`Remove ${group.clientName}`}
+                      >
+                        x
+                      </button>
+                    </div>
+
+                    {group.notes.length > 0 && (
+                      <div className="debrief-note-list">
+                        {group.notes.map(({ item, index }) => (
+                          <div key={item.id || index} className="debrief-note-row">
+                            <span className="debrief-note-dash">-</span>
+                            <textarea
+                              className="debrief-note-edit"
+                              value={item.note || ''}
+                              onChange={(e) => updateNote(index, e.target.value)}
+                              rows={1}
+                              aria-label={`Edit note for ${group.clientName}`}
+                            />
+                            <button
+                              type="button"
+                              className="debrief-note-remove"
+                              onClick={() => removeNote(index, group.key)}
+                              aria-label="Remove note"
+                            >
+                              x
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="debrief-add-note-row">
+                      <textarea
+                        ref={node => {
+                          if (node) noteInputRefs.current[group.key] = node
+                        }}
+                        className="input debrief-note-input"
+                        value={noteDrafts[group.key] || ''}
+                        onChange={(e) => setNoteDrafts(prev => ({ ...prev, [group.key]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            addNote(group)
+                          }
+                        }}
+                        rows={1}
+                        placeholder={`Add a note for ${group.clientName}...`}
+                      />
+                      <button
+                        type="button"
+                        className="debrief-note-button"
+                        onClick={() => addNote(group)}
+                      >
+                        + Note
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="debrief-add-client-zone">
+              <div className="debrief-add-client-label">
+                <span className="debrief-add-client-plus">+</span>
+                Add a client to this section
+              </div>
+              <div className="debrief-add-client-row">
+                <input
+                  ref={node => {
+                    if (node) clientInputRefs.current[activeTabConfig.id] = node
+                  }}
+                  className={`input debrief-client-input ${invalidClientSections[activeTabConfig.id] ? 'debrief-input-shake' : ''}`}
+                  value={clientDrafts[activeTabConfig.id] || ''}
+                  onChange={(e) => {
+                    setClientDrafts(prev => ({ ...prev, [activeTabConfig.id]: e.target.value }))
+                    setInvalidClientSections(prev => ({ ...prev, [activeTabConfig.id]: false }))
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      addClient(activeTabConfig.id)
+                    }
+                  }}
+                  placeholder="Client first name, last initial if needed"
+                />
+                <button
+                  type="button"
+                  className="debrief-add-client-button"
+                  onClick={() => addClient(activeTabConfig.id)}
+                >
+                  + Add
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="debrief-editor-actions">
+        <div className="debrief-save-status">{statusText}</div>
+        <div className="debrief-action-buttons">
+          <button
+            className="btn"
+            onClick={onSaveDraft}
+            disabled={manualSaving}
+            style={{ ...styles.secondaryButton, minHeight: '44px' }}
+          >
+            {manualSaving ? 'Saving...' : (isOffline ? 'Save Local Draft' : 'Save Draft')}
+          </button>
+          <button
+            className="btn btn-finish"
+            onClick={onSubmit}
+            disabled={submitting || !canSubmit}
+            style={{
+              ...styles.submitButton,
+              width: 'auto',
+              minHeight: '44px',
+              padding: '10px 14px',
+              fontSize: '14px'
+            }}
+          >
+            {submitting ? 'Submitting...' : (isOffline ? 'Queue Handoff' : 'Submit For Handoff')}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -598,25 +985,24 @@ export default function ShiftDebriefPage({
     notifySuccess(result.mode === 'extra' ? 'Extra note added' : 'Debrief note saved')
   }
 
-  const addItemToLocalDraft = async (item) => {
-    setItems(prev => [...prev, item])
-    setDirty(true)
-    notifySuccess('Item added to draft')
-  }
-
-  const updateItem = (index, nextItem) => {
-    setItems(prev => prev.map((item, i) => (i === index ? nextItem : item)))
-    setDirty(true)
-  }
-
-  const removeItem = (index) => {
-    setItems(prev => prev.filter((_, i) => i !== index))
+  const updateDraftItems = (updater) => {
+    setItems(prev => (typeof updater === 'function' ? updater(prev) : updater))
     setDirty(true)
   }
 
   const title = mode === 'quick'
     ? 'Add Debrief Note'
     : (submitted ? 'View Shift Debrief' : 'Edit Shift Debrief')
+
+  const draftStatusText = dirty
+    ? 'Unsaved changes'
+    : hasLocalDraft
+      ? 'Saved on this device'
+      : lastSavedAt
+        ? `Autosaved ${formatTime(lastSavedAt)}`
+        : draft?.updatedAt
+          ? `Autosaved ${formatTimestamp(draft.updatedAt)}`
+          : 'Draft not saved yet'
 
   return (
     <DebriefShell
@@ -640,63 +1026,17 @@ export default function ShiftDebriefPage({
       ) : submitted ? (
         <SubmittedDebriefView debrief={submitted} user={user} />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={styles.panel}>
-            <h3 style={styles.panelTitle}>Add Item</h3>
-            <DebriefNoteForm user={user} onSave={addItemToLocalDraft} buttonLabel="Add To Draft" compact />
-          </div>
-
-          <div style={styles.panel}>
-            <div style={styles.editorHeader}>
-              <div>
-                <h3 style={styles.panelTitle}>Draft Items</h3>
-                <div style={styles.metaLine}>
-                  {dirty
-                    ? 'Unsaved changes'
-                    : hasLocalDraft
-                      ? 'Saved on this device'
-                    : lastSavedAt
-                      ? `Autosaved ${formatTime(lastSavedAt)}`
-                      : draft?.updatedAt
-                        ? `Autosaved ${formatTimestamp(draft.updatedAt)}`
-                        : 'Draft not saved yet'}
-                </div>
-              </div>
-              <button
-                className="btn"
-                onClick={saveManualDraft}
-                disabled={manualSaving}
-                style={styles.secondaryButton}
-              >
-                {manualSaving ? 'Saving...' : (isOffline ? 'Save Local Draft' : 'Save Draft')}
-              </button>
-            </div>
-
-            {items.length === 0 ? (
-              <div style={styles.emptyText}>No debrief items yet.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {items.map((item, index) => (
-                  <DraftItemEditor
-                    key={item.id || index}
-                    item={item}
-                    onChange={(nextItem) => updateItem(index, nextItem)}
-                    onRemove={() => removeItem(index)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          <button
-            className="btn btn-finish"
-            onClick={handleSubmit}
-            disabled={submitting || items.length === 0}
-            style={styles.submitButton}
-          >
-            {submitting ? 'Submitting...' : (isOffline ? 'Queue Handoff' : 'Submit For Handoff')}
-          </button>
-        </div>
+        <SectionTabsDraftEditor
+          items={items}
+          user={user}
+          onItemsChange={updateDraftItems}
+          statusText={draftStatusText}
+          onSaveDraft={saveManualDraft}
+          manualSaving={manualSaving}
+          isOffline={isOffline}
+          onSubmit={handleSubmit}
+          submitting={submitting}
+        />
       )}
     </DebriefShell>
   )
@@ -704,7 +1044,7 @@ export default function ShiftDebriefPage({
 
 function DebriefShell({ title, subtitle = '', onBack, children }) {
   return (
-    <div className="transport-page">
+    <div className="transport-page debrief-page">
       <div className="transport-header">
         <div>
           <div className="transport-title">{title}</div>
