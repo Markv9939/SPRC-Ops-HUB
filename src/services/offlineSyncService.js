@@ -1,5 +1,18 @@
 import { db } from '../firebase'
-import { collection, doc, getDoc, increment, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore'
+import {
+  Timestamp,
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  increment,
+  query,
+  runTransaction,
+  serverTimestamp,
+  updateDoc,
+  where
+} from 'firebase/firestore'
 import { TEMPLATE_SCOPE_OTC_SHARED, getTemplateScopeForShift } from '../data/eocConstants'
 import { assertExpectedVersion, getVersionNumber } from './versioning'
 import { updateFleetRuntimeFromEocSubmission } from './fleetRuntimeService'
@@ -20,6 +33,7 @@ import {
 export const OFFLINE_ACTION_TYPES = {
   EOC_SUBMISSION: 'eocSubmission',
   SHIFT_DEBRIEF_SUBMISSION: 'shiftDebriefSubmission',
+  TRANSPORT_CREATE: 'transportCreate',
   TRANSPORT_UPDATE: 'transportUpdate',
   TRANSPORT_CLOSE: 'transportClose'
 }
@@ -36,6 +50,21 @@ export function getTransportDraftId(transportId) {
   return `transport:${String(transportId || '').trim()}`
 }
 
+export function isLocalTransportId(transportId) {
+  return String(transportId || '').startsWith('local_transport_')
+}
+
+export function makeLocalTransportId() {
+  const suffix = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}_${Math.random().toString(16).slice(2)}`
+  return `local_transport_${suffix}`
+}
+
+export function getTransportCreateActionId(localTransportId) {
+  return `transport-create:${String(localTransportId || '').trim()}`
+}
+
 export function queueEocSubmission(payload) {
   return queueOfflineAction({
     id: `eoc-submit:${payload?.task?.id || ''}:${payload?.normalizedUserId || payload?.user?.id || ''}`,
@@ -48,6 +77,14 @@ export function queueShiftDebriefSubmission(payload) {
   return queueOfflineAction({
     id: `debrief-submit:${payload?.context?.id || ''}`,
     type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION,
+    payload
+  })
+}
+
+export function queueTransportCreate(payload) {
+  return queueOfflineAction({
+    id: getTransportCreateActionId(payload?.localTransportId),
+    type: OFFLINE_ACTION_TYPES.TRANSPORT_CREATE,
     payload
   })
 }
@@ -240,6 +277,102 @@ async function submitShiftDebriefOnline(payload) {
   await deleteOfflineDraft(getDebriefDraftId(payload?.context?.id))
 }
 
+function toDate(value, fallback = new Date()) {
+  if (!value) return fallback
+  if (typeof value?.toDate === 'function') return value.toDate()
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? fallback : value
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? fallback : date
+}
+
+function toTimestamp(value, fallback = new Date()) {
+  return Timestamp.fromDate(toDate(value, fallback))
+}
+
+function normalizeTransportCreateData(payload) {
+  const snapshot = payload?.snapshot || payload?.transport || {}
+  const user = payload?.user || {}
+  const departedAtDate = toDate(snapshot.departedAt || snapshot.createdAt)
+  const createdAtDate = toDate(snapshot.createdAt || snapshot.departedAt, departedAtDate)
+  const status = String(snapshot.status || 'open').trim().toLowerCase()
+  const closedAtValue = snapshot.closedAt || snapshot.returnedAt || snapshot.updatedAt
+  const updatedAtDate = toDate(snapshot.updatedAt || closedAtValue || createdAtDate)
+
+  const data = {
+    site: snapshot.site || user.site || user.location || '',
+    createdByUserId: snapshot.createdByUserId || user.id || '',
+    createdByName: snapshot.createdByName || user.name || '',
+    status,
+    version: 1,
+    departedAt: toTimestamp(snapshot.departedAt, departedAtDate),
+    clients: Array.isArray(snapshot.clients) ? snapshot.clients : [],
+    reasons: Array.isArray(snapshot.reasons) ? snapshot.reasons : [],
+    stops: Array.isArray(snapshot.stops) ? snapshot.stops : [],
+    destinations: Array.isArray(snapshot.destinations) ? snapshot.destinations : [],
+    notes: typeof snapshot.notes === 'string' ? snapshot.notes : '',
+    createdAt: toTimestamp(snapshot.createdAt, createdAtDate),
+    updatedAt: toTimestamp(snapshot.updatedAt, updatedAtDate)
+  }
+
+  if (status === 'closed' || status === 'returned') {
+    data.returnedAt = toTimestamp(snapshot.returnedAt || snapshot.closedAt, updatedAtDate)
+    data.closedAt = toTimestamp(snapshot.closedAt || snapshot.returnedAt, updatedAtDate)
+    data.dcPaperworkStatus = snapshot.dcPaperworkStatus || null
+    data.dcPaperworkOtherNote = snapshot.dcPaperworkOtherNote || ''
+  }
+
+  return data
+}
+
+async function applyTransportCreateOnline(payload) {
+  const localTransportId = payload?.localTransportId
+  if (!localTransportId) throw new Error('Missing local transport ID.')
+
+  const data = normalizeTransportCreateData(payload)
+  if (!data.createdByUserId) throw new Error('Missing BHT user for transport sync.')
+  if (!data.site) throw new Error('Missing transport site for transport sync.')
+
+  if (data.status === 'open' || data.status === 'arrived') {
+    const userTransportSnapshot = await getDocs(
+      query(
+        collection(db, 'transports'),
+        where('createdByUserId', '==', data.createdByUserId)
+      )
+    )
+    const existingActive = userTransportSnapshot.docs.find((docSnap) => {
+      const status = String(docSnap.data()?.status || '').trim().toLowerCase()
+      return status === 'open' || status === 'arrived'
+    })
+    if (existingActive) {
+      throw new Error('Active transport already exists and needs supervisor review.')
+    }
+  }
+
+  const docRef = await addDoc(collection(db, 'transports'), data)
+
+  if (data.status === 'closed' || data.status === 'returned') {
+    try {
+      await createTransportCompletedAlert({
+        transport: { ...data, id: docRef.id, site: data.site },
+        userName: payload?.user?.name || data.createdByName
+      })
+      await writeAuditLog({
+        action: 'transport_closed',
+        collectionPath: 'transports',
+        documentId: docRef.id,
+        reason: payload?.auditReason || 'Offline-created transport synced closed',
+        actorUser: payload?.user,
+        extra: { dcPaperworkStatus: data.dcPaperworkStatus || null, offlineSynced: true, localTransportId }
+      })
+    } catch (notificationError) {
+      console.warn('Offline-created transport synced, but follow-up alert/audit write failed:', notificationError)
+    }
+  }
+
+  await deleteOfflineDraft(getTransportDraftId(localTransportId))
+  return { syncedDocumentId: docRef.id }
+}
+
 async function applyTransportUpdateOnline(payload) {
   const transportId = payload?.transportId
   if (!transportId) throw new Error('Missing transport ID.')
@@ -305,19 +438,22 @@ function needsReviewError(error) {
 async function processAction(action) {
   await updateOfflineAction(action.id, { status: 'syncing', attempts: Number(action.attempts || 0) + 1 })
   try {
+    let syncResult = null
     if (action.type === OFFLINE_ACTION_TYPES.EOC_SUBMISSION) {
-      await submitEocSubmissionOnline(action.payload)
+      syncResult = await submitEocSubmissionOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION) {
-      await submitShiftDebriefOnline(action.payload)
+      syncResult = await submitShiftDebriefOnline(action.payload)
+    } else if (action.type === OFFLINE_ACTION_TYPES.TRANSPORT_CREATE) {
+      syncResult = await applyTransportCreateOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.TRANSPORT_UPDATE) {
-      await applyTransportUpdateOnline(action.payload)
+      syncResult = await applyTransportUpdateOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.TRANSPORT_CLOSE) {
-      await applyTransportCloseOnline(action.payload)
+      syncResult = await applyTransportCloseOnline(action.payload)
     } else {
       throw new Error(`Unsupported offline action: ${action.type}`)
     }
-    await markOfflineActionSynced(action.id)
-    return { id: action.id, status: 'synced' }
+    await markOfflineActionSynced(action.id, syncResult?.syncedDocumentId ? { syncedDocumentId: syncResult.syncedDocumentId } : {})
+    return { id: action.id, status: 'synced', ...(syncResult || {}) }
   } catch (error) {
     if (needsReviewError(error)) {
       await markOfflineActionNeedsReview(action.id, error?.message || 'Needs supervisor review.')

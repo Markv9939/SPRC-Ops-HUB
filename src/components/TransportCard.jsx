@@ -7,10 +7,17 @@ import DestinationAutocomplete from './DestinationAutocomplete'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
 import { createTransportCompletedAlert, writeAuditLog } from '../services/notificationService'
-import { deleteOfflineDraft, getOfflineDraft, saveOfflineDraft } from '../services/offlineStore'
-import { getTransportDraftId, queueTransportClose, queueTransportUpdate } from '../services/offlineSyncService'
+import { deleteOfflineAction, deleteOfflineDraft, getOfflineDraft, saveOfflineDraft } from '../services/offlineStore'
+import {
+  getTransportCreateActionId,
+  getTransportDraftId,
+  isLocalTransportId,
+  queueTransportClose,
+  queueTransportCreate,
+  queueTransportUpdate
+} from '../services/offlineSyncService'
 
-function TransportCard({ transportId, user, onClose, onTransportClosed, isOffline = false }) {
+function TransportCard({ transportId, user, onClose, onTransportClosed, onTransportCancelled, isOffline = false }) {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('open')
   const [departedAt, setDepartedAt] = useState(null)
@@ -25,8 +32,10 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
   const [showMore, setShowMore] = useState(false)
   const [version, setVersion] = useState(1)
   const [hasLocalDraft, setHasLocalDraft] = useState(false)
+  const [transportMeta, setTransportMeta] = useState({})
 
   const normalizedStatus = String(status || '').trim().toLowerCase()
+  const localOnlyTransport = isLocalTransportId(transportId) || transportMeta.localOnly === true
   const submitLocked = normalizedStatus === 'returned' || normalizedStatus === 'closed'
   const writeLocked = submitLocked
   const activeTransport = normalizedStatus === 'open' || normalizedStatus === 'arrived'
@@ -42,43 +51,62 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
     'Other'
   ]
 
+  const applyTransportData = useCallback((data, options = {}) => {
+    const d = data || {}
+    setStatus(String(d.status || 'open').trim().toLowerCase())
+    setDepartedAt(d.departedAt)
+    setClients(Array.isArray(d.clients) ? d.clients : [])
+    setReasons(Array.isArray(d.reasons) ? d.reasons : [])
+    setStops(Array.isArray(d.stops) ? d.stops : [])
+    setDestinations(Array.isArray(d.destinations) ? d.destinations : [])
+    setNotes(typeof d.notes === 'string' ? d.notes : '')
+    setDcPaperworkStatus(d.dcPaperworkStatus || null)
+    setDcPaperworkOtherNote(d.dcPaperworkOtherNote || '')
+    setVersion(Number(d.version || 1))
+    setTransportMeta({
+      site: d.site || '',
+      createdByUserId: d.createdByUserId || '',
+      createdByName: d.createdByName || '',
+      createdAt: d.createdAt || null,
+      updatedAt: d.updatedAt || null,
+      localOnly: options.localOnly === true || d.localOnly === true || isLocalTransportId(transportId)
+    })
+  }, [transportId])
+
   const loadTransport = useCallback(async () => {
     if (!transportId) { setLoading(false); return }
+    setLoading(true)
+    setHasLocalDraft(false)
+    setTransportMeta({})
     try {
-      const docSnap = await getDoc(doc(db, 'transports', transportId))
-      if (docSnap.exists()) {
-        const d = docSnap.data()
-        setStatus(String(d.status || 'open').trim().toLowerCase())
-        setDepartedAt(d.departedAt)
-        setClients(d.clients || [])
-        setReasons(d.reasons || [])
-        setStops(d.stops || [])
-        setDestinations(d.destinations || [])
-        setNotes(d.notes || '')
-        setDcPaperworkStatus(d.dcPaperworkStatus || null)
-        setDcPaperworkOtherNote(d.dcPaperworkOtherNote || '')
-        setVersion(Number(d.version || 1))
-
-        const localDraft = await getOfflineDraft(getTransportDraftId(transportId)).catch(() => null)
-        const local = localDraft?.payload?.snapshot
-        if (local) {
-          setStatus(String(local.status || d.status || 'open').trim().toLowerCase())
-          setClients(local.clients || [])
-          setReasons(local.reasons || [])
-          setStops(local.stops || [])
-          setDestinations(local.destinations || [])
-          setNotes(local.notes || '')
-          setDcPaperworkStatus(local.dcPaperworkStatus || null)
-          setDcPaperworkOtherNote(local.dcPaperworkOtherNote || '')
-          setHasLocalDraft(true)
+      let remote = null
+      if (!isLocalTransportId(transportId)) {
+        try {
+          const docSnap = await getDoc(doc(db, 'transports', transportId))
+          if (docSnap.exists()) remote = docSnap.data()
+        } catch (err) {
+          console.error('Error loading remote transport:', err)
         }
+      }
+
+      const localDraft = await getOfflineDraft(getTransportDraftId(transportId)).catch(() => null)
+      const local = localDraft?.payload?.snapshot || null
+
+      if (remote) {
+        applyTransportData(remote)
+      }
+      if (local) {
+        applyTransportData({ ...(remote || {}), ...local }, {
+          localOnly: localDraft?.payload?.localOnly === true || isLocalTransportId(transportId)
+        })
+        setHasLocalDraft(true)
       }
     } catch (err) {
       console.error('Error loading transport:', err)
     } finally {
       setLoading(false)
     }
-  }, [transportId])
+  }, [applyTransportData, transportId])
 
   useEffect(() => {
     loadTransport()
@@ -93,7 +121,12 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
   const norm = (t) => t.toLowerCase().trim().replace(/\s+/g, ' ')
 
   const buildSnapshot = (updates = {}) => ({
+    id: transportId,
+    site: transportMeta.site || user?.site || user?.location || '',
+    createdByUserId: transportMeta.createdByUserId || user?.id || '',
+    createdByName: transportMeta.createdByName || user?.name || '',
     status,
+    version,
     departedAt,
     clients,
     reasons,
@@ -102,6 +135,10 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
     notes,
     dcPaperworkStatus,
     dcPaperworkOtherNote,
+    createdAt: transportMeta.createdAt || departedAt || new Date(),
+    updatedAt: new Date(),
+    localOnly: localOnlyTransport,
+    pendingSync: localOnlyTransport || isOffline,
     ...updates
   })
 
@@ -109,6 +146,20 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
     if (!transportId) return
     if (writeLocked) return
     const snapshot = buildSnapshot({ ...updates, notes: updates?.notes ?? notes })
+    if (localOnlyTransport) {
+      await saveOfflineDraft(getTransportDraftId(transportId), 'transport', {
+        snapshot,
+        expectedVersion: version,
+        localOnly: true
+      })
+      await queueTransportCreate({
+        localTransportId: transportId,
+        snapshot,
+        user
+      })
+      setHasLocalDraft(true)
+      return
+    }
     if (isOffline) {
       const offlineUpdates = {
         clients,
@@ -227,8 +278,11 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
   const handleCancelTransport = async () => {
     if (!transportId) return
     if (blockIfLocked()) return
+    const isLocalCancel = localOnlyTransport
     const confirmed = await showConfirmDialog(
-      'Cancel this transport? This removes it completely and cannot be undone.',
+      isLocalCancel
+        ? 'Cancel this offline transport? This removes it from this device before it syncs.'
+        : 'Cancel this transport? This removes it completely and cannot be undone.',
       {
         title: 'Cancel Transport',
         tone: 'danger',
@@ -239,6 +293,14 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
     if (!confirmed) return
 
     try {
+      if (isLocalCancel) {
+        await deleteOfflineDraft(getTransportDraftId(transportId))
+        await deleteOfflineAction(getTransportCreateActionId(transportId))
+        notifySuccess('Offline transport cancelled')
+        onTransportCancelled?.(transportId)
+        onClose()
+        return
+      }
       await deleteDoc(doc(db, 'transports', transportId))
       notifySuccess('Transport cancelled')
       onClose()
@@ -289,6 +351,9 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
     }
     const closedTransport = {
       id: transportId,
+      site: transportMeta.site || user?.site || user?.location || '',
+      createdByUserId: transportMeta.createdByUserId || user?.id || '',
+      createdByName: transportMeta.createdByName || user?.name || '',
       status: 'closed',
       departedAt,
       returnedAt: closedAt,
@@ -300,6 +365,27 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
       notes,
       dcPaperworkStatus: result.status,
       dcPaperworkOtherNote: result.otherNote || ''
+    }
+
+    if (localOnlyTransport) {
+      setStatus('closed')
+      const snapshot = buildSnapshot({ ...closeUpdates, updatedAt: closedAt })
+      await saveOfflineDraft(getTransportDraftId(transportId), 'transport', {
+        snapshot,
+        expectedVersion: version,
+        localOnly: true
+      })
+      await queueTransportCreate({
+        localTransportId: transportId,
+        snapshot,
+        user,
+        auditReason: `DC paperwork: ${dcStatusLabel(result.status)}`
+      })
+      setHasLocalDraft(true)
+      onTransportClosed?.({ ...closedTransport, ...snapshot })
+      notifySuccess('Transport saved on this device. It will sync when internet returns.')
+      onClose()
+      return
     }
 
     if (isOffline) {
@@ -600,7 +686,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, isOfflin
       )}
 
       {/* Cancel transport */}
-      {activeTransport && !isOffline && (
+      {activeTransport && (!isOffline || localOnlyTransport) && (
         <button
           onClick={handleCancelTransport}
           style={{
