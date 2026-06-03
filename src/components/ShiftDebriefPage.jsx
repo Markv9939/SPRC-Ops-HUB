@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../firebase'
 import ClientAutocomplete from './ClientAutocomplete'
+import DebriefGroupedReadView from './DebriefGroupedReadView'
 import {
   CLIENT_NOTE_SECTIONS,
   CONFIRMATION_ITEMS,
@@ -11,7 +12,6 @@ import {
   createDebriefItem,
   createEmptyConfirmation,
   getBhtDebriefContext,
-  getDebriefSectionLabel,
   saveDebriefDraft,
   saveDebriefConfirmation,
   saveQuickDebriefNote,
@@ -352,7 +352,7 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
         <div style={styles.metaLine}>
           Submitted by {debrief.submittedByName || debrief.draftByName || 'BHT'} on {formatTimestamp(debrief.submittedAt)}
         </div>
-        <DebriefItemsReadOnly items={debrief.items} />
+        <DebriefGroupedReadView items={debrief.items} emptyText="No notes in this debrief." />
       </div>
 
       <div style={styles.panel}>
@@ -428,32 +428,6 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
           {savingConfirmation ? 'Saving...' : 'Save Confirmation'}
         </button>
       </div>
-    </div>
-  )
-}
-
-function DebriefItemsReadOnly({ items }) {
-  const sorted = sortItems(items)
-  if (sorted.length === 0) {
-    return <div style={styles.emptyText}>No notes in this debrief.</div>
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      {sorted.map(item => (
-        <div key={item.id} style={styles.readOnlyItem}>
-          <div style={styles.itemHeader}>
-            <div>
-              <strong>
-                {item.type === 'client' ? (item.clientName || 'Client') : 'General Handoff'}
-              </strong>
-              <div style={styles.itemType}>{getDebriefSectionLabel(item.section)}</div>
-            </div>
-            <span style={styles.itemTime}>{formatTime(item.createdAtIso)}</span>
-          </div>
-          <div style={styles.noteText}>{item.note}</div>
-        </div>
-      ))}
     </div>
   )
 }

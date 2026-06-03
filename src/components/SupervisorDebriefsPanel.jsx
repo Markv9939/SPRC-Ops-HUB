@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { collection, onSnapshot, orderBy, query, Timestamp, where } from 'firebase/firestore'
 import { db } from '../firebase'
+import DebriefGroupedReadView from './DebriefGroupedReadView'
 import {
   CONFIRMATION_ITEMS,
-  DEBRIEFS_COLLECTION,
-  getDebriefSectionLabel
+  DEBRIEFS_COLLECTION
 } from '../services/shiftDebriefService'
 import { getShiftLabel } from '../data/eocConstants'
 
@@ -47,17 +47,7 @@ function DebriefDetail({ debrief }) {
       {items.length === 0 ? (
         <div style={styles.emptyText}>No handoff notes.</div>
       ) : (
-        <div style={styles.stack}>
-          {items.map(item => (
-            <div key={item.id} style={styles.noteCard}>
-              <div style={styles.noteHeader}>
-                <strong>{item.type === 'client' ? item.clientName || 'Client' : 'General Handoff'}</strong>
-                <span>{getDebriefSectionLabel(item.section)}</span>
-              </div>
-              <div style={styles.noteText}>{item.note}</div>
-            </div>
-          ))}
-        </div>
+        <DebriefGroupedReadView items={items} emptyText="No handoff notes." />
       )}
 
       <div style={styles.sectionTitle}>Extra Notes / Corrections</div>

@@ -32,6 +32,11 @@ export const GENERAL_HANDOFF_SECTIONS = [
   { id: 'notes_discrepancies', label: 'Notes/discrepancies' }
 ]
 
+export const DEBRIEF_READ_SECTION_ORDER = [
+  'medication_health_updates',
+  'client_progress_concerns'
+]
+
 export const CONFIRMATION_ITEMS = [
   { id: 'keysAccountedFor', label: 'Keys accounted for' },
   { id: 'sharpsRestrictedVerified', label: 'Sharps/restricted items verified' },
@@ -67,6 +72,55 @@ export function getLocalDateKey(date = new Date()) {
 export function getDebriefSectionLabel(sectionId) {
   return [...CLIENT_NOTE_SECTIONS, ...GENERAL_HANDOFF_SECTIONS]
     .find(section => section.id === sectionId)?.label || sectionId
+}
+
+export function groupDebriefItemsForReadView(items) {
+  const sortedItems = [...(Array.isArray(items) ? items : [])].sort((a, b) => (
+    String(a.createdAtIso || '').localeCompare(String(b.createdAtIso || ''))
+  ))
+  const clientItems = sortedItems.filter(item => item?.type === 'client')
+  const generalNotes = sortedItems.filter(item => item?.type === 'general')
+  const sectionMap = new Map()
+
+  clientItems.forEach(item => {
+    const sectionKey = cleanToken(item.section)
+    const nameKey = normalizeClientLabel(item.clientName || 'Client')
+    const displayName = cleanToken(item.clientName) || 'Client'
+
+    if (!sectionMap.has(sectionKey)) {
+      sectionMap.set(sectionKey, new Map())
+    }
+
+    const clientMap = sectionMap.get(sectionKey)
+    if (!clientMap.has(nameKey)) {
+      clientMap.set(nameKey, {
+        key: nameKey,
+        label: displayName,
+        firstCreatedAtIso: item.createdAtIso || '',
+        notes: []
+      })
+    }
+
+    clientMap.get(nameKey).notes.push(item)
+  })
+
+  const orderedSectionKeys = [
+    ...DEBRIEF_READ_SECTION_ORDER,
+    ...Array.from(sectionMap.keys())
+      .filter(key => !DEBRIEF_READ_SECTION_ORDER.includes(key))
+      .sort((a, b) => getDebriefSectionLabel(a).localeCompare(getDebriefSectionLabel(b)))
+  ]
+
+  const sections = orderedSectionKeys
+    .filter(key => sectionMap.has(key))
+    .map(key => ({
+      key,
+      label: getDebriefSectionLabel(key),
+      clients: Array.from(sectionMap.get(key).values())
+        .sort((a, b) => a.label.localeCompare(b.label))
+    }))
+
+  return { sections, generalNotes }
 }
 
 export function getDebriefLocationLabel(locationId) {
