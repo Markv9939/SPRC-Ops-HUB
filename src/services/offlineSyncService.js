@@ -19,6 +19,7 @@ import { updateFleetRuntimeFromEocSubmission } from './fleetRuntimeService'
 import { syncFleetTasksForVehicle } from './fleetTaskEngine'
 import { buildEocIssueAlertPayload, createTransportCompletedAlert, writeAuditLog } from './notificationService'
 import { submitShiftDebrief } from './shiftDebriefService'
+import { submitBhtIssueReportOnline } from './bhtIssueReportService'
 import { parseMileageValue } from '../utils/fleetStatus'
 import {
   deleteOfflineDraft,
@@ -33,6 +34,7 @@ import {
 export const OFFLINE_ACTION_TYPES = {
   EOC_SUBMISSION: 'eocSubmission',
   SHIFT_DEBRIEF_SUBMISSION: 'shiftDebriefSubmission',
+  BHT_ISSUE_REPORT: 'bhtIssueReport',
   TRANSPORT_CREATE: 'transportCreate',
   TRANSPORT_UPDATE: 'transportUpdate',
   TRANSPORT_CLOSE: 'transportClose'
@@ -61,6 +63,13 @@ export function makeLocalTransportId() {
   return `local_transport_${suffix}`
 }
 
+export function makeLocalBhtIssueReportId() {
+  const suffix = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}_${Math.random().toString(16).slice(2)}`
+  return `local_bht_issue_${suffix}`
+}
+
 export function getTransportCreateActionId(localTransportId) {
   return `transport-create:${String(localTransportId || '').trim()}`
 }
@@ -78,6 +87,15 @@ export function queueShiftDebriefSubmission(payload) {
     id: `debrief-submit:${payload?.context?.id || ''}`,
     type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION,
     payload
+  })
+}
+
+export function queueBhtIssueReport(payload) {
+  const localReportId = payload?.localReportId || makeLocalBhtIssueReportId()
+  return queueOfflineAction({
+    id: `bht-issue:${localReportId}`,
+    type: OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT,
+    payload: { ...payload, localReportId }
   })
 }
 
@@ -277,6 +295,11 @@ async function submitShiftDebriefOnline(payload) {
   await deleteOfflineDraft(getDebriefDraftId(payload?.context?.id))
 }
 
+async function submitBhtIssueReportActionOnline(payload) {
+  const result = await submitBhtIssueReportOnline(payload)
+  return { syncedDocumentId: result?.issueId || '' }
+}
+
 function toDate(value, fallback = new Date()) {
   if (!value) return fallback
   if (typeof value?.toDate === 'function') return value.toDate()
@@ -443,6 +466,8 @@ async function processAction(action) {
       syncResult = await submitEocSubmissionOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION) {
       syncResult = await submitShiftDebriefOnline(action.payload)
+    } else if (action.type === OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT) {
+      syncResult = await submitBhtIssueReportActionOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.TRANSPORT_CREATE) {
       syncResult = await applyTransportCreateOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.TRANSPORT_UPDATE) {

@@ -47,14 +47,19 @@ function basePayload() {
  * @returns {object} Firestore document data
  */
 export function buildEocIssueAlertPayload({ issueRefId, task, issue, userName }) {
+  const fromBhtHome = issue?.source === 'bht_home'
+  const prefix = fromBhtHome ? 'Issue report' : 'EOC issue'
+
   return {
     type: 'eoc_issue',
     issueId: issueRefId,
-    taskId: task?.id || null,
-    locationId: task?.locationId || null,
+    taskId: issue?.taskId || task?.id || null,
+    locationId: issue?.locationId || task?.locationId || null,
     eocType: issue?.eocType || task?.eocType || null,
     severity: issue?.severity || 'medium',
-    message: `EOC issue: ${issue?.label || 'Issue'} - ${issue?.description || ''}`,
+    source: issue?.source || null,
+    issueType: issue?.issueType || null,
+    message: `${prefix}: ${issue?.label || 'Issue'} - ${issue?.description || ''}`,
     bhtName: userName || null,
     techName: userName || null,
     ...basePayload()

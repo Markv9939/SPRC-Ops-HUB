@@ -1,20 +1,24 @@
-import { useEffect } from 'react'
-import { getShiftById, LOCATIONS } from '../data/eocConstants'
+import { useEffect, useState } from 'react'
+import { getShiftById, LOCATIONS, VANS } from '../data/eocConstants'
+import { BHT_HOME_ISSUE_TYPES } from '../services/bhtIssueReportService'
 import useEocAssignments from '../hooks/useEocAssignments'
 import useEocTasks from '../hooks/useEocTasks'
 import { getCurrentCycleDueDate } from '../utils/eocSchedule'
 import { notifyWarning } from '../utils/toast'
+import AppModal from './AppModal'
 
 const LOCAL_REMINDER_INTERVAL_MS = 60 * 60 * 1000
 
 function BhtHub({
   user,
   transports,
+  isOffline = false,
   issueUpdates = [],
   focusedIssueUpdateId = null,
   onNewTransport,
   onContinueTransport,
   onStartEoc,
+  onReportIssue,
   onAddDebriefNote,
   onEditDebrief,
   onDebriefAssignmentChange,
@@ -24,6 +28,14 @@ function BhtHub({
 }) {
   const { assignment, loading: assignmentLoading } = useEocAssignments(user)
   const { tasks, loading: tasksLoading } = useEocTasks(user, assignment)
+  const [issueModalOpen, setIssueModalOpen] = useState(false)
+  const [issueForm, setIssueForm] = useState({
+    issueType: BHT_HOME_ISSUE_TYPES[0].value,
+    description: '',
+    vanId: ''
+  })
+  const [issueError, setIssueError] = useState('')
+  const [issueSubmitting, setIssueSubmitting] = useState(false)
 
   const hasAssignment = !!assignment
 
@@ -145,6 +157,91 @@ function BhtHub({
     : ''
 
   const firstName = String(user?.name || '').split(' ')[0]
+  const assignedVanIds = [
+    ...(Array.isArray(assignment?.vanIds) ? assignment.vanIds : []),
+    ...(Array.isArray(user?.vanIds) ? user.vanIds : []),
+    assignment?.vanId,
+    user?.vanId
+  ]
+    .map(vanId => String(vanId || '').trim())
+    .filter(Boolean)
+    .filter((vanId, index, all) => all.indexOf(vanId) === index)
+  const issueIsVan = issueForm.issueType === 'van_vehicle'
+  const selectedIssueVanId = issueForm.vanId || (assignedVanIds.length === 1 ? assignedVanIds[0] : '')
+
+  const resetIssueForm = () => {
+    setIssueForm({
+      issueType: BHT_HOME_ISSUE_TYPES[0].value,
+      description: '',
+      vanId: assignedVanIds.length === 1 ? assignedVanIds[0] : ''
+    })
+    setIssueError('')
+    setIssueSubmitting(false)
+  }
+
+  const openIssueReport = () => {
+    resetIssueForm()
+    setIssueModalOpen(true)
+  }
+
+  const closeIssueReport = () => {
+    if (issueSubmitting) return
+    setIssueModalOpen(false)
+    setIssueError('')
+  }
+
+  const updateIssueType = (issueType) => {
+    const nextIsVan = issueType === 'van_vehicle'
+    setIssueError('')
+    setIssueForm(prev => ({
+      ...prev,
+      issueType,
+      vanId: nextIsVan
+        ? (assignedVanIds.length === 1 ? assignedVanIds[0] : '')
+        : ''
+    }))
+  }
+
+  const submitIssueReport = async (event) => {
+    event?.preventDefault()
+    const description = String(issueForm.description || '').trim()
+    const vanId = issueIsVan ? selectedIssueVanId : ''
+
+    if (!issueForm.issueType) {
+      setIssueError('Choose the issue type.')
+      return
+    }
+    if (issueIsVan && !vanId) {
+      setIssueError('Choose the van for this issue.')
+      return
+    }
+    if (!description) {
+      setIssueError('Describe the issue before submitting.')
+      return
+    }
+    if (!onReportIssue) {
+      setIssueError('Issue reporting is not available right now.')
+      return
+    }
+
+    setIssueSubmitting(true)
+    setIssueError('')
+    try {
+      await onReportIssue({
+        issueType: issueForm.issueType,
+        description,
+        vanId,
+        assignment
+      })
+      setIssueModalOpen(false)
+      resetIssueForm()
+    } catch (err) {
+      console.error('Issue report failed:', err)
+      setIssueError(err?.message || 'Failed to submit issue. Please try again.')
+    } finally {
+      setIssueSubmitting(false)
+    }
+  }
 
   useEffect(() => {
     if (!focusedIssueUpdateId) return
@@ -307,6 +404,25 @@ function BhtHub({
           <div className="hub-action-chevron">›</div>
         </button>
 
+        {/* Quick issue report */}
+        <button
+          className="hub-action-row hub-action-row-ready"
+          onClick={openIssueReport}
+        >
+          <div className="hub-action-icon hub-action-icon-house">
+            {'!'}
+          </div>
+          <div className="hub-action-info">
+            <div className="hub-action-title">
+              Report issue
+            </div>
+            <div className="hub-action-subtitle">
+              {isOffline ? 'Saves on this device until online' : 'Notify supervisor/admin'}
+            </div>
+          </div>
+          <div className="hub-action-chevron">&gt;</div>
+        </button>
+
         {/* Shift Debrief quick note */}
         {debriefAvailable && (
           <button
@@ -437,6 +553,115 @@ function BhtHub({
           })}
         </div>
       )}
+
+      <AppModal
+        isOpen={issueModalOpen}
+        title="Report Issue"
+        tone="warning"
+        maxWidth="520px"
+        footer={(
+          <>
+            <button
+              type="button"
+              className="btn"
+              onClick={closeIssueReport}
+              disabled={issueSubmitting}
+              style={{ flex: 1, background: '#F1EFEA', color: 'var(--text-secondary)', border: '1px solid #D8D1C6' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-finish"
+              onClick={submitIssueReport}
+              disabled={issueSubmitting}
+              style={{ flex: 1 }}
+            >
+              {issueSubmitting ? 'Submitting...' : 'Submit Issue'}
+            </button>
+          </>
+        )}
+      >
+        <form onSubmit={submitIssueReport}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
+            Issue type
+          </label>
+          <select
+            className="input"
+            value={issueForm.issueType}
+            onChange={(event) => updateIssueType(event.target.value)}
+            disabled={issueSubmitting}
+            style={{ width: '100%', marginBottom: '12px' }}
+          >
+            {BHT_HOME_ISSUE_TYPES.map(type => (
+              <option key={type.value} value={type.value}>{type.label}</option>
+            ))}
+          </select>
+
+          {issueIsVan && assignedVanIds.length > 1 && (
+            <>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
+                Van
+              </label>
+              <select
+                className="input"
+                value={issueForm.vanId}
+                onChange={(event) => {
+                  setIssueError('')
+                  setIssueForm(prev => ({ ...prev, vanId: event.target.value }))
+                }}
+                disabled={issueSubmitting}
+                style={{ width: '100%', marginBottom: '12px' }}
+              >
+                <option value="">Choose van</option>
+                {assignedVanIds.map(vanId => (
+                  <option key={vanId} value={vanId}>
+                    {VANS.find(van => van.id === vanId)?.label || vanId}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+
+          {issueIsVan && assignedVanIds.length === 1 && (
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+              Van: {VANS.find(van => van.id === selectedIssueVanId)?.label || selectedIssueVanId}
+            </div>
+          )}
+
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
+            What happened?
+          </label>
+          <textarea
+            className="input"
+            rows={4}
+            value={issueForm.description}
+            onChange={(event) => {
+              setIssueError('')
+              setIssueForm(prev => ({ ...prev, description: event.target.value }))
+            }}
+            disabled={issueSubmitting}
+            placeholder="Example: Hall bathroom sink is leaking under the cabinet."
+            style={{ width: '100%', resize: 'vertical', boxSizing: 'border-box' }}
+          />
+
+          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+            Location and staff name will be attached automatically.
+          </div>
+
+          {isOffline && (
+            <div style={{ color: '#B07A28', fontSize: '13px', marginTop: '10px', padding: '8px', background: 'rgba(176,122,40,0.08)', borderRadius: '8px' }}>
+              Offline mode: this report will save on this device and send when internet returns.
+            </div>
+          )}
+
+          {issueError && (
+            <div style={{ color: '#C94A3F', fontSize: '13px', marginTop: '10px', padding: '8px', background: 'rgba(205,78,66,0.06)', borderRadius: '8px' }}>
+              {issueError}
+            </div>
+          )}
+        </form>
+      </AppModal>
     </div>
   )
 }

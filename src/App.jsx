@@ -24,9 +24,11 @@ import {
   getTransportDraftId,
   isLocalTransportId,
   makeLocalTransportId,
+  queueBhtIssueReport,
   queueTransportCreate,
   syncOfflineOutbox
 } from './services/offlineSyncService'
+import { submitBhtIssueReportOnline } from './services/bhtIssueReportService'
 import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
 import Onboarding from './components/Onboarding'
@@ -672,6 +674,25 @@ function App() {
     setPage('eocForm')
   }
 
+  async function handleReportIssue(report) {
+    const payload = {
+      user,
+      assignment: report?.assignment || bhtDebriefAssignment,
+      issueType: report?.issueType || '',
+      description: report?.description || '',
+      vanId: report?.vanId || ''
+    }
+
+    if (isOffline) {
+      await queueBhtIssueReport(payload)
+      notifySuccess('Issue saved on this device')
+      return
+    }
+
+    await submitBhtIssueReportOnline(payload)
+    notifySuccess('Issue reported')
+  }
+
   function handleEocComplete() {
     setCurrentTaskId(null)
     setPage('home')
@@ -1104,11 +1125,13 @@ function App() {
       <BhtHub
         user={user}
         transports={transports}
+        isOffline={isOffline}
         issueUpdates={issueUpdates}
         focusedIssueUpdateId={focusedIssueUpdateId}
         onNewTransport={handleNewTransport}
         onContinueTransport={handleContinueTransport}
         onStartEoc={handleStartEoc}
+        onReportIssue={handleReportIssue}
         onAddDebriefNote={handleAddDebriefNote}
         onEditDebrief={handleEditDebrief}
         onDebriefAssignmentChange={setBhtDebriefAssignment}
