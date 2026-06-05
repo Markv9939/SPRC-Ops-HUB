@@ -2,6 +2,7 @@ import { addDoc, collection, doc, getDoc, serverTimestamp, updateDoc } from 'fir
 import { db } from '../firebase'
 import { hashPin } from '../utils/pinHash'
 import { normalizeRole } from '../utils/orgModel'
+import { findDuplicatePinUser } from './pinConflictService'
 
 function isFourDigitPin(value) {
   return /^\d{4}$/.test(String(value || '').trim())
@@ -42,6 +43,9 @@ export async function changeOwnPin({ sessionUser, currentPin, newPin, confirmPin
   }
 
   const newPinHash = await hashPin(newPin)
+  const duplicateUser = await findDuplicatePinUser(newPin, { excludeUserId: userId })
+  if (duplicateUser) throw toError('That PIN is already in use. Choose a different PIN.')
+
   await updateDoc(userRef, {
     pinHash: newPinHash,
     pinVersion: 'v1_sha256',

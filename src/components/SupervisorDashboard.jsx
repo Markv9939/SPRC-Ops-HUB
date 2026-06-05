@@ -14,6 +14,7 @@ import SupervisorDebriefsPanel from './SupervisorDebriefsPanel'
 import { LOCATIONS, VANS, getShiftLabel, getShiftOptionsForMainLocation, isShiftAllowedForMainLocation } from '../data/eocConstants'
 import { hashPin } from '../utils/pinHash'
 import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../services/assignmentService'
+import { findDuplicatePinUser } from '../services/pinConflictService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
 import { writeAuditLog as writeAuditEntry } from '../services/notificationService'
@@ -372,6 +373,16 @@ function SupervisorDashboard({
 
     try {
       const pinHash = hasPinInput ? await hashPin(userForm.pin) : null
+      if (hasPinInput) {
+        const duplicateUser = await findDuplicatePinUser(userForm.pin, {
+          excludeUserId: isNewUser ? null : userForm.id
+        })
+        if (duplicateUser) {
+          alert(`That PIN is already assigned to ${duplicateUser.name || duplicateUser.id}. Choose a different PIN.`)
+          return
+        }
+      }
+
       const normalizedRole = normalizeRole(userForm.role || '')
 
       if (!normalizedRole) {

@@ -3,6 +3,7 @@ import { db, auth } from '../firebase'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { signInAnonymously } from 'firebase/auth'
 import { hashPin } from '../utils/pinHash'
+import { isActiveNonDeletedUser } from '../services/pinConflictService'
 import { getScopedSessionUser } from '../services/accessGrantService'
 import { getAuthPolicy } from '../services/authPolicyService'
 import { isOfflineMode } from '../utils/networkGuard'
@@ -156,7 +157,14 @@ function PinLogin({ onLogin }) {
         'Login timed out while verifying PIN. Please check connection and try again.'
       )
 
-      if (querySnapshot.empty) {
+      const activePinUsers = querySnapshot.docs
+        .map(docSnap => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        }))
+        .filter(isActiveNonDeletedUser)
+
+      if (activePinUsers.length === 0) {
         const newFailedAttempts = failedAttempts + 1
         setFailedAttempts(newFailedAttempts)
         localStorage.setItem('failedAttempts', newFailedAttempts.toString())
@@ -172,8 +180,14 @@ function PinLogin({ onLogin }) {
 
         setPin('')
       } else {
-        const userDoc = querySnapshot.docs[0]
-        const userData = userDoc.data()
+        if (activePinUsers.length > 1) {
+          setError('PIN conflict found. Contact admin.')
+          setPin('')
+          return
+        }
+
+        const pinUser = activePinUsers[0]
+        const userData = pinUser
 
         localStorage.removeItem('failedAttempts')
         localStorage.removeItem('lockoutUntil')
@@ -215,7 +229,7 @@ function PinLogin({ onLogin }) {
         let scopedSessionUser
         try {
           scopedSessionUser = await withTimeout(
-            getScopedSessionUser(userDoc.id, userData),
+            getScopedSessionUser(pinUser.id, userData),
             LOGIN_STEP_TIMEOUT_MS,
             'Login timed out while loading access scope. Please try again.'
           )
@@ -229,7 +243,7 @@ function PinLogin({ onLogin }) {
             ? GLOBAL_SCOPE
             : (normalizeMainLocation(userData.site) || normalizeMainLocation(baseScopes[0]) || '')
           scopedSessionUser = {
-            id: userDoc.id,
+            id: pinUser.id,
             name: userData.name,
             role: normalizedRole,
             site: normalizedSite,
