@@ -11,9 +11,11 @@ import {
   DEBRIEF_DRAFTS_COLLECTION,
   DEBRIEFS_COLLECTION,
   GENERAL_HANDOFF_SECTIONS,
+  CLOSED_DEBRIEF_MESSAGE,
   createDebriefItem,
   createEmptyConfirmation,
   getBhtDebriefContext,
+  isDebriefClosedForCorrections,
   saveDebriefDraft,
   saveDebriefConfirmation,
   saveQuickDebriefNote,
@@ -310,12 +312,17 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
   const [confirmation, setConfirmation] = useState(() => getCurrentUserConfirmation(debrief, user))
   const [savingExtra, setSavingExtra] = useState(false)
   const [savingConfirmation, setSavingConfirmation] = useState(false)
+  const correctionsClosed = isDebriefClosedForCorrections(debrief)
 
   useEffect(() => {
     setConfirmation(getCurrentUserConfirmation(debrief, user))
   }, [debrief, user])
 
   const addExtraNote = async () => {
+    if (correctionsClosed) {
+      alert(CLOSED_DEBRIEF_MESSAGE)
+      return
+    }
     if (!extraNoteText.trim()) {
       alert('Please enter the extra note first.')
       return
@@ -348,7 +355,9 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={styles.lockedBanner}>
-        Submitted debrief is locked. Add extra notes below if something was missed.
+        {correctionsClosed
+          ? CLOSED_DEBRIEF_MESSAGE
+          : 'Submitted debrief is locked. Add extra notes below if something was missed.'}
       </div>
 
       <div style={styles.panel}>
@@ -376,22 +385,28 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
             ))}
           </div>
         )}
-        <textarea
-          className="input"
-          value={extraNoteText}
-          onChange={(e) => setExtraNoteText(e.target.value)}
-          rows={4}
-          placeholder="Add an extra note or correction..."
-          style={styles.textarea}
-        />
-        <button
-          className="btn btn-finish"
-          onClick={addExtraNote}
-          disabled={savingExtra}
-          style={styles.primaryButton}
-        >
-          {savingExtra ? 'Saving...' : 'Add Extra Note'}
-        </button>
+        {correctionsClosed ? (
+          <div style={styles.closedText}>No more corrections can be added after review.</div>
+        ) : (
+          <>
+            <textarea
+              className="input"
+              value={extraNoteText}
+              onChange={(e) => setExtraNoteText(e.target.value)}
+              rows={4}
+              placeholder="Add an extra note or correction..."
+              style={styles.textarea}
+            />
+            <button
+              className="btn btn-finish"
+              onClick={addExtraNote}
+              disabled={savingExtra}
+              style={styles.primaryButton}
+            >
+              {savingExtra ? 'Saving...' : 'Add Extra Note'}
+            </button>
+          </>
+        )}
       </div>
 
       <div style={styles.panel}>
@@ -1114,6 +1129,11 @@ export default function ShiftDebriefPage({
 
   const handleQuickSave = async (item) => {
     if (!context) return
+    if (submitted && isDebriefClosedForCorrections(submitted)) {
+      setQuickStatus(CLOSED_DEBRIEF_MESSAGE)
+      alert(CLOSED_DEBRIEF_MESSAGE)
+      return
+    }
     if (isOffline) {
       const localDraft = await getOfflineDraft(getDebriefDraftId(context.id)).catch(() => null)
       const existingItems = Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items : items
@@ -1166,9 +1186,13 @@ export default function ShiftDebriefPage({
         <div style={styles.panel}>
           <h3 style={styles.panelTitle}>Quick Note</h3>
           <p style={styles.bodyText}>
-            Save a client note or general handoff item. If the debrief is already submitted, this saves as an extra note.
+            {submitted && isDebriefClosedForCorrections(submitted)
+              ? CLOSED_DEBRIEF_MESSAGE
+              : 'Save a client note or general handoff item. If the debrief is already submitted, this saves as an extra note.'}
           </p>
-          <DebriefNoteForm user={user} onSave={handleQuickSave} buttonLabel="Save Debrief Note" compact />
+          {submitted && isDebriefClosedForCorrections(submitted) ? null : (
+            <DebriefNoteForm user={user} onSave={handleQuickSave} buttonLabel="Save Debrief Note" compact />
+          )}
           {quickStatus && <div style={styles.savedText}>{quickStatus}</div>}
         </div>
       ) : submitted ? (
@@ -1358,6 +1382,12 @@ const styles = {
     fontSize: '14px',
     color: 'var(--text-secondary)',
     padding: '10px 0'
+  },
+  closedText: {
+    fontSize: '14px',
+    color: 'var(--text-secondary)',
+    padding: '8px 0',
+    fontWeight: 700
   },
   savedText: {
     marginTop: '12px',

@@ -23,6 +23,7 @@ import {
 
 export const DEBRIEF_DRAFTS_COLLECTION = 'shiftDebriefDrafts'
 export const DEBRIEFS_COLLECTION = 'shiftDebriefs'
+export const CLOSED_DEBRIEF_MESSAGE = 'This debrief has already been reviewed and is now closed. No more corrections can be added.'
 
 export const DEBRIEF_LOCATION_IDS = new Set(['mesquite', 'lone_mountain'])
 
@@ -332,6 +333,9 @@ export async function appendExtraDebriefNote(debriefId, extraNote) {
   const debriefSnap = await getDoc(doc(db, DEBRIEFS_COLLECTION, debriefId))
   if (!debriefSnap.exists()) throw new Error('Submitted debrief was not found.')
   const existing = debriefSnap.data()
+  if (isDebriefClosedForCorrections(existing)) {
+    throw new Error(CLOSED_DEBRIEF_MESSAGE)
+  }
   const extraNotes = Array.isArray(existing.extraNotes) ? existing.extraNotes : []
   await updateDoc(doc(db, DEBRIEFS_COLLECTION, debriefId), {
     extraNotes: [...extraNotes, extraNote],
@@ -399,6 +403,9 @@ export async function saveDebriefConfirmation(debriefId, confirmation, user) {
 export async function saveQuickDebriefNote(context, item, user) {
   const submitted = await getCurrentSubmittedDebrief(context)
   if (submitted) {
+    if (isDebriefClosedForCorrections(submitted)) {
+      throw new Error(CLOSED_DEBRIEF_MESSAGE)
+    }
     await appendExtraDebriefNote(submitted.id, createExtraNote({
       note: item.type === 'client'
         ? `${item.clientName} - ${getDebriefSectionLabel(item.section)}: ${item.note}`
@@ -410,6 +417,10 @@ export async function saveQuickDebriefNote(context, item, user) {
   }
   await addDraftItem(context, item)
   return { mode: 'draft', debriefId: context.id }
+}
+
+export function isDebriefClosedForCorrections(debrief) {
+  return debrief?.confirmed === true
 }
 
 async function getReceivingBhtUsers({ locationId, shiftId, submittedByUserId }) {

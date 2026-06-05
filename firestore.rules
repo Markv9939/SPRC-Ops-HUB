@@ -704,7 +704,14 @@ service cloud.firestore {
           .affectedKeys()
           .hasOnly(['extraNotes', 'confirmation', 'confirmed', 'updatedAt', 'version'])
         && request.resource.data.extraNotes is list
-        && request.resource.data.extraNotes.size() >= resource.data.extraNotes.size()
+        && (
+          request.resource.data.extraNotes == resource.data.extraNotes
+          || (
+            resource.data.confirmed != true
+            && request.resource.data.confirmed != true
+            && request.resource.data.extraNotes.size() >= resource.data.extraNotes.size()
+          )
+        )
         && request.resource.data.confirmation is map
         && createdAtUnchanged();
 
