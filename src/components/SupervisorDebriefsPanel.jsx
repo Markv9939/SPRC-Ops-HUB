@@ -36,10 +36,15 @@ function locationLabel(locationId) {
   return locationId || '--'
 }
 
-function DebriefDetail({ debrief }) {
+function DebriefDetail({ debrief, nowMs }) {
   const items = Array.isArray(debrief.items) ? debrief.items : []
   const extraNotes = Array.isArray(debrief.extraNotes) ? debrief.extraNotes : []
   const confirmation = debrief.confirmation || {}
+  const acknowledgments = confirmation.acknowledgments || {}
+  const receivingUserIds = Array.isArray(debrief.receivingUserIds) ? debrief.receivingUserIds : []
+  const receivingUserNames = debrief.receivingUserNames || {}
+  const ackLateAt = toDate(debrief.incomingAcknowledgmentLateAt)
+  const ackIsLate = Boolean(ackLateAt && ackLateAt.getTime() <= nowMs)
 
   return (
     <div style={styles.detail}>
@@ -68,26 +73,65 @@ function DebriefDetail({ debrief }) {
       )}
 
       <div style={styles.sectionTitle}>Incoming Staff Confirmation</div>
-      <div style={styles.checkGrid}>
-        {CONFIRMATION_ITEMS.map(item => (
-          <div key={item.id} style={{
-            ...styles.checkItem,
-            ...(confirmation[item.id] === true ? styles.checkItemDone : {})
-          }}>
-            {confirmation[item.id] === true ? 'Yes' : 'No'} - {item.label}
+      {receivingUserIds.length === 0 ? (
+        <>
+          <div style={styles.checkGrid}>
+            {CONFIRMATION_ITEMS.map(item => (
+              <div key={item.id} style={{
+                ...styles.checkItem,
+                ...(confirmation[item.id] === true ? styles.checkItemDone : {})
+              }}>
+                {confirmation[item.id] === true ? 'Yes' : 'No'} - {item.label}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div style={styles.confirmLine}>
-        Initials: {confirmation.incomingStaffInitials || '--'}
-        {debrief.confirmed ? ` | Confirmed by ${confirmation.confirmedByName || 'incoming staff'} on ${formatDateTime(confirmation.confirmedAt)}` : ''}
-      </div>
+          <div style={styles.confirmLine}>
+            Initials: {confirmation.incomingStaffInitials || '--'}
+            {debrief.confirmed ? ` | Confirmed by ${confirmation.confirmedByName || 'incoming staff'} on ${formatDateTime(confirmation.confirmedAt)}` : ''}
+          </div>
+        </>
+      ) : (
+        <div style={styles.stack}>
+          {receivingUserIds.map(userId => {
+            const ack = acknowledgments[userId] || {}
+            const done = ack.confirmed === true
+            return (
+              <div key={userId} style={styles.ackCard}>
+                <div style={styles.noteHeader}>
+                  <strong>{receivingUserNames[userId] || 'Receiving BHT'}</strong>
+                  <span style={{
+                    ...styles.badge,
+                    ...(done ? styles.confirmedBadge : (ackIsLate ? styles.lateBadge : styles.pendingBadge))
+                  }}>
+                    {done ? 'Acknowledged' : (ackIsLate ? 'Late' : 'Pending')}
+                  </span>
+                </div>
+                <div style={styles.checkGrid}>
+                  {CONFIRMATION_ITEMS.map(item => (
+                    <div key={item.id} style={{
+                      ...styles.checkItem,
+                      ...(ack[item.id] === true ? styles.checkItemDone : {})
+                    }}>
+                      {ack[item.id] === true ? 'Yes' : 'No'} - {item.label}
+                    </div>
+                  ))}
+                </div>
+                <div style={styles.confirmLine}>
+                  Initials: {ack.incomingStaffInitials || '--'}
+                  {done ? ` | Confirmed on ${formatDateTime(ack.confirmedAt)}` : ` | Late after ${formatDateTime(debrief.incomingAcknowledgmentLateAt)}`}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
 
 export default function SupervisorDebriefsPanel({ inEocScope, focusedDebriefId = null }) {
   const now = useMemo(() => new Date(), [])
+  const [nowMs, setNowMs] = useState(() => Date.now())
   const [startDate, setStartDate] = useState(() => dateKey(new Date(now.getFullYear(), now.getMonth(), 1)))
   const [endDate, setEndDate] = useState(() => dateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0)))
   const [houseFilter, setHouseFilter] = useState('all')
@@ -95,6 +139,11 @@ export default function SupervisorDebriefsPanel({ inEocScope, focusedDebriefId =
   const [confirmationFilter, setConfirmationFilter] = useState('all')
   const [debriefs, setDebriefs] = useState([])
   const [expandedId, setExpandedId] = useState(null)
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNowMs(Date.now()), 60 * 1000)
+    return () => window.clearInterval(intervalId)
+  }, [])
 
   useEffect(() => {
     if (!startDate || !endDate) return undefined
@@ -189,7 +238,10 @@ export default function SupervisorDebriefsPanel({ inEocScope, focusedDebriefId =
           <div style={styles.emptyState}>No debriefs found.</div>
         ) : (
           <div style={styles.stack}>
-            {filtered.map(debrief => (
+            {filtered.map(debrief => {
+              const ackLateAt = toDate(debrief.incomingAcknowledgmentLateAt)
+              const ackIsLate = !debrief.confirmed && ackLateAt && ackLateAt.getTime() <= nowMs
+              return (
               <div key={debrief.id} style={{
                 ...styles.card,
                 ...(focusedDebriefId === debrief.id ? styles.focusedCard : {})
@@ -211,15 +263,16 @@ export default function SupervisorDebriefsPanel({ inEocScope, focusedDebriefId =
                     <span style={styles.badge}>{debrief.itemCount || 0} notes</span>
                     <span style={{
                       ...styles.badge,
-                      ...(debrief.confirmed ? styles.confirmedBadge : styles.pendingBadge)
+                      ...(debrief.confirmed ? styles.confirmedBadge : (ackIsLate ? styles.lateBadge : styles.pendingBadge))
                     }}>
-                      {debrief.confirmed ? 'Confirmed' : 'Pending'}
+                      {debrief.confirmed ? 'Acknowledged' : (ackIsLate ? 'Late' : 'Pending')}
                     </span>
                   </div>
                 </button>
-                {currentExpandedId === debrief.id && <DebriefDetail debrief={debrief} />}
+                {currentExpandedId === debrief.id && <DebriefDetail debrief={debrief} nowMs={nowMs} />}
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -335,6 +388,10 @@ const styles = {
     backgroundColor: 'rgba(176,122,40,0.16)',
     color: '#8A5C16'
   },
+  lateBadge: {
+    backgroundColor: 'rgba(205,78,66,0.14)',
+    color: '#9D362E'
+  },
   detail: {
     borderTop: '1px solid rgba(17,47,82,0.14)',
     padding: '14px'
@@ -347,6 +404,12 @@ const styles = {
     color: 'var(--text-primary)'
   },
   noteCard: {
+    border: '1px solid rgba(17,47,82,0.12)',
+    borderRadius: '8px',
+    padding: '12px',
+    backgroundColor: 'rgba(17,47,82,0.04)'
+  },
+  ackCard: {
     border: '1px solid rgba(17,47,82,0.12)',
     borderRadius: '8px',
     padding: '12px',

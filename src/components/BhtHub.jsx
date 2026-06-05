@@ -3,6 +3,9 @@ import { getShiftById, LOCATIONS } from '../data/eocConstants'
 import useEocAssignments from '../hooks/useEocAssignments'
 import useEocTasks from '../hooks/useEocTasks'
 import { getCurrentCycleDueDate } from '../utils/eocSchedule'
+import { notifyWarning } from '../utils/toast'
+
+const LOCAL_REMINDER_INTERVAL_MS = 60 * 60 * 1000
 
 function BhtHub({
   user,
@@ -15,7 +18,9 @@ function BhtHub({
   onAddDebriefNote,
   onEditDebrief,
   onDebriefAssignmentChange,
-  debriefSummary = { available: false, status: 'none', itemCount: 0 }
+  debriefSummary = { available: false, status: 'none', itemCount: 0 },
+  debriefAlerts = [],
+  onNavigateToDebrief
 }) {
   const { assignment, loading: assignmentLoading } = useEocAssignments(user)
   const { tasks, loading: tasksLoading } = useEocTasks(user, assignment)
@@ -127,6 +132,9 @@ function BhtHub({
 
   const vanStatus = getEocStatus(vanTask, vanCompleted)
   const houseStatus = getEocStatus(houseTask, houseCompleted)
+  const pendingIncomingHandoffs = debriefAlerts
+    .filter(alert => alert.type === 'shift_debrief_submitted')
+    .filter(alert => alert.targetUserId === user?.id)
   const debriefAvailable = debriefSummary?.available === true
   const debriefSubmitted = debriefSummary?.status === 'submitted'
   const debriefHasDraft = debriefSummary?.status === 'draft'
@@ -146,6 +154,36 @@ function BhtHub({
     }, 100)
     return () => clearTimeout(timerId)
   }, [focusedIssueUpdateId])
+
+  useEffect(() => {
+    const remindIfDue = () => {
+      const nowMs = Date.now()
+      const reminderItems = [
+        ...tasks
+          .filter(task => task.status === 'overdue')
+          .map(task => ({
+            key: `eoc:${task.id}`,
+            message: `${task.taskType === 'van' ? 'Van' : 'House'} EOC is overdue. Please complete it when safe.`
+          })),
+        ...pendingIncomingHandoffs.map(alert => ({
+          key: `handoff:${alert.id}`,
+          message: 'Incoming shift handoff is waiting for your review and initials.'
+        }))
+      ]
+
+      reminderItems.forEach(item => {
+        const storageKey = `sprc:bht-reminder:${item.key}`
+        const lastShownMs = Number(localStorage.getItem(storageKey) || 0)
+        if (lastShownMs && nowMs - lastShownMs < LOCAL_REMINDER_INTERVAL_MS) return
+        localStorage.setItem(storageKey, String(nowMs))
+        notifyWarning(item.message, 5200)
+      })
+    }
+
+    remindIfDue()
+    const intervalId = window.setInterval(remindIfDue, 60 * 1000)
+    return () => window.clearInterval(intervalId)
+  }, [pendingIncomingHandoffs, tasks])
 
   if (assignmentLoading || tasksLoading) {
     return (
@@ -218,6 +256,33 @@ function BhtHub({
 
       {/* Issue updates */}
       {renderIssueUpdates()}
+
+      {pendingIncomingHandoffs.length > 0 && (
+        <div className="glass-card" style={{ marginBottom: '16px', padding: '14px 16px', border: '2px solid rgba(176,122,40,0.34)' }}>
+          <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '8px' }}>
+            Incoming handoff pending
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {pendingIncomingHandoffs.map(alert => (
+              <button
+                key={alert.id}
+                className="hub-action-row hub-action-row-ready"
+                onClick={() => onNavigateToDebrief?.(alert)}
+                style={{ margin: 0 }}
+              >
+                <div className="hub-action-icon hub-action-icon-house">D</div>
+                <div className="hub-action-info">
+                  <div className="hub-action-title">Review handoff</div>
+                  <div className="hub-action-subtitle">
+                    Complete your checklist and initials.
+                  </div>
+                </div>
+                <div className="hub-action-chevron">&gt;</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Main action rows */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>

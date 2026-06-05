@@ -1,14 +1,22 @@
 import { db } from '../firebase'
 import { getShiftById, getTemplateScopeForShift } from '../data/eocConstants'
-import { getCurrentCycleDueDate, phoenixNow } from '../utils/eocSchedule'
+import { getCurrentCycleDueDate } from '../utils/eocSchedule'
 import { collection, query, where, getDocs, doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore'
 import { getVersionNumber } from './versioning'
 import { loadTemplateAssignmentsByScope, resolveTemplateForScope } from './eocTemplateService'
-import { getAvailableMainLocationsForUser, isAdminRole, isBhtRole, locationIdToMainLocation } from '../utils/orgModel'
+import { getAvailableMainLocationsForUser, isAdminRole, isBhtRole, isSupervisorRole, locationIdToMainLocation } from '../utils/orgModel'
+import {
+  formatPhoenixDateKey,
+  getNextShiftId,
+  getShiftTimingConfig,
+  getShiftTimingDetails,
+  hasTimestampPassed,
+  isOtcTimedShift,
+  toDate
+} from './shiftTimingService'
 
 function toPhoenixDateStr() {
-  const now = phoenixNow()
-  return `${now.year}-${String(now.month).padStart(2, '0')}-${String(now.day).padStart(2, '0')}`
+  return formatPhoenixDateKey(new Date())
 }
 
 function buildTaskDocId({ locationId, shiftId, taskType, dueDate, vanId }) {
@@ -22,9 +30,10 @@ function buildGroupKey(locationId, shiftId) {
   return `${locationId}::${shiftId}`
 }
 
-function getDesiredStatus(dueDate, currentStatus, todayStr) {
+function getDesiredStatus(task, currentStatus, todayStr, now = new Date()) {
   if (currentStatus === 'completed' || currentStatus === 'ignored') return currentStatus
-  return dueDate < todayStr ? 'overdue' : 'pending'
+  if (task?.dueAt) return hasTimestampPassed(task.dueAt, now) ? 'overdue' : 'pending'
+  return task?.dueDate < todayStr ? 'overdue' : 'pending'
 }
 
 function sortUnique(values) {
@@ -74,6 +83,13 @@ function createTaskRecord(group, taskType, vanId = null, templateMeta = null) {
     eligibleUserIds,
     eligibleUserNames,
     dueDate: group.dueDate,
+    availableAt: group.availableAt || null,
+    dueAt: group.dueAt || null,
+    shiftStartAt: group.shiftStartAt || null,
+    shiftEndAt: group.shiftEndAt || null,
+    outgoingDebriefDueAt: group.outgoingDebriefDueAt || null,
+    incomingAcknowledgmentLateAt: group.incomingAcknowledgmentLateAt || null,
+    timingSource: group.timingSource || 'legacy',
     status: 'pending',
     cycleKey: '',
     active: true,
@@ -104,7 +120,7 @@ function createTaskRecord(group, taskType, vanId = null, templateMeta = null) {
   return task
 }
 
-function buildDesiredTasks(assignments, templateAssignmentsByScope) {
+function buildDesiredTasks(assignments, templateAssignmentsByScope, timingConfig) {
   const groups = new Map()
 
   for (const assignment of assignments) {
@@ -112,11 +128,19 @@ function buildDesiredTasks(assignments, templateAssignmentsByScope) {
     if (!shift) continue
 
     const groupKey = buildGroupKey(assignment.locationId, assignment.shiftId)
+    const timingDetails = getShiftTimingDetails(assignment.shiftId, new Date(), timingConfig)
     const existingGroup = groups.get(groupKey) || {
       locationId: assignment.locationId,
       shiftId: assignment.shiftId,
       shiftLabel: shift.label,
-      dueDate: getCurrentCycleDueDate(shift),
+      dueDate: timingDetails?.eocDueDate || getCurrentCycleDueDate(shift),
+      availableAt: timingDetails?.eocAvailableAt || null,
+      dueAt: timingDetails?.eocDueAt || null,
+      shiftStartAt: timingDetails?.shiftStartAt || null,
+      shiftEndAt: timingDetails?.shiftEndAt || null,
+      outgoingDebriefDueAt: timingDetails?.outgoingDebriefDueAt || null,
+      incomingAcknowledgmentLateAt: timingDetails?.incomingAcknowledgmentLateAt || null,
+      timingSource: timingDetails ? 'appSettings/shiftTiming' : 'legacy',
       eligibleUserIds: [],
       eligibleUserNames: [],
       vanAssigneesByVanId: new Map()
@@ -175,6 +199,124 @@ function buildDesiredTasks(assignments, templateAssignmentsByScope) {
   return tasks.sort((a, b) => String(a.cycleKey || '').localeCompare(String(b.cycleKey || '')))
 }
 
+function cleanIdPart(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_')
+}
+
+function buildDebriefId({ userId, dateKey, locationId, shiftId }) {
+  return [
+    String(userId || '').trim(),
+    String(dateKey || '').trim(),
+    String(locationId || '').trim().toLowerCase(),
+    String(shiftId || '').trim()
+  ].join('_')
+}
+
+function isAcknowledgedBy(debrief, userId) {
+  const normalizedUserId = String(userId || '').trim()
+  if (!normalizedUserId) return false
+  const acknowledgments = debrief?.confirmation?.acknowledgments || {}
+  if (acknowledgments?.[normalizedUserId]?.confirmed === true) return true
+  return debrief?.confirmed === true && String(debrief?.confirmation?.confirmedByUserId || '').trim() === normalizedUserId
+}
+
+async function queueUniqueAlert(batch, alertId, payload) {
+  const alertRef = doc(db, 'alerts', alertId)
+  const existingSnap = await getDoc(alertRef)
+  if (existingSnap.exists()) return false
+  batch.set(alertRef, {
+    ...payload,
+    alertKey: alertId,
+    read: false,
+    version: 1,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  })
+  return true
+}
+
+async function syncDebriefTimingAlerts({ user, assignments, timingConfig, batch }) {
+  if (!isSupervisorRole(user?.role) && !isAdminRole(user?.role)) return 0
+
+  const now = new Date()
+  let alerts = 0
+  const activeAssignments = assignments
+    .filter(assignment => assignment.active)
+    .filter(assignment => isOtcTimedShift(assignment.shiftId, timingConfig))
+    .filter(assignment => assignment.bhtUserId)
+
+  const seenMissingKeys = new Set()
+  for (const assignment of activeAssignments) {
+    const timing = getShiftTimingDetails(assignment.shiftId, now, timingConfig)
+    if (!timing?.outgoingDebriefDueAt || timing.outgoingDebriefDueAt.getTime() > now.getTime()) continue
+
+    const debriefId = buildDebriefId({
+      userId: assignment.bhtUserId,
+      dateKey: timing.shiftStartDateKey,
+      locationId: assignment.locationId,
+      shiftId: assignment.shiftId
+    })
+    if (seenMissingKeys.has(debriefId)) continue
+    seenMissingKeys.add(debriefId)
+
+    const debriefSnap = await getDoc(doc(db, 'shiftDebriefs', debriefId))
+    if (debriefSnap.exists()) continue
+
+    const alertId = [
+      'shift_debrief_missing',
+      cleanIdPart(assignment.locationId),
+      cleanIdPart(assignment.shiftId),
+      cleanIdPart(assignment.bhtUserId),
+      cleanIdPart(timing.shiftStartDateKey)
+    ].join('__')
+    const queued = await queueUniqueAlert(batch, alertId, {
+      type: 'shift_debrief_missing',
+      debriefId,
+      locationId: assignment.locationId,
+      shiftId: assignment.shiftId,
+      audience: 'supervisor',
+      severity: 'high',
+      bhtName: assignment.bhtUserName || null,
+      dueAt: timing.outgoingDebriefDueAt,
+      message: `${assignment.bhtUserName || 'BHT'} has not submitted the outgoing debrief due for ${assignment.locationId} ${timing.shiftLabel}.`
+    })
+    if (queued) alerts += 1
+  }
+
+  const debriefsSnap = await getDocs(query(collection(db, 'shiftDebriefs'), where('status', '==', 'submitted')))
+  for (const debriefDoc of debriefsSnap.docs) {
+    const debrief = { id: debriefDoc.id, ...debriefDoc.data() }
+    if (!isOtcTimedShift(debrief.receivingShiftId || getNextShiftId(debrief.shiftId), timingConfig)) continue
+    if (!hasTimestampPassed(debrief.incomingAcknowledgmentLateAt, now)) continue
+
+    const receivingUserIds = Array.isArray(debrief.receivingUserIds) ? debrief.receivingUserIds : []
+    for (const receivingUserId of receivingUserIds) {
+      if (isAcknowledgedBy(debrief, receivingUserId)) continue
+      const alertId = [
+        'shift_debrief_incoming_ack_late',
+        cleanIdPart(debrief.id),
+        cleanIdPart(receivingUserId)
+      ].join('__')
+      const receivingNames = debrief.receivingUserNames || {}
+      const queued = await queueUniqueAlert(batch, alertId, {
+        type: 'shift_debrief_incoming_ack_late',
+        debriefId: debrief.id,
+        locationId: debrief.locationId,
+        shiftId: debrief.receivingShiftId || getNextShiftId(debrief.shiftId),
+        audience: 'supervisor',
+        severity: 'high',
+        targetUserId: receivingUserId,
+        targetUserName: receivingNames[receivingUserId] || null,
+        dueAt: toDate(debrief.incomingAcknowledgmentLateAt) || null,
+        message: `${receivingNames[receivingUserId] || 'Receiving BHT'} has not acknowledged the incoming handoff for ${debrief.locationLabel || debrief.locationId}.`
+      })
+      if (queued) alerts += 1
+    }
+  }
+
+  return alerts
+}
+
 function getAccessibleGroupKeys(user, normalizedAssignments) {
   const normalizedUserId = String(user?.id || '').trim()
   if (!normalizedUserId) return new Set()
@@ -206,9 +348,11 @@ function taskInScope(task, scopedGroupKeys) {
 }
 
 export async function syncEocTasksForUserScope(user) {
-  if (!user?.id) return { created: 0, updated: 0, scanned: 0 }
+  if (!user?.id) return { created: 0, updated: 0, scanned: 0, alerts: 0 }
 
   const todayStr = toPhoenixDateStr()
+  const now = new Date()
+  const timingConfig = await getShiftTimingConfig()
 
   const assignmentsSnap = await getDocs(
     query(collection(db, 'shiftAssignments'), where('active', '==', true))
@@ -228,7 +372,7 @@ export async function syncEocTasksForUserScope(user) {
     .filter(assignment => scopedGroupKeys.has(buildGroupKey(assignment.locationId, assignment.shiftId)))
 
   const templateAssignmentsByScope = await loadTemplateAssignmentsByScope()
-  const desiredTasks = buildDesiredTasks(assignmentsForScope, templateAssignmentsByScope)
+  const desiredTasks = buildDesiredTasks(assignmentsForScope, templateAssignmentsByScope, timingConfig)
   const desiredTaskIds = new Set(desiredTasks.map(task => task.cycleKey))
   const batch = writeBatch(db)
   const touched = new Set()
@@ -241,7 +385,7 @@ export async function syncEocTasksForUserScope(user) {
     const existingSnap = await getDoc(taskRef)
 
     if (!existingSnap.exists()) {
-      const initialStatus = getDesiredStatus(task.dueDate, 'pending', todayStr)
+      const initialStatus = getDesiredStatus(task, 'pending', todayStr, now)
       batch.set(taskRef, {
         ...task,
         status: initialStatus,
@@ -260,7 +404,7 @@ export async function syncEocTasksForUserScope(user) {
     const currentEligibleUserIds = sortUnique(Array.isArray(existing.eligibleUserIds) ? existing.eligibleUserIds : [])
     const currentEligibleUserNames = sortUnique(Array.isArray(existing.eligibleUserNames) ? existing.eligibleUserNames : [])
     const scopeKey = buildGroupKey(task.locationId, task.shiftId)
-    const nextStatus = getDesiredStatus(task.dueDate, existing.status, todayStr)
+    const nextStatus = getDesiredStatus(task, existing.status, todayStr, now)
     const needsTaskShapeUpdate =
       existing.taskType !== task.taskType
       || existing.locationId !== task.locationId
@@ -270,6 +414,13 @@ export async function syncEocTasksForUserScope(user) {
       || existing.dueDate !== task.dueDate
       || existing.shiftLabel !== task.shiftLabel
       || existing.scopeKey !== scopeKey
+      || toDate(existing.availableAt)?.getTime() !== toDate(task.availableAt)?.getTime()
+      || toDate(existing.dueAt)?.getTime() !== toDate(task.dueAt)?.getTime()
+      || toDate(existing.shiftStartAt)?.getTime() !== toDate(task.shiftStartAt)?.getTime()
+      || toDate(existing.shiftEndAt)?.getTime() !== toDate(task.shiftEndAt)?.getTime()
+      || toDate(existing.outgoingDebriefDueAt)?.getTime() !== toDate(task.outgoingDebriefDueAt)?.getTime()
+      || toDate(existing.incomingAcknowledgmentLateAt)?.getTime() !== toDate(task.incomingAcknowledgmentLateAt)?.getTime()
+      || existing.timingSource !== task.timingSource
       || String(existing.templateId || '').trim() !== String(task.templateId || '').trim()
       || String(existing.templateName || '').trim() !== String(task.templateName || '').trim()
       || !arraysEqual(currentEligibleUserIds, nextEligibleUserIds)
@@ -286,6 +437,13 @@ export async function syncEocTasksForUserScope(user) {
         templateScope: task.templateScope,
         vanId: task.vanId || null,
         dueDate: task.dueDate,
+        availableAt: task.availableAt || null,
+        dueAt: task.dueAt || null,
+        shiftStartAt: task.shiftStartAt || null,
+        shiftEndAt: task.shiftEndAt || null,
+        outgoingDebriefDueAt: task.outgoingDebriefDueAt || null,
+        incomingAcknowledgmentLateAt: task.incomingAcknowledgmentLateAt || null,
+        timingSource: task.timingSource || 'legacy',
         shiftLabel: task.shiftLabel,
         scopeKey,
         templateId: task.templateId || null,
@@ -327,7 +485,8 @@ export async function syncEocTasksForUserScope(user) {
   for (const taskDoc of pendingSnap.docs) {
     const data = taskDoc.data()
     if (!taskInScope(data, scopedGroupKeys)) continue
-    if (!data.dueDate || data.dueDate >= todayStr) continue
+    if (data.dueAt && !hasTimestampPassed(data.dueAt, now)) continue
+    if (!data.dueAt && (!data.dueDate || data.dueDate >= todayStr)) continue
     if (touched.has(taskDoc.id)) continue
 
     batch.update(taskDoc.ref, {
@@ -339,13 +498,21 @@ export async function syncEocTasksForUserScope(user) {
     updated += 1
   }
 
-  if (created > 0 || updated > 0) {
+  const alerts = await syncDebriefTimingAlerts({
+    user,
+    assignments: assignmentsForScope,
+    timingConfig,
+    batch
+  })
+
+  if (created > 0 || updated > 0 || alerts > 0) {
     await batch.commit()
   }
 
   return {
     created,
     updated,
+    alerts,
     scanned: desiredTasks.length
   }
 }

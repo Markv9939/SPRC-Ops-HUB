@@ -70,6 +70,7 @@ function SupervisorDashboard({
   isOffline = false,
   eocAlerts = [],
   fleetAlerts = [],
+  debriefAlerts = [],
   navigationTarget = null,
   onNavigationHandled
 }) {
@@ -1616,6 +1617,7 @@ function SupervisorDashboard({
           fleetUpcomingTasks={fleetUpcomingTasks}
           eocAlerts={eocAlerts}
           fleetAlerts={fleetAlerts}
+          debriefAlerts={debriefAlerts}
           complianceItems={complianceItems}
           inComplianceScope={inComplianceScope}
           inTransportScope={inTransportScope}

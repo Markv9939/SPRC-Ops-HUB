@@ -50,7 +50,7 @@ function severityLabel(severity) {
 }
 
 function alertTypeIcon(type) {
-  if (type === 'shift_debrief_submitted') return 'D'
+  if (String(type || '').startsWith('shift_debrief_')) return 'D'
   if (type === 'eoc_issue') return '⚠️'
   if (type === 'eoc_issue_update') return '📋'
   if (type?.startsWith('fleet_')) return '🚐'
@@ -60,6 +60,9 @@ function alertTypeIcon(type) {
 
 function alertTypeLabel(type) {
   if (type === 'shift_debrief_submitted') return 'Shift Debrief'
+  if (type === 'shift_debrief_missing') return 'Missing Debrief'
+  if (type === 'shift_debrief_no_receivers') return 'No Receiver'
+  if (type === 'shift_debrief_incoming_ack_late') return 'Late Handoff Ack'
   if (type === 'eoc_issue') return 'EOC Issue'
   if (type === 'eoc_issue_update') return 'Issue Update'
   if (type === 'fleet_overdue') return 'Fleet Overdue'
@@ -83,7 +86,7 @@ const FILTER_TABS = [
 function filterAlerts(alerts, filterKey) {
   if (filterKey === 'all') return alerts
   if (filterKey === 'eoc') return alerts.filter(a => a.type === 'eoc_issue')
-  if (filterKey === 'debriefs') return alerts.filter(a => a.type === 'shift_debrief_submitted')
+  if (filterKey === 'debriefs') return alerts.filter(a => String(a.type || '').startsWith('shift_debrief_'))
   if (filterKey === 'fleet') return alerts.filter(a => a.type?.startsWith('fleet_') || a.type === 'transport_completed')
   if (filterKey === 'updates') return alerts.filter(a => a.type === 'eoc_issue_update')
   return alerts
@@ -191,7 +194,7 @@ export default function NotificationCenter({
   const handleAlertAction = (alert) => {
     if (alert.type === 'eoc_issue' || alert.type === 'eoc_issue_update') {
       onNavigateToIssue?.(alert)
-    } else if (alert.type === 'shift_debrief_submitted') {
+    } else if (String(alert.type || '').startsWith('shift_debrief_')) {
       onNavigateToDebrief?.(alert)
     } else if (alert.type?.startsWith('fleet_') || alert.type === 'transport_completed') {
       onNavigateToFleet?.(alert)
@@ -297,7 +300,7 @@ export default function NotificationCenter({
                   >
                     {alert.type === 'eoc_issue' || alert.type === 'eoc_issue_update'
                       ? 'View Issue'
-                      : alert.type === 'shift_debrief_submitted'
+                      : String(alert.type || '').startsWith('shift_debrief_')
                         ? 'View Debrief'
                         : 'View Details'}
                   </button>

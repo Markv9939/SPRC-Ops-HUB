@@ -10,6 +10,12 @@ function sortTasks(items) {
     const bPriority = STATUS_PRIORITY[b.status] ?? 99
     if (aPriority !== bPriority) return aPriority - bPriority
 
+    const aDueAt = a.dueAt?.toDate ? a.dueAt.toDate().getTime() : (a.dueAt ? new Date(a.dueAt).getTime() : 0)
+    const bDueAt = b.dueAt?.toDate ? b.dueAt.toDate().getTime() : (b.dueAt ? new Date(b.dueAt).getTime() : 0)
+    if (aDueAt || bDueAt) {
+      return (aDueAt || 0) - (bDueAt || 0)
+    }
+
     if (a.dueDate !== b.dueDate) {
       return (a.dueDate || '').localeCompare(b.dueDate || '')
     }

@@ -14,6 +14,13 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { isFleetAlertType } from '../utils/fleetStatus'
 import { isBhtRole } from '../utils/orgModel'
 
+const DEBRIEF_ALERT_TYPES = new Set([
+  'shift_debrief_submitted',
+  'shift_debrief_missing',
+  'shift_debrief_no_receivers',
+  'shift_debrief_incoming_ack_late'
+])
+
 function tsMs(ts) {
   if (!ts) return 0
   return ts.toDate ? ts.toDate().getTime() : 0
@@ -58,7 +65,7 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
 
       // Shift debrief alerts
       const scopedDebriefs = rows
-        .filter(a => a.type === 'shift_debrief_submitted')
+        .filter(a => DEBRIEF_ALERT_TYPES.has(a.type))
         .filter(a => (
           inEocScope(a.locationId)
           && (
@@ -76,7 +83,7 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
         if (type === 'eoc_issue' && inEocScope(alertDoc.locationId)) return acc + 1
         if (isFleetAlertType(type) && inComplianceScope(alertDoc.mainLocation || alertDoc.locationId || '')) return acc + 1
         if (
-          type === 'shift_debrief_submitted'
+          DEBRIEF_ALERT_TYPES.has(type)
           && inEocScope(alertDoc.locationId)
           && (
             isBhtRole(user.role)

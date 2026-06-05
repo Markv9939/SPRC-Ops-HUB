@@ -8,7 +8,7 @@
  * Props:
  *   user, isOffline, isMobile,
  *   eocIssues, eocOverdueTasks, fleetOverdueTasks, fleetUpcomingTasks,
- *   eocAlerts, fleetAlerts, complianceItems,
+ *   eocAlerts, fleetAlerts, debriefAlerts, complianceItems,
  *   inComplianceScope, inTransportScope,
  *   onNavigateTab            — (tabKey) => void
  *   onDrilldownToTransports  — ({ startDate, endDate, site, status, reason, driver }) => void
@@ -108,6 +108,18 @@ function formatFleetVehicleLabel(task) {
   return task?.vehicleId || 'Unknown vehicle'
 }
 
+function formatAlertTypeLabel(type) {
+  if (type === 'shift_debrief_missing') return 'Missing debrief'
+  if (type === 'shift_debrief_no_receivers') return 'No receiving BHT'
+  if (type === 'shift_debrief_incoming_ack_late') return 'Late handoff acknowledgment'
+  if (type === 'shift_debrief_submitted') return 'Shift debrief submitted'
+  if (type === 'eoc_issue') return 'EOC issue'
+  if (type === 'fleet_overdue') return 'Fleet overdue'
+  if (type === 'fleet_upcoming') return 'Fleet upcoming'
+  if (type === 'transport_completed') return 'Transport completed'
+  return type || 'Alert'
+}
+
 function formatTime(timestamp) {
   if (!timestamp) return '--:--'
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
@@ -162,6 +174,7 @@ export default function DashboardSummaryPanel({
   fleetUpcomingTasks,
   eocAlerts,
   fleetAlerts,
+  debriefAlerts = [],
   complianceItems,
   inComplianceScope,
   inTransportScope,
@@ -555,10 +568,10 @@ export default function DashboardSummaryPanel({
   const filteredOverdueTaskQueue = useMemo(() => eocOverdueTasks.filter(task => locationMatchesQueueFilter(task.locationId)), [eocOverdueTasks, locationMatchesQueueFilter])
   const filteredFleetOverdueQueue = useMemo(() => fleetOverdueTasks.filter(task => locationMatchesQueueFilter(task.mainLocation || task.locationId)), [fleetOverdueTasks, locationMatchesQueueFilter])
   const filteredFleetUpcomingQueue = useMemo(() => fleetUpcomingTasks.filter(task => locationMatchesQueueFilter(task.mainLocation || task.locationId)), [fleetUpcomingTasks, locationMatchesQueueFilter])
-  const filteredAlertQueue = useMemo(() => [...eocAlerts, ...fleetAlerts]
+  const filteredAlertQueue = useMemo(() => [...eocAlerts, ...fleetAlerts, ...debriefAlerts]
     .filter(a => locationMatchesQueueFilter(a.mainLocation || a.locationId))
     .sort((a, b) => { const aMs = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0; const bMs = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0; return bMs - aMs }),
-    [eocAlerts, fleetAlerts, locationMatchesQueueFilter])
+    [debriefAlerts, eocAlerts, fleetAlerts, locationMatchesQueueFilter])
   const filteredComplianceOverdueQueue = useMemo(() => scopedComplianceItems.filter(item => getStatus(item.dueDate) === 'overdue').filter(item => complianceMatchesQueueFilter(item)).sort((a, b) => getComplianceItemDueMs(a) - getComplianceItemDueMs(b)), [complianceMatchesQueueFilter, scopedComplianceItems])
   const filteredComplianceUpcomingQueue = useMemo(() => scopedComplianceItems.filter(item => getStatus(item.dueDate) === 'upcoming').filter(item => complianceMatchesQueueFilter(item)).sort((a, b) => getComplianceItemDueMs(a) - getComplianceItemDueMs(b)), [complianceMatchesQueueFilter, scopedComplianceItems])
 
@@ -571,7 +584,7 @@ export default function DashboardSummaryPanel({
 
   const hasQueueData = (
     eocIssues.length > 0 || eocOverdueTasks.length > 0 || fleetOverdueTasks.length > 0 ||
-    fleetUpcomingTasks.length > 0 || eocAlerts.length > 0 || fleetAlerts.length > 0 ||
+    fleetUpcomingTasks.length > 0 || eocAlerts.length > 0 || fleetAlerts.length > 0 || debriefAlerts.length > 0 ||
     complianceSummary.overdue > 0 || complianceSummary.upcoming > 0
   )
 
@@ -583,13 +596,14 @@ export default function DashboardSummaryPanel({
     eocIssues.forEach(i => addMapped(i.locationId))
     eocOverdueTasks.forEach(t => addMapped(t.locationId))
     eocAlerts.forEach(a => addMapped(a.locationId))
+    debriefAlerts.forEach(a => addMapped(a.locationId))
     fleetOverdueTasks.forEach(t => addMapped(t.mainLocation || t.locationId))
     fleetUpcomingTasks.forEach(t => addMapped(t.mainLocation || t.locationId))
     fleetAlerts.forEach(a => addMapped(a.mainLocation || a.locationId))
     scopedComplianceItems.forEach(item => { const s = getComplianceItemSite(item); if (s) discovered.add(s) })
     ;[...discovered].sort().forEach(site => { if (seenValues.has(site)) return; options.push({ value: site, label: `Location: ${site}` }); seenValues.add(site) })
     return options
-  }, [eocAlerts, eocIssues, eocOverdueTasks, fleetAlerts, fleetOverdueTasks, fleetUpcomingTasks, scopedComplianceItems])
+  }, [debriefAlerts, eocAlerts, eocIssues, eocOverdueTasks, fleetAlerts, fleetOverdueTasks, fleetUpcomingTasks, scopedComplianceItems])
 
   // ── Render ──
   return (
@@ -615,7 +629,7 @@ export default function DashboardSummaryPanel({
             </button>
             <button onClick={() => setQueueView('alerts')} style={{ padding: '10px 20px', backgroundColor: 'rgba(33,150,243,0.15)', borderRadius: '8px', textAlign: 'center', border: queueView === 'alerts' ? '2px solid #2196F3' : '1px solid rgba(33,150,243,0.3)', cursor: 'pointer', color: 'inherit' }}>
               <div style={{ fontSize: '12px', color: '#64B5F6' }}>Unread Alerts</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#64B5F6' }}>{eocAlerts.length + fleetAlerts.length}</div>
+              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#64B5F6' }}>{queueCounts.alerts}</div>
             </button>
           </div>
 
@@ -790,7 +804,7 @@ export default function DashboardSummaryPanel({
             {queueView === 'alerts' && filteredAlertQueue.length === 0 && (<div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No unread alerts for this filter.</div>)}
             {queueView === 'alerts' && filteredAlertQueue.map(alertItem => (
               <div key={alertItem.id} style={{ padding: '12px', borderRadius: '8px', border: '1px solid rgba(17,47,82,0.14)', backgroundColor: 'rgba(17,47,82,0.06)' }}>
-                <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>{alertItem.type || 'Alert'}</div>
+                <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>{formatAlertTypeLabel(alertItem.type)}</div>
                 <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{alertItem.message || '(no message)'}</div>
                 <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
                   {LOCATIONS.find(l => l.id === alertItem.locationId)?.label || alertItem.locationId || 'Unknown location'} &bull; {formatDate(alertItem.createdAt)} {formatTime(alertItem.createdAt)}

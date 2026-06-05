@@ -25,6 +25,20 @@ function getDraftDocId(taskId, userId) {
   return `${String(taskId || '').trim()}__${String(userId || '').trim()}`
 }
 
+function formatDueLabel(task) {
+  const dueAt = task?.dueAt?.toDate ? task.dueAt.toDate() : (task?.dueAt ? new Date(task.dueAt) : null)
+  if (dueAt && !Number.isNaN(dueAt.getTime())) {
+    return dueAt.toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    })
+  }
+  return task?.dueDate || '--'
+}
+
 function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   const [task, setTask] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -49,6 +63,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   const draftTimerRef = useRef(null)
   const lastSavedPayloadRef = useRef('')
   const isDraftLoadedRef = useRef(false)
+  const initialDraftSnapshotRef = useRef(false)
   const itemRefs = useRef({})
   const repairInputRefs = useRef({})
 
@@ -412,6 +427,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     async function loadDraft() {
       setDraftReady(false)
       isDraftLoadedRef.current = false
+      initialDraftSnapshotRef.current = false
       setDraftStatus('idle')
 
       try {
@@ -476,6 +492,11 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     }
 
     const serialized = JSON.stringify(payload)
+    if (!initialDraftSnapshotRef.current) {
+      initialDraftSnapshotRef.current = true
+      lastSavedPayloadRef.current = serialized
+      return undefined
+    }
     if (serialized === lastSavedPayloadRef.current) return undefined
 
     if (draftTimerRef.current) {
@@ -719,7 +740,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
             {eocType === 'van' ? 'Van EOC' : 'House EOC'}
           </h2>
           <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            {locationLabel} · Due {task?.dueDate}
+            {locationLabel} · Due {formatDueLabel(task)}
           </div>
         </div>
       </div>

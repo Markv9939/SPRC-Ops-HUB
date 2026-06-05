@@ -1,6 +1,5 @@
 import { auth, db } from '../firebase'
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
@@ -14,6 +13,13 @@ import {
 } from 'firebase/firestore'
 import { getShiftLabel } from '../data/eocConstants'
 import { isAdminRole, isBhtRole, isSupervisorRole, locationIdToMainLocation } from '../utils/orgModel'
+import {
+  getFallbackShiftTimingConfig,
+  getNextShiftId,
+  getShiftTimingConfig,
+  getShiftTimingDetails,
+  toDate
+} from './shiftTimingService'
 
 export const DEBRIEF_DRAFTS_COLLECTION = 'shiftDebriefDrafts'
 export const DEBRIEFS_COLLECTION = 'shiftDebriefs'
@@ -44,8 +50,6 @@ export const CONFIRMATION_ITEMS = [
   { id: 'controlledMedicationLogReviewed', label: 'Controlled medication log reviewed/signed' },
   { id: 'questionsClarificationsAddressed', label: 'Questions/clarifications addressed' }
 ]
-
-const SHIFT_SEQUENCE = ['shift_1', 'shift_2']
 
 function cleanToken(value) {
   return String(value || '').trim()
@@ -137,7 +141,8 @@ export function getBhtDebriefContext(user, date = new Date(), assignment = null)
   const source = assignment || user || {}
   const locationId = cleanToken(source?.locationId).toLowerCase()
   const shiftId = cleanToken(source?.shiftId)
-  const dateKey = getLocalDateKey(date)
+  const timing = getShiftTimingDetails(shiftId, date, getFallbackShiftTimingConfig())
+  const dateKey = timing?.shiftStartDateKey || getLocalDateKey(date)
 
   if (!isDebriefLocation(locationId) || !shiftId) return null
 
@@ -149,6 +154,10 @@ export function getBhtDebriefContext(user, date = new Date(), assignment = null)
     mainLocation: locationIdToMainLocation(locationId) || 'OTC',
     shiftId,
     shiftLabel: getShiftLabel(shiftId),
+    shiftStartAt: timing?.shiftStartAt || null,
+    shiftEndAt: timing?.shiftEndAt || null,
+    outgoingDebriefDueAt: timing?.outgoingDebriefDueAt || null,
+    incomingAcknowledgmentLateAt: timing?.incomingAcknowledgmentLateAt || null,
     draftByUserId: user.id,
     draftByName: user.name || 'BHT',
     draftByAuthUid: user.authUid || auth.currentUser?.uid || ''
@@ -202,7 +211,8 @@ export function createEmptyConfirmation() {
     confirmed: false,
     confirmedAt: null,
     confirmedByUserId: null,
-    confirmedByName: null
+    confirmedByName: null,
+    acknowledgments: {}
   }
 }
 
@@ -264,6 +274,20 @@ export async function submitShiftDebrief(context, items, user) {
     throw new Error('This debrief has already been submitted.')
   }
 
+  const timingConfig = await getShiftTimingConfig()
+  const outgoingTiming = getShiftTimingDetails(context.shiftId, new Date(), timingConfig)
+  const receivingShiftId = getNextShiftId(context.shiftId)
+  const receivingTiming = receivingShiftId
+    ? getShiftTimingDetails(receivingShiftId, outgoingTiming?.shiftEndAt || new Date(), timingConfig)
+    : null
+  const receivingUsers = receivingShiftId
+    ? await getReceivingBhtUsers({ locationId: context.locationId, shiftId: receivingShiftId, submittedByUserId: user?.id })
+    : []
+  const receivingUserNames = receivingUsers.reduce((acc, row) => {
+    acc[row.id] = row.name || 'BHT'
+    return acc
+  }, {})
+
   const payload = {
     ...context,
     status: 'submitted',
@@ -272,6 +296,14 @@ export async function submitShiftDebrief(context, items, user) {
     extraNotes: [],
     confirmation: createEmptyConfirmation(),
     confirmed: false,
+    receivingShiftId,
+    receivingShiftLabel: receivingShiftId ? getShiftLabel(receivingShiftId) : '',
+    receivingUserIds: receivingUsers.map(row => row.id),
+    receivingUserNames,
+    shiftStartAt: outgoingTiming?.shiftStartAt || context.shiftStartAt || null,
+    shiftEndAt: outgoingTiming?.shiftEndAt || context.shiftEndAt || null,
+    outgoingDebriefDueAt: outgoingTiming?.outgoingDebriefDueAt || context.outgoingDebriefDueAt || null,
+    incomingAcknowledgmentLateAt: receivingTiming?.incomingAcknowledgmentLateAt || null,
     submittedByUserId: user?.id || context.draftByUserId,
     submittedByName: user?.name || context.draftByName,
     submittedAt: serverTimestamp(),
@@ -293,7 +325,7 @@ export async function submitShiftDebrief(context, items, user) {
     },
     { merge: true }
   )
-  await createShiftDebriefSubmittedAlerts({ debrief: { ...payload, id: context.id }, user })
+  await createShiftDebriefSubmittedAlerts({ debrief: { ...payload, id: context.id }, receivingUsers })
 }
 
 export async function appendExtraDebriefNote(debriefId, extraNote) {
@@ -308,21 +340,60 @@ export async function appendExtraDebriefNote(debriefId, extraNote) {
 }
 
 export async function saveDebriefConfirmation(debriefId, confirmation, user) {
-  const confirmed = CONFIRMATION_ITEMS.every(item => confirmation?.[item.id] === true)
-    && cleanToken(confirmation?.incomingStaffInitials).length > 0
+  const debriefRef = doc(db, DEBRIEFS_COLLECTION, debriefId)
+  const debriefSnap = await getDoc(debriefRef)
+  if (!debriefSnap.exists()) throw new Error('Submitted debrief was not found.')
 
-  await updateDoc(doc(db, DEBRIEFS_COLLECTION, debriefId), {
+  const debrief = { id: debriefSnap.id, ...debriefSnap.data() }
+  const receivingUserIds = Array.isArray(debrief.receivingUserIds) ? debrief.receivingUserIds.map(v => cleanToken(v)) : []
+  const currentUserId = cleanToken(user?.id)
+  const currentAcknowledged = CONFIRMATION_ITEMS.every(item => confirmation?.[item.id] === true)
+    && cleanToken(confirmation?.incomingStaffInitials).length > 0
+  const existingConfirmation = debrief.confirmation || {}
+  const existingAcknowledgments = existingConfirmation.acknowledgments || {}
+  const nextAcknowledgments = {
+    ...existingAcknowledgments,
+    ...(currentUserId
+      ? {
+          [currentUserId]: {
+            keysAccountedFor: confirmation?.keysAccountedFor === true,
+            sharpsRestrictedVerified: confirmation?.sharpsRestrictedVerified === true,
+            clientRoundCompleted: confirmation?.clientRoundCompleted === true,
+            controlledMedicationLogReviewed: confirmation?.controlledMedicationLogReviewed === true,
+            questionsClarificationsAddressed: confirmation?.questionsClarificationsAddressed === true,
+            incomingStaffInitials: cleanToken(confirmation?.incomingStaffInitials),
+            confirmed: currentAcknowledged,
+            confirmedAt: currentAcknowledged ? new Date() : null,
+            confirmedByUserId: currentAcknowledged ? currentUserId : null,
+            confirmedByName: currentAcknowledged ? user?.name || null : null
+          }
+        }
+      : {})
+  }
+
+  const allReceivingAcknowledged = receivingUserIds.length > 0
+    ? receivingUserIds.every(userId => nextAcknowledgments[userId]?.confirmed === true)
+    : currentAcknowledged
+  const latestUserAcknowledgment = currentUserId ? nextAcknowledgments[currentUserId] : null
+
+  await updateDoc(debriefRef, {
     confirmation: {
+      ...existingConfirmation,
       ...confirmation,
       incomingStaffInitials: cleanToken(confirmation?.incomingStaffInitials),
-      confirmed,
-      confirmedAt: confirmed ? serverTimestamp() : null,
-      confirmedByUserId: confirmed ? user?.id || null : null,
-      confirmedByName: confirmed ? user?.name || null : null
+      confirmed: allReceivingAcknowledged,
+      confirmedAt: allReceivingAcknowledged ? (toDate(existingConfirmation.confirmedAt) || new Date()) : null,
+      confirmedByUserId: latestUserAcknowledgment?.confirmedByUserId || existingConfirmation.confirmedByUserId || null,
+      confirmedByName: latestUserAcknowledgment?.confirmedByName || existingConfirmation.confirmedByName || null,
+      acknowledgments: nextAcknowledgments
     },
-    confirmed,
+    confirmed: allReceivingAcknowledged,
     updatedAt: serverTimestamp()
   })
+
+  if (currentAcknowledged && currentUserId) {
+    await markCurrentUserHandoffAlertsRead({ debriefId, userId: currentUserId })
+  }
 }
 
 export async function saveQuickDebriefNote(context, item, user) {
@@ -341,48 +412,67 @@ export async function saveQuickDebriefNote(context, item, user) {
   return { mode: 'draft', debriefId: context.id }
 }
 
-function getNextShiftId(shiftId) {
-  const index = SHIFT_SEQUENCE.indexOf(cleanToken(shiftId))
-  if (index === -1) return ''
-  return SHIFT_SEQUENCE[(index + 1) % SHIFT_SEQUENCE.length]
+async function getReceivingBhtUsers({ locationId, shiftId, submittedByUserId }) {
+  const usersSnap = await getDocs(query(collection(db, 'users'), where('active', '==', true)))
+  return usersSnap.docs
+    .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
+    .filter(row => isBhtRole(row.role))
+    .filter(row => cleanToken(row.locationId).toLowerCase() === cleanToken(locationId).toLowerCase())
+    .filter(row => cleanToken(row.shiftId) === cleanToken(shiftId))
+    .filter(row => row.id !== submittedByUserId)
 }
 
-async function createShiftDebriefSubmittedAlerts({ debrief, user }) {
+function cleanAlertIdPart(value) {
+  return cleanToken(value).toLowerCase().replace(/[^a-z0-9_-]+/g, '_')
+}
+
+async function queueUniqueAlert(batch, alertId, payload) {
+  const alertRef = doc(db, 'alerts', alertId)
+  const existingSnap = await getDoc(alertRef)
+  if (existingSnap.exists()) return false
+  batch.set(alertRef, {
+    ...payload,
+    alertKey: alertId,
+    read: false,
+    version: 1,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  })
+  return true
+}
+
+async function createShiftDebriefSubmittedAlerts({ debrief, receivingUsers = [] }) {
   const batch = writeBatch(db)
-  const nextShiftId = getNextShiftId(debrief.shiftId)
   let batchWrites = 0
 
-  if (nextShiftId) {
-    const usersSnap = await getDocs(query(collection(db, 'users'), where('active', '==', true)))
-    usersSnap.docs
-      .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-      .filter(row => isBhtRole(row.role))
-      .filter(row => cleanToken(row.locationId).toLowerCase() === debrief.locationId)
-      .filter(row => cleanToken(row.shiftId) === nextShiftId)
-      .filter(row => row.id !== user?.id)
-      .forEach(row => {
-        const alertRef = doc(collection(db, 'alerts'))
-        batch.set(alertRef, {
-          type: 'shift_debrief_submitted',
-          debriefId: debrief.id,
-          locationId: debrief.locationId,
-          shiftId: debrief.shiftId,
-          targetUserId: row.id,
-          targetUserName: row.name || null,
-          audience: 'bht',
-          severity: 'medium',
-          message: `${debrief.submittedByName || 'BHT'} submitted ${debrief.locationLabel} shift debrief.`,
-          bhtName: debrief.submittedByName || null,
-          read: false,
-          version: 1,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        })
-        batchWrites += 1
-      })
+  for (const row of receivingUsers) {
+    const alertId = [
+      'shift_debrief_submitted',
+      cleanAlertIdPart(debrief.id),
+      cleanAlertIdPart(row.id)
+    ].join('__')
+    const queued = await queueUniqueAlert(batch, alertId, {
+      type: 'shift_debrief_submitted',
+      debriefId: debrief.id,
+      locationId: debrief.locationId,
+      shiftId: debrief.shiftId,
+      receivingShiftId: debrief.receivingShiftId || null,
+      targetUserId: row.id,
+      targetUserName: row.name || null,
+      audience: 'bht',
+      severity: 'medium',
+      incomingAcknowledgmentLateAt: debrief.incomingAcknowledgmentLateAt || null,
+      message: `${debrief.submittedByName || 'BHT'} submitted ${debrief.locationLabel} shift debrief.`,
+      bhtName: debrief.submittedByName || null
+    })
+    if (queued) batchWrites += 1
   }
 
-  await addDoc(collection(db, 'alerts'), {
+  const supervisorAlertId = [
+    'shift_debrief_submitted_supervisor',
+    cleanAlertIdPart(debrief.id)
+  ].join('__')
+  if (await queueUniqueAlert(batch, supervisorAlertId, {
     type: 'shift_debrief_submitted',
     debriefId: debrief.id,
     locationId: debrief.locationId,
@@ -390,16 +480,51 @@ async function createShiftDebriefSubmittedAlerts({ debrief, user }) {
     audience: 'supervisor',
     severity: 'medium',
     message: `${debrief.submittedByName || 'BHT'} submitted ${debrief.locationLabel} shift debrief.`,
-    bhtName: debrief.submittedByName || null,
-    read: false,
-    version: 1,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  })
+    bhtName: debrief.submittedByName || null
+  })) {
+    batchWrites += 1
+  }
+
+  if (receivingUsers.length === 0) {
+    const noReceiversAlertId = [
+      'shift_debrief_no_receivers',
+      cleanAlertIdPart(debrief.id)
+    ].join('__')
+    if (await queueUniqueAlert(batch, noReceiversAlertId, {
+      type: 'shift_debrief_no_receivers',
+      debriefId: debrief.id,
+      locationId: debrief.locationId,
+      shiftId: debrief.receivingShiftId || getNextShiftId(debrief.shiftId),
+      audience: 'supervisor',
+      severity: 'high',
+      message: `No receiving BHT is assigned for ${debrief.locationLabel || debrief.locationId} ${debrief.receivingShiftLabel || 'incoming shift'} handoff.`,
+      bhtName: debrief.submittedByName || null
+    })) {
+      batchWrites += 1
+    }
+  }
 
   if (batchWrites > 0) {
     await batch.commit()
   }
+}
+
+async function markCurrentUserHandoffAlertsRead({ debriefId, userId }) {
+  const alertsSnap = await getDocs(query(collection(db, 'alerts'), where('debriefId', '==', debriefId)))
+  const batch = writeBatch(db)
+  let writes = 0
+  alertsSnap.docs.forEach(alertDoc => {
+    const alert = alertDoc.data()
+    if (alert.targetUserId !== userId) return
+    if (alert.read === true) return
+    if (alert.type !== 'shift_debrief_submitted') return
+    batch.update(alertDoc.ref, {
+      read: true,
+      updatedAt: serverTimestamp()
+    })
+    writes += 1
+  })
+  if (writes > 0) await batch.commit()
 }
 
 export function canUserSeeDebrief(user, debrief) {

@@ -596,12 +596,12 @@ function App() {
     }
   }, [bhtDebriefContext])
 
-  // Sync EOC task generation + overdue status on session start.
+  // Sync EOC task generation + overdue status on session start and while online.
   useEffect(() => {
     if (!user || isOffline) return
 
     let cancelled = false
-    ;(async () => {
+    const runEocSync = async () => {
       try {
         if (isBhtRole(user.role)) {
           await syncDerivedAssignmentForUser(user.id, {
@@ -626,9 +626,15 @@ function App() {
           console.error('EOC task engine sync failed:', err)
         }
       }
-    })()
+    }
 
-    return () => { cancelled = true }
+    runEocSync()
+    const intervalId = setInterval(runEocSync, 5 * 60 * 1000)
+
+    return () => {
+      cancelled = true
+      clearInterval(intervalId)
+    }
   }, [user, isOffline])
 
   // Sync fleet task generation on supervisor/admin session start and periodic refresh.
@@ -1107,6 +1113,8 @@ function App() {
         onEditDebrief={handleEditDebrief}
         onDebriefAssignmentChange={setBhtDebriefAssignment}
         debriefSummary={effectiveBhtDebriefSummary}
+        debriefAlerts={debriefAlerts}
+        onNavigateToDebrief={handleNavigateToDebrief}
       />
       {showOnboarding && (
         <Onboarding onComplete={() => setShowOnboarding(false)} />

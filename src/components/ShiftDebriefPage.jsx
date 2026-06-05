@@ -97,6 +97,12 @@ function makeUiId(prefix = 'draft') {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
+function getCurrentUserConfirmation(sourceDebrief, user) {
+  const userId = String(user?.id || '').trim()
+  const saved = sourceDebrief?.confirmation?.acknowledgments?.[userId]
+  return saved || sourceDebrief?.confirmation || createEmptyConfirmation()
+}
+
 function ShiftDebriefGuide({ onComplete }) {
   const [stepIndex, setStepIndex] = useState(0)
   const steps = [
@@ -289,13 +295,13 @@ function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = fa
 
 function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
   const [extraNoteText, setExtraNoteText] = useState('')
-  const [confirmation, setConfirmation] = useState(() => debrief?.confirmation || createEmptyConfirmation())
+  const [confirmation, setConfirmation] = useState(() => getCurrentUserConfirmation(debrief, user))
   const [savingExtra, setSavingExtra] = useState(false)
   const [savingConfirmation, setSavingConfirmation] = useState(false)
 
   useEffect(() => {
-    setConfirmation(debrief?.confirmation || createEmptyConfirmation())
-  }, [debrief?.confirmation])
+    setConfirmation(getCurrentUserConfirmation(debrief, user))
+  }, [debrief, user])
 
   const addExtraNote = async () => {
     if (!extraNoteText.trim()) {
@@ -400,9 +406,9 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
             style={{ maxWidth: '180px' }}
           />
         </div>
-        {debrief.confirmed && (
+        {confirmation?.confirmed && (
           <div style={styles.confirmedText}>
-            Confirmed by {debrief.confirmation?.confirmedByName || 'incoming staff'} on {formatTimestamp(debrief.confirmation?.confirmedAt)}
+            Confirmed by {confirmation?.confirmedByName || 'incoming staff'} on {formatTimestamp(confirmation?.confirmedAt)}
           </div>
         )}
         <button
