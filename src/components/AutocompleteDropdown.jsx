@@ -6,7 +6,16 @@ import { createPortal } from 'react-dom'
  * Renders via portal at document.body to escape all parent overflow constraints
  * Positions itself using getBoundingClientRect() on the passed inputRef
  */
-function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, loading, inputRef }) {
+function AutocompleteDropdown({
+  suggestions,
+  onSelect,
+  isVisible,
+  renderItem,
+  loading,
+  inputRef,
+  placement = 'above',
+  maxHeightCap = 240
+}) {
   const dropdownRef = useRef(null)
   const [position, setPosition] = useState({ top: 0, left: 0, width: 0 })
   const [maxHeight, setMaxHeight] = useState(240)
@@ -15,20 +24,26 @@ function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, lo
     if (inputRef?.current) {
       const rect = inputRef.current.getBoundingClientRect()
       const estimatedHeight = dropdownRef.current?.offsetHeight
-        || Math.min(240, (loading ? 40 : 0) + Math.max(suggestions.length, 1) * 44)
-      const availableAbove = Math.max(80, rect.top - 8)
-      const nextMaxHeight = Math.min(240, availableAbove)
+        || Math.min(maxHeightCap, (loading ? 40 : 0) + Math.max(suggestions.length, 1) * 44)
+      const availableSpace = placement === 'below'
+        ? Math.max(80, window.innerHeight - rect.bottom - 8)
+        : Math.max(80, rect.top - 8)
+      const nextMaxHeight = Math.min(maxHeightCap, availableSpace)
       const heightForPosition = Math.min(estimatedHeight, nextMaxHeight)
-      const rawTop = rect.top + window.scrollY - heightForPosition - 6
-      const aboveTop = Math.max(window.scrollY + 8, rawTop)
+      const rawTop = placement === 'below'
+        ? rect.bottom + window.scrollY + 2
+        : rect.top + window.scrollY - heightForPosition - 6
+      const nextTop = placement === 'below'
+        ? rawTop
+        : Math.max(window.scrollY + 8, rawTop)
       setPosition({
-        top: aboveTop,
+        top: nextTop,
         left: rect.left + window.scrollX,
         width: rect.width
       })
       setMaxHeight(nextMaxHeight)
     }
-  }, [inputRef, loading, suggestions.length])
+  }, [inputRef, loading, maxHeightCap, placement, suggestions.length])
 
   // Update position when visible or suggestions change
   useEffect(() => {
@@ -65,7 +80,9 @@ function AutocompleteDropdown({ suggestions, onSelect, isVisible, renderItem, lo
         width: position.width,
         background: 'var(--bg-surface)',
         border: '2px solid var(--card-border)',
-        borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
+        borderRadius: placement === 'below'
+          ? '0 0 var(--radius-sm) var(--radius-sm)'
+          : 'var(--radius-sm) var(--radius-sm) 0 0',
         boxShadow: 'var(--shadow-lg)',
         zIndex: 9999,
         maxHeight: `${maxHeight}px`,

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../firebase'
 import ClientAutocomplete from './ClientAutocomplete'
+import AutocompleteDropdown from './AutocompleteDropdown'
 import DebriefGroupedReadView from './DebriefGroupedReadView'
+import useAutocomplete from '../hooks/useAutocomplete'
 import {
   CLIENT_NOTE_SECTIONS,
   CONFIRMATION_ITEMS,
@@ -52,12 +54,10 @@ function sortItems(items) {
   ))
 }
 
-const GENERAL_EDIT_SECTION_ID = 'notes_discrepancies'
-
 const EDIT_SECTION_TABS = [
   {
     id: 'medication_health_updates',
-    label: 'Medication',
+    label: 'Med/Health',
     icon: 'Rx',
     header: 'Medication & Health Updates',
     emptyTitle: 'No medication clients yet',
@@ -80,6 +80,18 @@ const EDIT_SECTION_TABS = [
     header: 'General Handoff',
     tone: 'slate'
   }
+]
+
+const CLIENT_NOTE_PLACEHOLDERS = {
+  medication_health_updates: name => `Add a med/health note for ${name}...`,
+  client_progress_concerns: name => `Add a progress note for ${name}...`
+}
+
+const GENERAL_EDIT_SECTIONS = [
+  { id: 'pending_task', label: 'Pending Task', placeholder: 'Add a pending task...' },
+  { id: 'urgent_time_sensitive_task', label: 'Urgent / Time-Sensitive', placeholder: 'Add an urgent note...' },
+  { id: 'maintenance_van_facility_operational', label: 'Maintenance / Van / Facility', placeholder: 'Add a maintenance or operational note...' },
+  { id: 'notes_discrepancies', label: 'Notes & Discrepancies', placeholder: 'Add a note or discrepancy...' }
 ]
 
 function normalizeClientKey(value) {
@@ -469,6 +481,91 @@ function buildClientGroups(items, emptyClients) {
   return groupsBySection
 }
 
+function DebriefClientAutocomplete({
+  sectionId,
+  value,
+  onChange,
+  onAdd,
+  existingClients,
+  invalid,
+  inputRef
+}) {
+  const internalInputRef = useRef(null)
+  const { suggestions, isVisible, isLoading, search, select, hide, show } = useAutocomplete(
+    'clients',
+    'normalizedLabel',
+    1,
+    6
+  )
+  const normalizedExisting = new Set(existingClients)
+  const filteredSuggestions = suggestions.filter(s => !normalizedExisting.has(normalizeClientKey(s.label)))
+  const trimmedValue = value.trim()
+
+  const handleChange = (event) => {
+    const nextValue = event.target.value
+    onChange(nextValue)
+    search(nextValue)
+  }
+
+  const handleSelect = (suggestion) => {
+    select(suggestion)
+    onChange(suggestion.label)
+    onAdd(sectionId, suggestion.label)
+  }
+
+  const renderSuggestion = (suggestion) => {
+    const label = suggestion.label || ''
+    const prefixLength = trimmedValue.length
+    const prefix = label.slice(0, prefixLength)
+    const rest = label.slice(prefixLength)
+    const isPrefixMatch = label.toLowerCase().startsWith(trimmedValue.toLowerCase())
+
+    return isPrefixMatch ? (
+      <span>
+        <span className="debrief-ac-match">{prefix}</span>{rest}
+      </span>
+    ) : (
+      <span>{label}</span>
+    )
+  }
+
+  return (
+    <>
+      <input
+        ref={node => {
+          internalInputRef.current = node
+          if (typeof inputRef === 'function') inputRef(node)
+        }}
+        className={`input debrief-client-input ${invalid ? 'debrief-input-shake' : ''}`}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            onAdd(sectionId)
+          }
+        }}
+        onFocus={() => {
+          if (trimmedValue) show()
+        }}
+        onBlur={() => setTimeout(() => hide(), 250)}
+        placeholder="Client first name, last initial if needed"
+        autoComplete="off"
+      />
+      <AutocompleteDropdown
+        suggestions={filteredSuggestions}
+        isVisible={isVisible && filteredSuggestions.length > 0}
+        loading={isLoading}
+        onSelect={handleSelect}
+        inputRef={internalInputRef}
+        placement="below"
+        maxHeightCap={130}
+        renderItem={renderSuggestion}
+      />
+    </>
+  )
+}
+
 function SectionTabsDraftEditor({
   items,
   user,
@@ -476,7 +573,6 @@ function SectionTabsDraftEditor({
   statusText,
   onSaveDraft,
   manualSaving,
-  isOffline,
   onSubmit,
   submitting
 }) {
@@ -484,30 +580,31 @@ function SectionTabsDraftEditor({
   const [emptyClients, setEmptyClients] = useState([])
   const [clientDrafts, setClientDrafts] = useState({})
   const [noteDrafts, setNoteDrafts] = useState({})
+  const [generalDrafts, setGeneralDrafts] = useState({})
   const [invalidClientSections, setInvalidClientSections] = useState({})
   const clientInputRefs = useRef({})
   const noteInputRefs = useRef({})
-  const generalTextareaRef = useRef(null)
+  const generalInputRefs = useRef({})
 
   const clientGroups = useMemo(
     () => buildClientGroups(items, emptyClients),
     [emptyClients, items]
   )
 
-  const generalItems = useMemo(
-    () => items.filter(item => item?.type === 'general'),
+  const generalGroups = useMemo(
+    () => GENERAL_EDIT_SECTIONS.map(section => ({
+      ...section,
+      notes: items
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item?.type === 'general' && item.section === section.id)
+    })),
     [items]
   )
-
-  const generalText = generalItems
-    .map(item => item.note || '')
-    .filter(Boolean)
-    .join('\n\n')
 
   useEffect(() => {
     const timer = setTimeout(() => {
       if (activeTab === 'general') {
-        generalTextareaRef.current?.focus()
+        generalInputRefs.current[GENERAL_EDIT_SECTIONS[0].id]?.focus()
         return
       }
       clientInputRefs.current[activeTab]?.focus()
@@ -527,8 +624,8 @@ function SectionTabsDraftEditor({
     (clientGroups[sectionId] || []).map(group => normalizeClientKey(group.clientName))
   )
 
-  const addClient = (sectionId) => {
-    const rawName = clientDrafts[sectionId] || ''
+  const addClient = (sectionId, overrideName = '') => {
+    const rawName = overrideName || clientDrafts[sectionId] || ''
     const clientName = rawName.trim()
     if (!clientName) {
       setInvalidClientSections(prev => ({ ...prev, [sectionId]: true }))
@@ -604,39 +701,44 @@ function SectionTabsDraftEditor({
     clientInputRefs.current[group.sectionId]?.focus()
   }
 
-  const updateGeneralText = (value) => {
+  const focusGeneralInput = (sectionId) => {
+    setTimeout(() => generalInputRefs.current[sectionId]?.focus(), 80)
+  }
+
+  const addGeneralNote = (sectionId) => {
+    const noteText = (generalDrafts[sectionId] || '').trim()
+    if (!noteText) {
+      focusGeneralInput(sectionId)
+      return
+    }
+
+    const item = createDebriefItem({
+      type: 'general',
+      section: sectionId,
+      clientName: '',
+      note: noteText,
+      user
+    })
+
+    applyItemsChange(prev => [...prev, item])
+    setGeneralDrafts(prev => ({ ...prev, [sectionId]: '' }))
+    focusGeneralInput(sectionId)
+  }
+
+  const updateGeneralNote = (itemIndex, note) => {
     applyItemsChange(prev => {
-      const existingGeneral = prev.find(item => item?.type === 'general')
-      const otherItems = prev.filter(item => item?.type !== 'general')
-      const trimmedValue = value.trim()
-
-      if (!trimmedValue) {
-        return otherItems
-      }
-
-      const nextGeneral = existingGeneral
-        ? {
-            ...existingGeneral,
-            section: existingGeneral.section || GENERAL_EDIT_SECTION_ID,
-            clientName: '',
-            note: value,
-            updatedAtIso: new Date().toISOString()
-          }
-        : createDebriefItem({
-            type: 'general',
-            section: GENERAL_EDIT_SECTION_ID,
-            clientName: '',
-            note: value,
-            user
-          })
-
-      return [...otherItems, nextGeneral]
+      const nextItems = prev.map((item, index) => (
+        index === itemIndex
+          ? { ...item, note, updatedAtIso: new Date().toISOString() }
+          : item
+      ))
+      return nextItems
     })
   }
 
-  const renderTabBadge = (tab) => {
-    if (tab.id === 'general') return generalText.trim() ? '\u2713' : '-'
-    return clientGroups[tab.id]?.length || 0
+  const removeGeneralNote = (itemIndex, sectionId) => {
+    applyItemsChange(prev => prev.filter((_, index) => index !== itemIndex))
+    focusGeneralInput(sectionId)
   }
 
   const activeTabConfig = EDIT_SECTION_TABS.find(tab => tab.id === activeTab) || EDIT_SECTION_TABS[0]
@@ -645,21 +747,40 @@ function SectionTabsDraftEditor({
 
   return (
     <div className="debrief-edit-shell">
-      <div className="debrief-tabbar" role="tablist" aria-label="Debrief sections">
-        {EDIT_SECTION_TABS.map(tab => (
+      <div className="debrief-top-bar">
+        <div className="debrief-tabbar" role="tablist" aria-label="Debrief sections">
+          {EDIT_SECTION_TABS.map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={`debrief-tab ${activeTab === tab.id ? 'debrief-tab-active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="debrief-top-divider" />
+        <div className="debrief-top-actions">
           <button
-            key={tab.id}
             type="button"
-            role="tab"
-            aria-selected={activeTab === tab.id}
-            className={`debrief-tab ${activeTab === tab.id ? 'debrief-tab-active' : ''} ${tab.tone === 'slate' ? 'debrief-tab-slate' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
+            className="debrief-top-save"
+            onClick={onSaveDraft}
+            disabled={manualSaving}
           >
-            <span className="debrief-tab-icon">{tab.icon}</span>
-            <span className="debrief-tab-label">{tab.label}</span>
-            <span className="debrief-tab-badge">{renderTabBadge(tab)}</span>
+            {manualSaving ? 'Saving...' : 'Save'}
           </button>
-        ))}
+          <button
+            type="button"
+            className="debrief-top-submit"
+            onClick={onSubmit}
+            disabled={submitting || !canSubmit}
+          >
+            {submitting ? 'Submitting...' : 'Submit Debrief'}
+          </button>
+        </div>
       </div>
 
       <div key={activeTabConfig.id} className="debrief-section-panel">
@@ -670,13 +791,61 @@ function SectionTabsDraftEditor({
 
         {activeTabConfig.id === 'general' ? (
           <div className="debrief-general-body">
-            <textarea
-              ref={generalTextareaRef}
-              className="input debrief-general-textarea"
-              value={generalText}
-              onChange={(e) => updateGeneralText(e.target.value)}
-              placeholder="Anything the incoming shift needs to know - house mood, upcoming appointments, anything that doesn't belong to a specific client..."
-            />
+            {generalGroups.map(group => (
+              <div key={group.id} className="debrief-general-card">
+                <div className="debrief-general-card-title">{group.label}</div>
+                {group.notes.length > 0 && (
+                  <div className="debrief-note-list">
+                    {group.notes.map(({ item, index }) => (
+                      <div key={item.id || index} className="debrief-note-row">
+                        <span className="debrief-note-dash">-</span>
+                        <textarea
+                          className="debrief-note-edit debrief-general-note-edit"
+                          value={item.note || ''}
+                          onChange={(e) => updateGeneralNote(index, e.target.value)}
+                          rows={1}
+                          aria-label={`Edit ${group.label} note`}
+                        />
+                        <button
+                          type="button"
+                          className="debrief-note-remove"
+                          onClick={() => removeGeneralNote(index, group.id)}
+                          aria-label="Remove note"
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="debrief-add-note-row">
+                  <textarea
+                    ref={node => {
+                      if (node) generalInputRefs.current[group.id] = node
+                    }}
+                    className="input debrief-note-input debrief-general-note-input"
+                    value={generalDrafts[group.id] || ''}
+                    onChange={(e) => setGeneralDrafts(prev => ({ ...prev, [group.id]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        addGeneralNote(group.id)
+                      }
+                    }}
+                    rows={1}
+                    placeholder={group.placeholder}
+                  />
+                  <button
+                    type="button"
+                    className="debrief-note-button debrief-general-note-button"
+                    onClick={() => addGeneralNote(group.id)}
+                    aria-label={`Add ${group.label} note`}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
           <>
@@ -742,7 +911,7 @@ function SectionTabsDraftEditor({
                           }
                         }}
                         rows={1}
-                        placeholder={`Add a note for ${group.clientName}...`}
+                        placeholder={(CLIENT_NOTE_PLACEHOLDERS[group.sectionId] || (name => `Add a note for ${name}...`))(group.clientName)}
                       />
                       <button
                         type="button"
@@ -763,23 +932,19 @@ function SectionTabsDraftEditor({
                 Add a client to this section
               </div>
               <div className="debrief-add-client-row">
-                <input
-                  ref={node => {
-                    if (node) clientInputRefs.current[activeTabConfig.id] = node
-                  }}
-                  className={`input debrief-client-input ${invalidClientSections[activeTabConfig.id] ? 'debrief-input-shake' : ''}`}
+                <DebriefClientAutocomplete
+                  sectionId={activeTabConfig.id}
                   value={clientDrafts[activeTabConfig.id] || ''}
-                  onChange={(e) => {
-                    setClientDrafts(prev => ({ ...prev, [activeTabConfig.id]: e.target.value }))
+                  onChange={(value) => {
+                    setClientDrafts(prev => ({ ...prev, [activeTabConfig.id]: value }))
                     setInvalidClientSections(prev => ({ ...prev, [activeTabConfig.id]: false }))
                   }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      addClient(activeTabConfig.id)
-                    }
+                  onAdd={addClient}
+                  existingClients={getExistingClientNames(activeTabConfig.id)}
+                  invalid={invalidClientSections[activeTabConfig.id]}
+                  inputRef={node => {
+                    if (node) clientInputRefs.current[activeTabConfig.id] = node
                   }}
-                  placeholder="Client first name, last initial if needed"
                 />
                 <button
                   type="button"
@@ -794,32 +959,9 @@ function SectionTabsDraftEditor({
         )}
       </div>
 
-      <div className="debrief-editor-actions">
-        <div className="debrief-save-status">{statusText}</div>
-        <div className="debrief-action-buttons">
-          <button
-            className="btn"
-            onClick={onSaveDraft}
-            disabled={manualSaving}
-            style={{ ...styles.secondaryButton, minHeight: '44px' }}
-          >
-            {manualSaving ? 'Saving...' : (isOffline ? 'Save Local Draft' : 'Save Draft')}
-          </button>
-          <button
-            className="btn btn-finish"
-            onClick={onSubmit}
-            disabled={submitting || !canSubmit}
-            style={{
-              ...styles.submitButton,
-              width: 'auto',
-              minHeight: '44px',
-              padding: '10px 14px',
-              fontSize: '14px'
-            }}
-          >
-            {submitting ? 'Submitting...' : (isOffline ? 'Queue Handoff' : 'Submit For Handoff')}
-          </button>
-        </div>
+      <div className="debrief-save-strip">
+        <span className="debrief-save-dot" />
+        <span>{statusText}</span>
       </div>
     </div>
   )
@@ -1039,7 +1181,6 @@ export default function ShiftDebriefPage({
           statusText={draftStatusText}
           onSaveDraft={saveManualDraft}
           manualSaving={manualSaving}
-          isOffline={isOffline}
           onSubmit={handleSubmit}
           submitting={submitting}
         />
