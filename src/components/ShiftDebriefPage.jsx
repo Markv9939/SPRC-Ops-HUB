@@ -90,11 +90,21 @@ const CLIENT_NOTE_PLACEHOLDERS = {
 }
 
 const GENERAL_EDIT_SECTIONS = [
-  { id: 'pending_task', label: 'Pending Task', placeholder: 'Add a pending task...' },
-  { id: 'urgent_time_sensitive_task', label: 'Urgent / Time-Sensitive', placeholder: 'Add an urgent note...' },
-  { id: 'maintenance_van_facility_operational', label: 'Maintenance / Van / Facility', placeholder: 'Add a maintenance or operational note...' },
-  { id: 'notes_discrepancies', label: 'Notes & Discrepancies', placeholder: 'Add a note or discrepancy...' }
+  { id: 'pending_task', label: 'Pending Task', placeholder: 'Add what still needs to be done, who is responsible, and timing...' },
+  { id: 'urgent_time_sensitive_task', label: 'Urgent / Time-Sensitive', placeholder: 'Add what needs attention soon, deadline, and who should handle it...' },
+  { id: 'maintenance_van_facility_operational', label: 'Maintenance / Van / Facility', placeholder: 'Add the issue, location/van, and what follow-up is needed...' },
+  { id: 'notes_discrepancies', label: 'Notes & Discrepancies', placeholder: 'Add the discrepancy, context, and what incoming staff should know...' }
 ]
+
+function getDebriefNotePlaceholder(type, sectionId, clientName) {
+  if (type === 'client') {
+    const name = String(clientName || '').trim() || 'this client'
+    const getPlaceholder = CLIENT_NOTE_PLACEHOLDERS[sectionId] || (value => `Add a note for ${value}...`)
+    return getPlaceholder(name)
+  }
+
+  return GENERAL_EDIT_SECTIONS.find(section => section.id === sectionId)?.placeholder || 'Add a general handoff note...'
+}
 
 function normalizeClientKey(value) {
   return String(value || 'Client').trim().toLowerCase().replace(/\s+/g, ' ')
@@ -192,6 +202,7 @@ function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = fa
   const [section, setSection] = useState(CLIENT_NOTE_SECTIONS[0].id)
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
+  const notePlaceholder = getDebriefNotePlaceholder(type, section, clientName)
 
   useEffect(() => {
     setSection(type === 'client' ? CLIENT_NOTE_SECTIONS[0].id : GENERAL_HANDOFF_SECTIONS[0].id)
@@ -289,7 +300,7 @@ function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = fa
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={compact ? 4 : 5}
-          placeholder="Type the handoff note..."
+          placeholder={notePlaceholder}
           style={styles.textarea}
         />
       </div>
@@ -394,7 +405,7 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
               value={extraNoteText}
               onChange={(e) => setExtraNoteText(e.target.value)}
               rows={4}
-              placeholder="Add an extra note or correction..."
+              placeholder="Add what was missed, corrected, or needs follow-up..."
               style={styles.textarea}
             />
             <button

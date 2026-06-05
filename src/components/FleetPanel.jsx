@@ -848,7 +848,7 @@ function FleetPanel({ user, scopeSites = null }) {
 
                   <input value={serviceForm.vendorName} onChange={e => setServiceForm(prev => ({ ...prev, vendorName: e.target.value }))} style={inputStyle} placeholder="Vendor name (optional)" />
                   <input value={serviceForm.documentUrl} onChange={e => setServiceForm(prev => ({ ...prev, documentUrl: e.target.value }))} style={inputStyle} placeholder="External document URL (optional)" />
-                  <textarea value={serviceForm.notes} onChange={e => setServiceForm(prev => ({ ...prev, notes: e.target.value }))} style={{ ...inputStyle, resize: 'vertical' }} rows={3} placeholder="Notes (optional)" />
+                  <textarea value={serviceForm.notes} onChange={e => setServiceForm(prev => ({ ...prev, notes: e.target.value }))} style={{ ...inputStyle, resize: 'vertical' }} rows={3} placeholder="Add service details, vendor/document issues, or follow-up needed..." />
 
                   <button onClick={handleLogService} disabled={savingService} style={{ ...buttonPrimaryStyle, opacity: savingService ? 0.75 : 1 }}>
                     {savingService ? 'Saving...' : 'Log Service Record'}

@@ -404,7 +404,7 @@ function EmployeeDetail({ employee, items, siteOptions, onClose, onEmployeeUpdat
             <input value={addForm.subtype} onChange={(e) => setAddForm(prev => ({ ...prev, subtype: e.target.value }))} style={inputStyle} placeholder="Subtype (optional)" />
             <input type="date" value={addForm.lastCompleted} onChange={(e) => setAddForm(prev => ({ ...prev, lastCompleted: e.target.value }))} style={inputStyle} />
             <input type="date" value={addForm.dueDate} onChange={(e) => setAddForm(prev => ({ ...prev, dueDate: e.target.value }))} style={inputStyle} />
-            <input value={addForm.notes} onChange={(e) => setAddForm(prev => ({ ...prev, notes: e.target.value }))} style={inputStyle} placeholder="Notes (optional)" />
+            <input value={addForm.notes} onChange={(e) => setAddForm(prev => ({ ...prev, notes: e.target.value }))} style={inputStyle} placeholder="Add document/status details or follow-up needed..." />
           </div>
           <div style={{ marginTop: '8px', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
             <button onClick={() => setShowAdd(false)} style={btnSecondary}>Cancel</button>
@@ -429,7 +429,7 @@ function EmployeeDetail({ employee, items, siteOptions, onClose, onEmployeeUpdat
                   <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
                     <input type="date" value={editForm.lastCompleted} onChange={(e) => setEditForm(prev => ({ ...prev, lastCompleted: e.target.value }))} style={inputStyle} />
                     <input type="date" value={editForm.dueDate} onChange={(e) => setEditForm(prev => ({ ...prev, dueDate: e.target.value }))} style={inputStyle} />
-                    <input value={editForm.notes} onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))} style={inputStyle} placeholder="Notes" />
+                    <input value={editForm.notes} onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))} style={inputStyle} placeholder="Add document/status details or follow-up needed..." />
                   </div>
                   <div style={{ marginTop: '8px', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                     <button onClick={() => setEditingId(null)} style={btnSecondary}>Cancel</button>
@@ -562,7 +562,7 @@ function EmployeeDetail({ employee, items, siteOptions, onClose, onEmployeeUpdat
               </div>
               <div>
                 <div style={mobileFieldLabelStyle}>Notes</div>
-                <input value={mobileAddForm.notes} onChange={(e) => setMobileAddForm(prev => ({ ...prev, notes: e.target.value }))} style={mobileSheetInputStyle} placeholder="Optional notes" />
+                <input value={mobileAddForm.notes} onChange={(e) => setMobileAddForm(prev => ({ ...prev, notes: e.target.value }))} style={mobileSheetInputStyle} placeholder="Add document/status details or follow-up needed..." />
               </div>
             </div>
             <div style={{
@@ -632,7 +632,7 @@ function EmployeeDetail({ employee, items, siteOptions, onClose, onEmployeeUpdat
               </div>
               <div>
                 <div style={mobileFieldLabelStyle}>Notes</div>
-                <input value={mobileEditForm.notes} onChange={(e) => setMobileEditForm(prev => ({ ...prev, notes: e.target.value }))} style={mobileSheetInputStyle} placeholder="Optional notes" />
+                <input value={mobileEditForm.notes} onChange={(e) => setMobileEditForm(prev => ({ ...prev, notes: e.target.value }))} style={mobileSheetInputStyle} placeholder="Add document/status details or follow-up needed..." />
               </div>
             </div>
             <div style={{

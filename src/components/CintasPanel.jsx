@@ -423,7 +423,7 @@ function CintasPanel({ user, scopeSites = null }) {
                 <input value={itemForm.subtype} onChange={(e) => setItemForm(prev => ({ ...prev, subtype: e.target.value }))} style={inputStyle} placeholder="Subtype (optional)" />
                 <input type="date" value={itemForm.lastCompleted} onChange={(e) => setItemForm(prev => ({ ...prev, lastCompleted: e.target.value }))} style={inputStyle} />
                 <input type="date" value={itemForm.dueDate} onChange={(e) => setItemForm(prev => ({ ...prev, dueDate: e.target.value }))} style={inputStyle} />
-                <input value={itemForm.notes} onChange={(e) => setItemForm(prev => ({ ...prev, notes: e.target.value }))} style={inputStyle} placeholder="Notes" />
+                <input value={itemForm.notes} onChange={(e) => setItemForm(prev => ({ ...prev, notes: e.target.value }))} style={inputStyle} placeholder="Add document/status details or follow-up needed..." />
               </div>
               <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                 <button onClick={() => setAddingLocationItem(false)} style={btnSecondary}>Cancel</button>
@@ -485,7 +485,7 @@ function CintasPanel({ user, scopeSites = null }) {
                         <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(140px, 1fr))' }}>
                           <input type="date" value={itemEditForm.lastCompleted} onChange={(e) => setItemEditForm(prev => ({ ...prev, lastCompleted: e.target.value }))} style={inputStyle} />
                           <input type="date" value={itemEditForm.dueDate} onChange={(e) => setItemEditForm(prev => ({ ...prev, dueDate: e.target.value }))} style={inputStyle} />
-                          <input value={itemEditForm.notes} onChange={(e) => setItemEditForm(prev => ({ ...prev, notes: e.target.value }))} style={inputStyle} placeholder="Notes" />
+                          <input value={itemEditForm.notes} onChange={(e) => setItemEditForm(prev => ({ ...prev, notes: e.target.value }))} style={inputStyle} placeholder="Add document/status details or follow-up needed..." />
                         </div>
                         <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
                           <button onClick={() => setEditingItemId(null)} style={btnSecondary}>Cancel</button>

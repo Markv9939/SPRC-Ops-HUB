@@ -641,7 +641,7 @@ function BhtHub({
               setIssueForm(prev => ({ ...prev, description: event.target.value }))
             }}
             disabled={issueSubmitting}
-            placeholder="Example: Hall bathroom sink is leaking under the cabinet."
+            placeholder="Add what happened, exact location/van, and any immediate safety concern..."
             style={{ width: '100%', resize: 'vertical', boxSizing: 'border-box' }}
           />
 

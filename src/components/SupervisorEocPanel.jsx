@@ -198,7 +198,7 @@ function SupervisorEocPanel({ user, isOffline = false, targetIssueId = null, onT
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <input
                           className="input"
-                          placeholder="Resolution notes..."
+                          placeholder="Add action taken, current status, and next step..."
                           value={resolveNotes}
                           onChange={event => setResolveNotes(event.target.value)}
                           style={{ flex: 1, padding: '6px 10px', fontSize: '13px' }}

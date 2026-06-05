@@ -657,7 +657,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
               onBlur={() => { if (!writeLocked) save({ notes }).catch(() => {}) }}
               readOnly={writeLocked}
               disabled={writeLocked}
-              placeholder="Any additional notes..."
+              placeholder="Add delays, route changes, concerns, or handoff info..."
               rows={3}
               style={{ resize: 'vertical', fontFamily: 'inherit', opacity: writeLocked ? 0.72 : 1 }}
             />

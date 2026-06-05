@@ -367,7 +367,7 @@ function PropertiesPanel({ user, scopeSites = null, onOpenTab = null }) {
               </select>
               <textarea
                 style={{ ...inputStyle, minHeight: '88px', resize: 'vertical' }}
-                placeholder="Notes (optional)"
+                placeholder="Add access, maintenance, or operational details..."
                 value={propertyForm.notes}
                 onChange={event => setPropertyForm(prev => ({ ...prev, notes: event.target.value }))}
               />

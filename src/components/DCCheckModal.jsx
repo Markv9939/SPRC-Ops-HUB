@@ -101,7 +101,7 @@ function DCPaperworkModal({ onComplete, onCancel }) {
           <textarea
             value={otherNote}
             onChange={(e) => setOtherNote(e.target.value)}
-            placeholder="Explain..."
+            placeholder="Add the specific concern or reason..."
             rows={3}
             style={{
               width: '100%',

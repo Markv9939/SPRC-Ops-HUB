@@ -856,7 +856,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
                         ref={(node) => { repairInputRefs.current[item.id] = node }}
                         className={`input ${isRepairMissing(item.id) ? 'input-warn' : ''}`}
                         aria-label={`Repair note for ${item.label}`}
-                        placeholder="Describe the issue..."
+                        placeholder="Add what is broken/missing and exactly where it is..."
                         value={repairDetails[item.id]?.description || ''}
                         onChange={(e) => setRepairField(item.id, e.target.value)}
                         onKeyDown={(event) => {
