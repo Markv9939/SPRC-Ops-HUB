@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { db, auth } from './firebase'
 import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, getDocs, doc } from 'firebase/firestore'
 import { signOut } from 'firebase/auth'
@@ -51,6 +52,43 @@ import {
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
 const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
 const ACTIVE_TRANSPORT_STATUSES = new Set(['open', 'arrived'])
+const DASHBOARD_TABS = new Set([
+  'dashboard',
+  'transports',
+  'debriefs',
+  'users',
+  'eoc',
+  'compliance',
+  'properties',
+  'fleet',
+  'cintas',
+  'audit'
+])
+
+function parseAppRoute(pathname) {
+  const parts = String(pathname || '/').split('/').filter(Boolean).map(decodeURIComponent)
+  if (parts[0] === 'transport' && parts[1]) {
+    return { page: 'transport', currentTransportId: parts[1] }
+  }
+  if (parts[0] === 'eoc' && parts[1]) {
+    return { page: 'eocForm', currentTaskId: parts[1] }
+  }
+  if (parts[0] === 'debrief') {
+    const mode = parts[1] === 'quick' ? 'quick' : 'full'
+    return { page: 'debrief', currentDebriefMode: mode, currentDebriefId: parts[2] || null }
+  }
+  if (parts[0] === 'dashboard') {
+    const dashboardTab = DASHBOARD_TABS.has(parts[1]) ? parts[1] : 'dashboard'
+    return { page: 'home', dashboardTab }
+  }
+  return { page: 'home' }
+}
+
+function getDefaultRoute(user) {
+  return isSupervisorRole(user?.role) || isAdminRole(user?.role)
+    ? '/dashboard/dashboard'
+    : '/home'
+}
 
 function normalizeTransportStatus(status) {
   return String(status || '').trim().toLowerCase()
@@ -203,6 +241,9 @@ function buildBhtHeaderSubtitle(sessionUser) {
 }
 
 function App() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const activeRoute = useMemo(() => parseAppRoute(location.pathname), [location.pathname])
   const [user, setUser] = useState(() => {
     const saved = sessionStorage.getItem('bhtUser')
     if (!saved) return null
@@ -219,12 +260,12 @@ function App() {
       return null
     }
   })
-  const [page, setPage] = useState('home')
   const [transports, setTransports] = useState([])
-  const [currentTransportId, setCurrentTransportId] = useState(null)
-  const [currentTaskId, setCurrentTaskId] = useState(null)
-  const [currentDebriefId, setCurrentDebriefId] = useState(null)
-  const [currentDebriefMode, setCurrentDebriefMode] = useState('full')
+  const page = activeRoute.page
+  const currentTransportId = activeRoute.currentTransportId || null
+  const currentTaskId = activeRoute.currentTaskId || null
+  const currentDebriefId = activeRoute.currentDebriefId || null
+  const currentDebriefMode = activeRoute.currentDebriefMode || 'full'
   const [bhtDebriefAssignment, setBhtDebriefAssignment] = useState(null)
   const [bhtDebriefSummary, setBhtDebriefSummary] = useState({ available: false, status: 'none', itemCount: 0 })
   // Alert count and issue updates from shared hooks
@@ -240,6 +281,7 @@ function App() {
   const [isChangePinOpen, setIsChangePinOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [dashboardNavigationTarget, setDashboardNavigationTarget] = useState(null)
+  const dashboardTab = activeRoute.dashboardTab || 'dashboard'
   const [focusedIssueUpdateId, setFocusedIssueUpdateId] = useState(null)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const bhtHeaderSubtitle = buildBhtHeaderSubtitle(user)
@@ -263,6 +305,41 @@ function App() {
     return () => restoreAlerts()
   }, [])
 
+  useEffect(() => {
+    if (!user) return
+    const isManagement = isSupervisorRole(user.role) || isAdminRole(user.role)
+    const onManagementRoute = location.pathname.startsWith('/dashboard/')
+    if (location.pathname === '/') {
+      navigate(getDefaultRoute(user), { replace: true })
+      return
+    }
+    if (isManagement && !onManagementRoute) {
+      navigate(getDefaultRoute(user), { replace: true })
+      return
+    }
+    if (!isManagement && onManagementRoute) {
+      navigate('/home', { replace: true })
+    }
+  }, [location.pathname, navigate, user])
+
+  const navigateHome = useCallback((options = {}) => {
+    navigate(getDefaultRoute(user), options)
+  }, [navigate, user])
+
+  const navigateBack = useCallback(() => {
+    const historyIndex = Number(window.history.state?.idx || 0)
+    if (historyIndex > 0) {
+      navigate(-1)
+      return
+    }
+    navigateHome({ replace: true })
+  }, [navigate, navigateHome])
+
+  const navigateDashboardTab = useCallback((tab) => {
+    const safeTab = DASHBOARD_TABS.has(tab) ? tab : 'dashboard'
+    navigate(`/dashboard/${safeTab}`)
+  }, [navigate])
+
   const getActiveTransport = useCallback(() => {
     if (!user || !isBhtRole(user.role)) return null
     return transports.find(t => isActiveTransportStatus(t.status)) || null
@@ -270,15 +347,21 @@ function App() {
 
   const resumeActiveTransport = useCallback((transport) => {
     if (!transport?.id) return
-    setCurrentTransportId(transport.id)
-    setPage('transport')
-  }, [])
+    navigate(`/transport/${encodeURIComponent(transport.id)}`)
+  }, [navigate])
 
   function handleLogin(userData) {
     sessionStorage.setItem('bhtUser', JSON.stringify(userData))
     setUser(userData)
-    setPage('home')
     localStorage.setItem('lastActivity', Date.now().toString())
+    const route = parseAppRoute(location.pathname)
+    const isManagement = isSupervisorRole(userData?.role) || isAdminRole(userData?.role)
+    const routeMatchesRole = isManagement
+      ? location.pathname.startsWith('/dashboard/')
+      : ['home', 'transport', 'eocForm', 'debrief'].includes(route.page)
+    if (location.pathname === '/' || !routeMatchesRole) {
+      navigate(getDefaultRoute(userData), { replace: true })
+    }
     if (isBhtRole(userData?.role) && shouldShowOnboarding()) {
       setShowOnboarding(true)
     }
@@ -302,17 +385,14 @@ function App() {
   const handleLogout = useCallback(async () => {
     sessionStorage.removeItem('bhtUser')
     setUser(null)
-    setPage('home')
     setTransports([])
-    setCurrentTransportId(null)
-    setCurrentTaskId(null)
-    setCurrentDebriefId(null)
     setBhtDebriefAssignment(null)
     localStorage.removeItem('lastActivity')
+    navigate('/', { replace: true })
     signOut(auth).catch((err) => {
       console.warn('Auth signOut skipped:', err)
     })
-  }, [])
+  }, [navigate])
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false)
@@ -354,7 +434,7 @@ function App() {
       const localTransports = getPendingLocalTransports(actions, user)
       const syncedTransportId = getSyncedTransportIdForLocal(actions, currentTransportId)
       if (syncedTransportId) {
-        setCurrentTransportId(syncedTransportId)
+        navigate(`/transport/${encodeURIComponent(syncedTransportId)}`, { replace: true })
       }
       setTransports(prev => mergeTransportLists(
         prev.filter(transport => !transport?.localOnly && !isLocalTransportId(transport?.id)),
@@ -363,7 +443,7 @@ function App() {
     } catch (err) {
       console.warn('Pending offline transports unavailable:', err)
     }
-  }, [currentTransportId, user])
+  }, [currentTransportId, navigate, user])
 
   useEffect(() => {
     if (!user) return undefined
@@ -457,12 +537,9 @@ function App() {
           sessionStorage.removeItem('bhtUser')
           localStorage.removeItem('lastActivity')
           setUser(null)
-          setPage('home')
           setTransports([])
-          setCurrentTransportId(null)
-          setCurrentTaskId(null)
-          setCurrentDebriefId(null)
           setBhtDebriefAssignment(null)
+          navigate('/', { replace: true })
           return
         }
 
@@ -481,12 +558,9 @@ function App() {
             alert('Access policy changed: auth claims are now required. Please re-login with a claim-enabled account.')
             sessionStorage.removeItem('bhtUser')
             localStorage.removeItem('lastActivity')
-            setPage('home')
             setTransports([])
-            setCurrentTransportId(null)
-            setCurrentTaskId(null)
-            setCurrentDebriefId(null)
             setBhtDebriefAssignment(null)
+            navigate('/', { replace: true })
             return null
           }
 
@@ -508,7 +582,7 @@ function App() {
       cancelled = true
       clearInterval(intervalId)
     }
-  }, [user?.id, isOffline])
+  }, [user?.id, isOffline, navigate])
 
   // Load transports from Firestore — BHT only.
   // Supervisor/Admin manage their own transport state inside SupervisorDashboard,
@@ -670,8 +744,7 @@ function App() {
   // Alert count and issue updates are now provided by useScopedAlerts hook above
 
   function handleStartEoc(taskId) {
-    setCurrentTaskId(taskId)
-    setPage('eocForm')
+    navigate(`/eoc/${encodeURIComponent(taskId)}`)
   }
 
   async function handleReportIssue(report) {
@@ -694,13 +767,11 @@ function App() {
   }
 
   function handleEocComplete() {
-    setCurrentTaskId(null)
-    setPage('home')
+    navigateHome()
   }
 
   function handleEocBack() {
-    setCurrentTaskId(null)
-    setPage('home')
+    navigateBack()
   }
 
   async function handleNewTransport() {
@@ -767,8 +838,7 @@ function App() {
         })
         localStorage.setItem(lastSiteKey, transportSite)
         setTransports(prev => mergeTransportLists(prev, [newTransport]))
-        setCurrentTransportId(localTransportId)
-        setPage('transport')
+        navigate(`/transport/${encodeURIComponent(localTransportId)}`)
         notifySuccess('Transport saved on this device')
         return
       }
@@ -807,8 +877,7 @@ function App() {
 
       const docRef = await addDoc(collection(db, 'transports'), newTransport)
       localStorage.setItem(lastSiteKey, transportSite)
-      setCurrentTransportId(docRef.id)
-      setPage('transport')
+      navigate(`/transport/${encodeURIComponent(docRef.id)}`)
       notifySuccess('Transport created')
     } catch (error) {
       console.error('Error creating transport:', error)
@@ -821,8 +890,7 @@ function App() {
   }
 
   function handleCloseTransportCard() {
-    setCurrentTransportId(null)
-    setPage('home')
+    navigateBack()
   }
 
   function handleTransportClosed(closedTransport) {
@@ -837,39 +905,30 @@ function App() {
         ))
       })
     }
-    setCurrentTransportId(null)
-    setPage('home')
+    navigateHome()
   }
 
   function handleTransportCancelled(transportId) {
     if (transportId) {
       setTransports(prev => prev.filter(transport => transport.id !== transportId))
     }
-    setCurrentTransportId(null)
-    setPage('home')
+    navigateHome()
   }
 
   function handleContinueTransport(transportId) {
-    setCurrentTransportId(transportId)
-    setPage('transport')
+    navigate(`/transport/${encodeURIComponent(transportId)}`)
   }
 
   function handleAddDebriefNote() {
-    setCurrentDebriefMode('quick')
-    setCurrentDebriefId(null)
-    setPage('debrief')
+    navigate('/debrief/quick')
   }
 
   function handleEditDebrief() {
-    setCurrentDebriefMode('full')
-    setCurrentDebriefId(null)
-    setPage('debrief')
+    navigate('/debrief/full')
   }
 
   function handleDebriefBack() {
-    setCurrentDebriefId(null)
-    setCurrentDebriefMode('full')
-    setPage('home')
+    navigateBack()
   }
 
   function handleNavigateToIssue(alert) {
@@ -879,11 +938,12 @@ function App() {
         issueId: alert?.issueId || null,
         createdAt: Date.now()
       })
+      navigateDashboardTab('eoc')
       return
     }
 
     setFocusedIssueUpdateId(alert?.id || null)
-    setPage('home')
+    navigateHome()
   }
 
   function handleNavigateToFleet() {
@@ -892,6 +952,7 @@ function App() {
         type: 'fleet',
         createdAt: Date.now()
       })
+      navigateDashboardTab('fleet')
     }
   }
 
@@ -902,12 +963,12 @@ function App() {
         debriefId: alert?.debriefId || null,
         createdAt: Date.now()
       })
+      navigateDashboardTab('debriefs')
       return
     }
 
-    setCurrentDebriefId(alert?.debriefId || null)
-    setCurrentDebriefMode('full')
-    setPage('debrief')
+    const debriefId = alert?.debriefId ? `/${encodeURIComponent(alert.debriefId)}` : ''
+    navigate(`/debrief/full${debriefId}`)
   }
 
   if (user === null) {
@@ -920,156 +981,110 @@ function App() {
     )
   }
 
+  const isManagementUser = isSupervisorRole(user.role) || isAdminRole(user.role)
+  const commonHeaderProps = {
+    userName: user.name,
+    userSubtitle: bhtHeaderSubtitle,
+    isManagement: isManagementUser,
+    isAdmin: isAdminRole(user.role),
+    activeSection: isManagementUser ? dashboardTab : 'home',
+    onNavigateHome: () => navigateHome(),
+    onNavigateSection: navigateDashboardTab,
+    onLogout: handleLogout,
+    onChangePin: () => setIsChangePinOpen(true),
+    canChangeOwnPin,
+    alertCount,
+    isOffline,
+    pendingSyncCount,
+    needsReviewCount: offlineOutboxSummary.needsReview,
+    onNotificationsOpen: () => setIsNotificationsOpen(true)
+  }
+
+  const sharedOverlays = (
+    <>
+      <ChangePinModal
+        isOpen={isChangePinOpen}
+        onClose={() => setIsChangePinOpen(false)}
+        onSubmit={handleChangeOwnPin}
+      />
+      <NotificationCenter
+        isOpen={isNotificationsOpen}
+        onClose={() => setIsNotificationsOpen(false)}
+        eocAlerts={eocAlerts}
+        fleetAlerts={fleetAlerts}
+        debriefAlerts={debriefAlerts}
+        issueUpdates={issueUpdates}
+        onNavigateToIssue={handleNavigateToIssue}
+        onNavigateToFleet={handleNavigateToFleet}
+        onNavigateToDebrief={handleNavigateToDebrief}
+      />
+      <DialogHost />
+      <ToastHost />
+    </>
+  )
+
+  const renderShell = (content, { title, showBack = false, onBack = navigateBack } = {}) => (
+    <div className={`app-shell app-bg ${isManagementUser ? 'management-shell' : 'field-shell'}`}>
+      <Header
+        {...commonHeaderProps}
+        pageTitle={title || 'Home'}
+        showBack={showBack}
+        onBack={onBack}
+      />
+      <main className="app-shell-content">{content}</main>
+      {sharedOverlays}
+    </div>
+  )
+
   if (page === 'transport') {
-    return (
-      <div className="app-bg">
-        <Header
-          userName={user.name}
-          userSubtitle={bhtHeaderSubtitle}
-          onLogout={handleLogout}
-          onChangePin={() => setIsChangePinOpen(true)}
-          canChangeOwnPin={canChangeOwnPin}
-          alertCount={alertCount}
-          isOffline={isOffline}
-          pendingSyncCount={pendingSyncCount}
-          needsReviewCount={offlineOutboxSummary.needsReview}
-          onNotificationsOpen={() => setIsNotificationsOpen(true)}
-        />
-        <TransportCard
-          transportId={currentTransportId}
-          user={user}
-          isOffline={isOffline}
-          onClose={handleCloseTransportCard}
-          onTransportClosed={handleTransportClosed}
-          onTransportCancelled={handleTransportCancelled}
-        />
-        <ChangePinModal
-          isOpen={isChangePinOpen}
-          onClose={() => setIsChangePinOpen(false)}
-          onSubmit={handleChangeOwnPin}
-        />
-        <NotificationCenter
-          isOpen={isNotificationsOpen}
-          onClose={() => setIsNotificationsOpen(false)}
-          eocAlerts={eocAlerts}
-          fleetAlerts={fleetAlerts}
-          debriefAlerts={debriefAlerts}
-          issueUpdates={issueUpdates}
-          onNavigateToIssue={handleNavigateToIssue}
-          onNavigateToFleet={handleNavigateToFleet}
-          onNavigateToDebrief={handleNavigateToDebrief}
-        />
-        <DialogHost />
-        <ToastHost />
-      </div>
+    return renderShell(
+      <TransportCard
+        transportId={currentTransportId}
+        user={user}
+        isOffline={isOffline}
+        onClose={handleCloseTransportCard}
+        onTransportClosed={handleTransportClosed}
+        onTransportCancelled={handleTransportCancelled}
+      />,
+      { title: 'Transport', showBack: true, onBack: handleCloseTransportCard }
     )
   }
 
   if (page === 'eocForm') {
-    return (
-      <div className="app-bg">
-        <Header
-          userName={user.name}
-          userSubtitle={bhtHeaderSubtitle}
-          onLogout={handleLogout}
-          onChangePin={() => setIsChangePinOpen(true)}
-          canChangeOwnPin={canChangeOwnPin}
-          alertCount={alertCount}
-          isOffline={isOffline}
-          pendingSyncCount={pendingSyncCount}
-          needsReviewCount={offlineOutboxSummary.needsReview}
-          onNotificationsOpen={() => setIsNotificationsOpen(true)}
-        />
-        <EocChecklist
-          taskId={currentTaskId}
-          user={user}
-          isOffline={isOffline}
-          onComplete={handleEocComplete}
-          onBack={handleEocBack}
-        />
-        <ChangePinModal
-          isOpen={isChangePinOpen}
-          onClose={() => setIsChangePinOpen(false)}
-          onSubmit={handleChangeOwnPin}
-        />
-        <NotificationCenter
-          isOpen={isNotificationsOpen}
-          onClose={() => setIsNotificationsOpen(false)}
-          eocAlerts={eocAlerts}
-          fleetAlerts={fleetAlerts}
-          debriefAlerts={debriefAlerts}
-          issueUpdates={issueUpdates}
-          onNavigateToIssue={handleNavigateToIssue}
-          onNavigateToFleet={handleNavigateToFleet}
-          onNavigateToDebrief={handleNavigateToDebrief}
-        />
-        <DialogHost />
-        <ToastHost />
-      </div>
+    return renderShell(
+      <EocChecklist
+        taskId={currentTaskId}
+        user={user}
+        isOffline={isOffline}
+        onComplete={handleEocComplete}
+        onBack={handleEocBack}
+      />,
+      { title: 'End of Shift Checklist', showBack: true, onBack: handleEocBack }
     )
   }
 
   if (page === 'debrief') {
-    return (
-      <div className="app-bg">
-        <Header
-          userName={user.name}
-          userSubtitle={bhtHeaderSubtitle}
-          onLogout={handleLogout}
-          onChangePin={() => setIsChangePinOpen(true)}
-          canChangeOwnPin={canChangeOwnPin}
-          alertCount={alertCount}
-          isOffline={isOffline}
-          pendingSyncCount={pendingSyncCount}
-          needsReviewCount={offlineOutboxSummary.needsReview}
-          onNotificationsOpen={() => setIsNotificationsOpen(true)}
-        />
-        <ShiftDebriefPage
-          user={user}
-          assignment={bhtDebriefAssignment}
-          mode={currentDebriefMode}
-          debriefId={currentDebriefId}
-          isOffline={isOffline}
-          onBack={handleDebriefBack}
-        />
-        <ChangePinModal
-          isOpen={isChangePinOpen}
-          onClose={() => setIsChangePinOpen(false)}
-          onSubmit={handleChangeOwnPin}
-        />
-        <NotificationCenter
-          isOpen={isNotificationsOpen}
-          onClose={() => setIsNotificationsOpen(false)}
-          eocAlerts={eocAlerts}
-          fleetAlerts={fleetAlerts}
-          debriefAlerts={debriefAlerts}
-          issueUpdates={issueUpdates}
-          onNavigateToIssue={handleNavigateToIssue}
-          onNavigateToFleet={handleNavigateToFleet}
-          onNavigateToDebrief={handleNavigateToDebrief}
-        />
-        <DialogHost />
-        <ToastHost />
-      </div>
+    return renderShell(
+      <ShiftDebriefPage
+        user={user}
+        assignment={bhtDebriefAssignment}
+        mode={currentDebriefMode}
+        debriefId={currentDebriefId}
+        isOffline={isOffline}
+        onBack={handleDebriefBack}
+      />,
+      {
+        title: currentDebriefMode === 'quick' ? 'Add Debrief Note' : 'Shift Debrief',
+        showBack: true,
+        onBack: handleDebriefBack
+      }
     )
   }
 
-  // Show supervisor dashboard for supervisor or admin role
-  if (isSupervisorRole(user.role) || isAdminRole(user.role)) {
-    return (
-      <div className="app-bg">
-        <Header
-          userName={user.name}
-          userSubtitle={bhtHeaderSubtitle}
-          onLogout={handleLogout}
-          onChangePin={() => setIsChangePinOpen(true)}
-          canChangeOwnPin={canChangeOwnPin}
-          alertCount={alertCount}
-          isOffline={isOffline}
-          pendingSyncCount={pendingSyncCount}
-          needsReviewCount={offlineOutboxSummary.needsReview}
-          onNotificationsOpen={() => setIsNotificationsOpen(true)}
-        />
+  if (isManagementUser) {
+    const sectionTitle = dashboardTab.charAt(0).toUpperCase() + dashboardTab.slice(1)
+    return renderShell(
+      <>
         <SupervisorDashboard
           user={user}
           isOffline={isOffline}
@@ -1079,49 +1094,18 @@ function App() {
           eocAlerts={eocAlerts}
           fleetAlerts={fleetAlerts}
           debriefAlerts={debriefAlerts}
+          activeTab={dashboardTab}
+          onActiveTabChange={navigateDashboardTab}
           navigationTarget={dashboardNavigationTarget}
           onNavigationHandled={() => setDashboardNavigationTarget(null)}
         />
-        <ChangePinModal
-          isOpen={isChangePinOpen}
-          onClose={() => setIsChangePinOpen(false)}
-          onSubmit={handleChangeOwnPin}
-        />
-        <NotificationCenter
-          isOpen={isNotificationsOpen}
-          onClose={() => setIsNotificationsOpen(false)}
-          eocAlerts={eocAlerts}
-          fleetAlerts={fleetAlerts}
-          debriefAlerts={debriefAlerts}
-          issueUpdates={issueUpdates}
-          onNavigateToIssue={handleNavigateToIssue}
-          onNavigateToFleet={handleNavigateToFleet}
-          onNavigateToDebrief={handleNavigateToDebrief}
-        />
-        <DialogHost />
-        <ToastHost />
-      </div>
+      </>,
+      { title: sectionTitle }
     )
   }
 
-  // Regular BHT view - BHT Hub
-  return (
-    <div style={{
-      minHeight: '100vh',
-      backgroundColor: 'var(--bg)'
-    }}>
-      <Header
-        userName={user.name}
-        userSubtitle={bhtHeaderSubtitle}
-        onLogout={handleLogout}
-        onChangePin={() => setIsChangePinOpen(true)}
-        canChangeOwnPin={canChangeOwnPin}
-        alertCount={alertCount}
-        isOffline={isOffline}
-        pendingSyncCount={pendingSyncCount}
-        needsReviewCount={offlineOutboxSummary.needsReview}
-        onNotificationsOpen={() => setIsNotificationsOpen(true)}
-      />
+  return renderShell(
+    <>
       <BhtHub
         user={user}
         transports={transports}
@@ -1142,25 +1126,8 @@ function App() {
       {showOnboarding && (
         <Onboarding onComplete={() => setShowOnboarding(false)} />
       )}
-      <ChangePinModal
-        isOpen={isChangePinOpen}
-        onClose={() => setIsChangePinOpen(false)}
-        onSubmit={handleChangeOwnPin}
-      />
-      <NotificationCenter
-        isOpen={isNotificationsOpen}
-        onClose={() => setIsNotificationsOpen(false)}
-        eocAlerts={eocAlerts}
-        fleetAlerts={fleetAlerts}
-        debriefAlerts={debriefAlerts}
-        issueUpdates={issueUpdates}
-        onNavigateToIssue={handleNavigateToIssue}
-        onNavigateToFleet={handleNavigateToFleet}
-        onNavigateToDebrief={handleNavigateToDebrief}
-      />
-      <DialogHost />
-      <ToastHost />
-    </div>
+    </>,
+    { title: 'Home' }
   )
 }
 

@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, updateDoc, deleteDoc, serverTimestamp, setDoc, increment } from 'firebase/firestore'
+import { doc, getDoc, deleteDoc, serverTimestamp, setDoc, runTransaction, onSnapshot } from 'firebase/firestore'
 import DCPaperworkModal from './DCCheckModal'
 import ClientAutocomplete from './ClientAutocomplete'
 import DestinationAutocomplete from './DestinationAutocomplete'
@@ -16,6 +16,32 @@ import {
   queueTransportCreate,
   queueTransportUpdate
 } from '../services/offlineSyncService'
+import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
+import { cloneRecord, formatConflictFields, isCollaborationConflict, makeConflictError, mergeRecordFields } from '../utils/collaboration'
+
+const TRANSPORT_COLLAB_FIELDS = [
+  { field: 'status', label: 'status' },
+  { field: 'clients', label: 'clients' },
+  { field: 'reasons', label: 'reasons' },
+  { field: 'stops', label: 'arrivals' },
+  { field: 'destinations', label: 'destinations' },
+  { field: 'notes', label: 'notes' },
+  { field: 'dcPaperworkStatus', label: 'DC paperwork status' },
+  { field: 'dcPaperworkOtherNote', label: 'DC paperwork note' }
+]
+
+function editableTransportRecord(data = {}) {
+  return {
+    status: String(data.status || 'open').trim().toLowerCase(),
+    clients: Array.isArray(data.clients) ? data.clients : [],
+    reasons: Array.isArray(data.reasons) ? data.reasons : [],
+    stops: Array.isArray(data.stops) ? data.stops : [],
+    destinations: Array.isArray(data.destinations) ? data.destinations : [],
+    notes: typeof data.notes === 'string' ? data.notes : '',
+    dcPaperworkStatus: data.dcPaperworkStatus || null,
+    dcPaperworkOtherNote: data.dcPaperworkOtherNote || ''
+  }
+}
 
 function TransportCard({ transportId, user, onClose, onTransportClosed, onTransportCancelled, isOffline = false }) {
   const [loading, setLoading] = useState(true)
@@ -33,6 +59,11 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
   const [version, setVersion] = useState(1)
   const [hasLocalDraft, setHasLocalDraft] = useState(false)
   const [transportMeta, setTransportMeta] = useState({})
+  const [collaborationNotice, setCollaborationNotice] = useState('')
+  const [collaborationConflicts, setCollaborationConflicts] = useState([])
+  const [conflictRemoteData, setConflictRemoteData] = useState(null)
+  const baseTransportRef = useRef(null)
+  const dirtyFieldsRef = useRef(new Set())
 
   const normalizedStatus = String(status || '').trim().toLowerCase()
   const localOnlyTransport = isLocalTransportId(transportId) || transportMeta.localOnly === true
@@ -71,6 +102,12 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
       updatedAt: d.updatedAt || null,
       localOnly: options.localOnly === true || d.localOnly === true || isLocalTransportId(transportId)
     })
+    if (options.setBase !== false) {
+      baseTransportRef.current = cloneRecord(editableTransportRecord(d))
+      dirtyFieldsRef.current.clear()
+      setCollaborationConflicts([])
+      setConflictRemoteData(null)
+    }
   }, [transportId])
 
   const loadTransport = useCallback(async () => {
@@ -120,7 +157,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
 
   const norm = (t) => t.toLowerCase().trim().replace(/\s+/g, ' ')
 
-  const buildSnapshot = (updates = {}) => ({
+  const buildSnapshot = useCallback((updates = {}) => ({
     id: transportId,
     site: transportMeta.site || user?.site || user?.location || '',
     createdByUserId: transportMeta.createdByUserId || user?.id || '',
@@ -140,11 +177,97 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     localOnly: localOnlyTransport,
     pendingSync: localOnlyTransport || isOffline,
     ...updates
-  })
+  }), [
+    clients,
+    dcPaperworkOtherNote,
+    dcPaperworkStatus,
+    departedAt,
+    destinations,
+    isOffline,
+    localOnlyTransport,
+    notes,
+    reasons,
+    status,
+    stops,
+    transportId,
+    transportMeta.createdAt,
+    transportMeta.createdByName,
+    transportMeta.createdByUserId,
+    transportMeta.site,
+    user,
+    version
+  ])
+
+  useEffect(() => {
+    if (!transportId || isLocalTransportId(transportId)) return undefined
+    const transportRef = doc(db, 'transports', transportId)
+    const unsubscribe = onSnapshot(
+      transportRef,
+      { includeMetadataChanges: true },
+      (snap) => {
+        if (!snap.exists() || snap.metadata.hasPendingWrites) return
+        const remoteData = { id: snap.id, ...snap.data() }
+        const remoteEditable = editableTransportRecord(remoteData)
+
+        if (!baseTransportRef.current) {
+          baseTransportRef.current = cloneRecord(remoteEditable)
+          return
+        }
+
+        const localEditable = editableTransportRecord(buildSnapshot())
+        const hasLocalChanges = dirtyFieldsRef.current.size > 0 || hasLocalDraft
+        if (!hasLocalChanges) {
+          applyTransportData(remoteData)
+          if (getVersionNumber(remoteData) !== version) {
+            setCollaborationNotice('Transport updated to the latest version.')
+          }
+          return
+        }
+
+        const result = mergeRecordFields(baseTransportRef.current, localEditable, remoteEditable, TRANSPORT_COLLAB_FIELDS)
+        if (result.conflicts.length > 0) {
+          setCollaborationConflicts(result.conflicts)
+          setConflictRemoteData(remoteData)
+          setCollaborationNotice('Transport changed in another session. Review the conflicting fields before saving.')
+          return
+        }
+
+        if (result.autoMerged.length > 0) {
+          applyTransportData({ ...remoteData, ...result.merged }, { setBase: false })
+          baseTransportRef.current = cloneRecord(remoteEditable)
+          setVersion(getVersionNumber(remoteData) || version)
+          setCollaborationNotice('Transport updated elsewhere. Safe changes were merged without replacing your typing.')
+        }
+      },
+      (err) => {
+        console.error('Transport live update failed:', err)
+      }
+    )
+    return () => unsubscribe()
+  }, [applyTransportData, buildSnapshot, hasLocalDraft, transportId, version])
+
+  useEffect(() => {
+    if (!transportId || writeLocked || !dirtyFieldsRef.current.has('notes')) return undefined
+    const timer = window.setTimeout(() => {
+      saveOfflineDraft(getTransportDraftId(transportId), 'transport', {
+        snapshot: buildSnapshot(),
+        expectedVersion: version,
+        localOnly: localOnlyTransport
+      }).then(() => {
+        setHasLocalDraft(true)
+      }).catch(err => {
+        console.warn('Transport local draft save failed:', err)
+      })
+    }, 600)
+    return () => window.clearTimeout(timer)
+  }, [buildSnapshot, localOnlyTransport, notes, transportId, version, writeLocked])
 
   const save = async (updates) => {
     if (!transportId) return
     if (writeLocked) return
+    if (collaborationConflicts.length > 0) {
+      throw makeConflictError(collaborationConflicts)
+    }
     const snapshot = buildSnapshot({ ...updates, notes: updates?.notes ?? notes })
     if (localOnlyTransport) {
       await saveOfflineDraft(getTransportDraftId(transportId), 'transport', {
@@ -183,20 +306,43 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
       return
     }
     try {
-      await updateDoc(doc(db, 'transports', transportId), {
+      const updateFields = {
         ...updates,
         notes,
-        version: increment(1),
         updatedAt: serverTimestamp()
+      }
+      await runTransaction(db, async (transaction) => {
+        const transportRef = doc(db, 'transports', transportId)
+        const latestSnap = await transaction.get(transportRef)
+        if (!latestSnap.exists()) throw new Error('Transport no longer exists.')
+        const latest = latestSnap.data()
+        const { nextVersion } = assertExpectedVersion({
+          expectedVersion: version,
+          currentVersion: getVersionNumber(latest),
+          documentId: transportId,
+          recordLabel: 'Transport'
+        })
+        transaction.update(transportRef, {
+          ...updateFields,
+          version: nextVersion
+        })
       })
       setVersion(prev => Number(prev || 1) + 1)
       setHasLocalDraft(false)
+      Object.keys(updates || {}).concat('notes').forEach(field => dirtyFieldsRef.current.delete(field))
+      setCollaborationNotice('')
+      setCollaborationConflicts([])
+      setConflictRemoteData(null)
       await deleteOfflineDraft(getTransportDraftId(transportId))
     } catch (err) {
       console.error('Save error:', err)
-      const message = err?.message || 'Failed to save transport changes.'
+      const message = isCollaborationConflict(err)
+        ? `Transport changed elsewhere: ${formatConflictFields(err.conflicts)}. Review latest version before saving.`
+        : formatVersionConflictMessage(err, err?.message || 'Failed to save transport changes.')
       alert(message)
-      await loadTransport()
+      if (!isCollaborationConflict(err)) {
+        await loadTransport()
+      }
       throw err
     }
   }
@@ -234,6 +380,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
   const handleAddClient = async (clientName) => {
     if (blockIfLocked()) return
     const updated = [...clients, clientName]
+    dirtyFieldsRef.current.add('clients')
     setClients(updated)
     try {
       await touchClientUsage(clientName)
@@ -246,6 +393,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
   const removeClient = (i) => {
     if (blockIfLocked()) return
     const updated = clients.filter((_, idx) => idx !== i)
+    dirtyFieldsRef.current.add('clients')
     setClients(updated)
     save({ clients: updated }).catch(() => {})
   }
@@ -253,6 +401,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
   const toggleReason = (r) => {
     if (blockIfLocked()) return
     const updated = reasons.includes(r) ? reasons.filter(x => x !== r) : [...reasons, r]
+    dirtyFieldsRef.current.add('reasons')
     setReasons(updated)
     save({ reasons: updated }).catch(() => {})
   }
@@ -260,6 +409,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
   const handleAddDestination = async (destination) => {
     if (blockIfLocked()) return
     const updated = [...destinations, destination]
+    dirtyFieldsRef.current.add('destinations')
     setDestinations(updated)
     try {
       await save({ destinations: updated })
@@ -271,6 +421,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
   const removeDest = (i) => {
     if (blockIfLocked()) return
     const updated = destinations.filter((_, idx) => idx !== i)
+    dirtyFieldsRef.current.add('destinations')
     setDestinations(updated)
     save({ destinations: updated }).catch(() => {})
   }
@@ -337,6 +488,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
 
   const handleDCPaperworkComplete = async (result) => {
     if (writeLocked) return
+    ;['status', 'destinations', 'dcPaperworkStatus', 'dcPaperworkOtherNote'].forEach(field => dirtyFieldsRef.current.add(field))
     setShowDCPaperwork(false)
     setDcPaperworkStatus(result.status)
     setDcPaperworkOtherNote(result.otherNote || '')
@@ -449,6 +601,31 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     }
   }
 
+  const useLatestConflictFields = () => {
+    if (!conflictRemoteData || collaborationConflicts.length === 0) return
+    const next = buildSnapshot()
+    collaborationConflicts.forEach(conflict => {
+      next[conflict.field] = conflictRemoteData[conflict.field]
+      dirtyFieldsRef.current.delete(conflict.field)
+    })
+    applyTransportData(next, { setBase: false })
+    baseTransportRef.current = cloneRecord(editableTransportRecord(conflictRemoteData))
+    setVersion(getVersionNumber(conflictRemoteData) || version)
+    setCollaborationConflicts([])
+    setConflictRemoteData(null)
+    setCollaborationNotice('Latest conflicting fields applied. Your other typing was kept.')
+  }
+
+  const keepMineConflictFields = () => {
+    if (!conflictRemoteData || collaborationConflicts.length === 0) return
+    collaborationConflicts.forEach(conflict => dirtyFieldsRef.current.add(conflict.field))
+    baseTransportRef.current = cloneRecord(editableTransportRecord(conflictRemoteData))
+    setVersion(getVersionNumber(conflictRemoteData) || version)
+    setCollaborationConflicts([])
+    setConflictRemoteData(null)
+    setCollaborationNotice('Your version was kept. Save again to apply it over the latest conflicting fields.')
+  }
+
   const dcStatusLabel = (s) => {
     if (s === 'collected') return 'Collected'
     if (s === 'na') return 'N/A'
@@ -479,10 +656,29 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
             Departed {fmt(departedAt)}
           </div>
         </div>
-        <button className="transport-close-btn" onClick={onClose} aria-label="Close">✕</button>
       </div>
 
       {/* Status messages */}
+      {collaborationNotice && (
+        <div style={{ marginBottom: '12px', fontSize: '13px', color: collaborationConflicts.length > 0 ? '#9D362E' : '#2F7D57', textAlign: 'center', padding: '8px', background: collaborationConflicts.length > 0 ? 'rgba(205,78,66,0.10)' : 'rgba(47,125,87,0.08)', borderRadius: '8px' }}>
+          {collaborationNotice}
+          {collaborationConflicts.length > 0 && (
+            <>
+              <div style={{ marginTop: '4px', fontWeight: 700 }}>
+                Conflicts: {formatConflictFields(collaborationConflicts)}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap', marginTop: '8px' }}>
+                <button type="button" onClick={useLatestConflictFields} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(17,47,82,0.24)', background: '#FFFFFF', color: 'var(--text-primary)', fontWeight: 700 }}>
+                  Use latest
+                </button>
+                <button type="button" onClick={keepMineConflictFields} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(205,78,66,0.36)', background: '#FFFFFF', color: '#9D362E', fontWeight: 700 }}>
+                  Keep mine
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       {isOffline && (
         <div style={{ marginBottom: '12px', fontSize: '13px', color: '#B07A28', textAlign: 'center', padding: '8px', background: 'rgba(176,122,40,0.08)', borderRadius: '8px' }}>
           Offline - transport changes will be saved on this device and synced when internet returns.
@@ -653,7 +849,10 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
             <textarea
               className="input"
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              onChange={(e) => {
+                dirtyFieldsRef.current.add('notes')
+                setNotes(e.target.value)
+              }}
               onBlur={() => { if (!writeLocked) save({ notes }).catch(() => {}) }}
               readOnly={writeLocked}
               disabled={writeLocked}

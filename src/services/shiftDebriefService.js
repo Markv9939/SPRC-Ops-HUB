@@ -5,6 +5,7 @@ import {
   getDoc,
   getDocs,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -20,6 +21,7 @@ import {
   getShiftTimingDetails,
   toDate
 } from './shiftTimingService'
+import { assertExpectedVersion, getVersionNumber } from './versioning'
 
 export const DEBRIEF_DRAFTS_COLLECTION = 'shiftDebriefDrafts'
 export const DEBRIEFS_COLLECTION = 'shiftDebriefs'
@@ -244,22 +246,46 @@ export async function getCurrentDraftDebrief(context) {
   return draftSnap.exists() ? { id: draftSnap.id, ...draftSnap.data() } : null
 }
 
-export async function saveDebriefDraft(context, items) {
+export async function saveDebriefDraft(context, items, options = {}) {
   const draftRef = doc(db, DEBRIEF_DRAFTS_COLLECTION, context.id)
-  const existing = await getDoc(draftRef)
-  await setDoc(
-    draftRef,
-    {
+  const expectedVersion = options.expectedVersion
+  if (expectedVersion === undefined || expectedVersion === null) {
+    const existing = await getDoc(draftRef)
+    await setDoc(
+      draftRef,
+      {
+        ...context,
+        status: 'draft',
+        items,
+        itemCount: items.length,
+        ...(existing.exists() ? {} : { createdAt: serverTimestamp() }),
+        updatedAt: serverTimestamp(),
+        version: existing.exists() ? getVersionNumber(existing.data()) + 1 : 1
+      },
+      { merge: true }
+    )
+    return
+  }
+
+  await runTransaction(db, async (transaction) => {
+    const existing = await transaction.get(draftRef)
+    const currentVersion = existing.exists() ? getVersionNumber(existing.data()) : 0
+    const { nextVersion } = assertExpectedVersion({
+      expectedVersion,
+      currentVersion,
+      documentId: context.id,
+      recordLabel: 'Shift debrief draft'
+    })
+    transaction.set(draftRef, {
       ...context,
       status: 'draft',
       items,
       itemCount: items.length,
       ...(existing.exists() ? {} : { createdAt: serverTimestamp() }),
       updatedAt: serverTimestamp(),
-      version: 1
-    },
-    { merge: true }
-  )
+      version: nextVersion
+    }, { merge: true })
+  })
 }
 
 export async function addDraftItem(context, item) {
