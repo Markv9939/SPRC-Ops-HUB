@@ -28,8 +28,13 @@ import { deleteOfflineDraft, getOfflineDraft, saveOfflineDraft } from '../servic
 import { getDebriefDraftId, queueShiftDebriefSubmission } from '../services/offlineSyncService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
+import { cloneRecord, formatConflictFields, mergeRecordFields } from '../utils/collaboration'
+import { formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 
 const GUIDE_KEY = 'sprc_shift_debrief_guide_done'
+const DEBRIEF_COLLAB_FIELDS = [
+  { field: 'items', label: 'debrief notes', type: 'listById', idField: 'id' }
+]
 
 function formatTimestamp(value) {
   if (!value) return ''
@@ -54,6 +59,12 @@ function sortItems(items) {
   return [...(Array.isArray(items) ? items : [])].sort((a, b) => (
     String(a.createdAtIso || '').localeCompare(String(b.createdAtIso || ''))
   ))
+}
+
+function editableDebriefDraft(data = {}) {
+  return {
+    items: sortItems(data.items || [])
+  }
 }
 
 const EDIT_SECTION_TABS = [
@@ -1013,6 +1024,25 @@ export default function ShiftDebriefPage({
   const [submitting, setSubmitting] = useState(false)
   const [showGuide, setShowGuide] = useState(() => !localStorage.getItem(GUIDE_KEY))
   const [quickStatus, setQuickStatus] = useState('')
+  const [collaborationNotice, setCollaborationNotice] = useState('')
+  const [collaborationConflicts, setCollaborationConflicts] = useState([])
+  const [conflictRemoteDraft, setConflictRemoteDraft] = useState(null)
+  const baseDraftRef = useRef(null)
+  const itemsRef = useRef([])
+  const dirtyRef = useRef(false)
+  const hasLocalDraftRef = useRef(false)
+
+  useEffect(() => {
+    itemsRef.current = items
+  }, [items])
+
+  useEffect(() => {
+    dirtyRef.current = dirty
+  }, [dirty])
+
+  useEffect(() => {
+    hasLocalDraftRef.current = hasLocalDraft
+  }, [hasLocalDraft])
 
   useEffect(() => {
     if (!targetDebriefId) return undefined
@@ -1027,7 +1057,42 @@ export default function ShiftDebriefPage({
     if (!context?.id || debriefId) return undefined
     const unsubDraft = onSnapshot(
       doc(db, DEBRIEF_DRAFTS_COLLECTION, context.id),
-      (snap) => setDraft(snap.exists() ? { id: snap.id, ...snap.data() } : null)
+      (snap) => {
+        const latestDraft = snap.exists() ? { id: snap.id, ...snap.data() } : null
+        setDraft(latestDraft)
+        const remoteEditable = editableDebriefDraft(latestDraft || {})
+
+        if (!baseDraftRef.current) {
+          baseDraftRef.current = cloneRecord(remoteEditable)
+          if (!dirtyRef.current && !hasLocalDraftRef.current) {
+            setItems(remoteEditable.items)
+          }
+          return
+        }
+
+        if (!dirtyRef.current && !hasLocalDraftRef.current) {
+          baseDraftRef.current = cloneRecord(remoteEditable)
+          setItems(remoteEditable.items)
+          setCollaborationConflicts([])
+          setConflictRemoteDraft(null)
+          return
+        }
+
+        const localEditable = editableDebriefDraft({ items: itemsRef.current })
+        const result = mergeRecordFields(baseDraftRef.current, localEditable, remoteEditable, DEBRIEF_COLLAB_FIELDS)
+        if (result.conflicts.length > 0) {
+          setCollaborationConflicts(result.conflicts)
+          setConflictRemoteDraft(latestDraft)
+          setCollaborationNotice('This debrief changed in another session. Review the conflicting notes before saving.')
+          return
+        }
+
+        if (result.autoMerged.length > 0) {
+          setItems(sortItems(result.merged.items))
+          baseDraftRef.current = cloneRecord(remoteEditable)
+          setCollaborationNotice('Debrief updated elsewhere. Safe changes were merged without replacing your typing.')
+        }
+      }
     )
     return () => unsubDraft()
   }, [context?.id, debriefId])
@@ -1047,29 +1112,33 @@ export default function ShiftDebriefPage({
   }, [context?.id, debriefId])
 
   useEffect(() => {
-    if (dirty || hasLocalDraft) return
+    if (dirty || hasLocalDraft || collaborationConflicts.length > 0) return
     setItems(sortItems(draft?.items || []))
-  }, [draft, dirty, hasLocalDraft])
+  }, [collaborationConflicts.length, draft, dirty, hasLocalDraft])
 
   useEffect(() => {
-    if (!dirty || submitted || mode === 'quick' || !context) return undefined
+    if (!dirty || submitted || mode === 'quick' || !context || collaborationConflicts.length > 0) return undefined
     const timer = setTimeout(async () => {
       try {
         await saveOfflineDraft(getDebriefDraftId(context.id), 'debrief', { context, items })
         setHasLocalDraft(true)
         if (!isOffline) {
-          await saveDebriefDraft(context, items)
+          await saveDebriefDraft(context, items, { expectedVersion: getVersionNumber(draft) })
           await deleteOfflineDraft(getDebriefDraftId(context.id))
           setHasLocalDraft(false)
         }
         setLastSavedAt(new Date())
         setDirty(false)
+        baseDraftRef.current = cloneRecord(editableDebriefDraft({ items }))
+        setCollaborationConflicts([])
+        setConflictRemoteDraft(null)
       } catch (err) {
         console.error('Debrief autosave failed:', err)
+        setCollaborationNotice(formatVersionConflictMessage(err, 'Debrief autosave paused. Review latest changes before saving.'))
       }
     }, 1200)
     return () => clearTimeout(timer)
-  }, [context, dirty, isOffline, items, mode, submitted])
+  }, [collaborationConflicts.length, context, dirty, draft, isOffline, items, mode, submitted])
 
   if (!context && !debriefId) {
     return (
@@ -1084,20 +1153,59 @@ export default function ShiftDebriefPage({
     )
   }
 
+  const useLatestDebriefConflicts = () => {
+    if (!conflictRemoteDraft || collaborationConflicts.length === 0) return
+    const remoteItems = editableDebriefDraft(conflictRemoteDraft).items
+    const remoteById = new Map(remoteItems.map(item => [item.id, item]))
+    const conflictIds = new Set(collaborationConflicts.map(conflict => conflict.field))
+    const nextItems = sortItems(items
+      .filter(item => !(conflictIds.has(item.id) && !remoteById.has(item.id)))
+      .map(item => (
+        conflictIds.has(item.id) && remoteById.has(item.id)
+          ? remoteById.get(item.id)
+          : item
+      )))
+    setItems(nextItems)
+    itemsRef.current = nextItems
+    baseDraftRef.current = cloneRecord(editableDebriefDraft(conflictRemoteDraft))
+    setCollaborationConflicts([])
+    setConflictRemoteDraft(null)
+    setCollaborationNotice('Latest conflicting notes applied. Your other notes were kept.')
+  }
+
+  const keepMineDebriefConflicts = () => {
+    if (!conflictRemoteDraft || collaborationConflicts.length === 0) return
+    baseDraftRef.current = cloneRecord(editableDebriefDraft(conflictRemoteDraft))
+    setCollaborationConflicts([])
+    setConflictRemoteDraft(null)
+    setDirty(true)
+    setCollaborationNotice('Your version was kept. Save again to apply it over the latest conflicting notes.')
+  }
+
   const saveManualDraft = async () => {
     if (!context) return
+    if (collaborationConflicts.length > 0) {
+      alert(`Debrief changed elsewhere: ${formatConflictFields(collaborationConflicts)}. Use latest or keep yours before saving.`)
+      return
+    }
     setManualSaving(true)
     try {
       await saveOfflineDraft(getDebriefDraftId(context.id), 'debrief', { context, items })
       setHasLocalDraft(true)
       if (!isOffline) {
-        await saveDebriefDraft(context, items)
+        await saveDebriefDraft(context, items, { expectedVersion: getVersionNumber(draft) })
         await deleteOfflineDraft(getDebriefDraftId(context.id))
         setHasLocalDraft(false)
       }
       setLastSavedAt(new Date())
       setDirty(false)
+      baseDraftRef.current = cloneRecord(editableDebriefDraft({ items }))
+      setCollaborationConflicts([])
+      setConflictRemoteDraft(null)
       notifySuccess(isOffline ? 'Draft saved on this device' : 'Draft saved')
+    } catch (err) {
+      console.error('Debrief manual save failed:', err)
+      alert(formatVersionConflictMessage(err, err?.message || 'Failed to save debrief draft.'))
     } finally {
       setManualSaving(false)
     }
@@ -1105,6 +1213,10 @@ export default function ShiftDebriefPage({
 
   const handleSubmit = async () => {
     if (!context) return
+    if (collaborationConflicts.length > 0) {
+      alert(`Debrief changed elsewhere: ${formatConflictFields(collaborationConflicts)}. Use latest or keep yours before submitting.`)
+      return
+    }
     const validItems = items.filter(item => item.note?.trim() && (item.type !== 'client' || item.clientName?.trim()))
     if (validItems.length === 0) {
       alert('Please add at least one complete debrief note before submitting.')
@@ -1192,6 +1304,29 @@ export default function ShiftDebriefPage({
       onBack={onBack}
     >
       {showGuide && <ShiftDebriefGuide onComplete={() => setShowGuide(false)} />}
+      {collaborationNotice && mode !== 'quick' && !submitted && (
+        <div style={{
+          ...styles.collaborationBanner,
+          ...(collaborationConflicts.length > 0 ? styles.collaborationBannerConflict : {})
+        }}>
+          <div>{collaborationNotice}</div>
+          {collaborationConflicts.length > 0 && (
+            <>
+              <div style={{ marginTop: '4px', fontWeight: 700 }}>
+                Conflicts: {formatConflictFields(collaborationConflicts)}
+              </div>
+              <div style={styles.conflictActions}>
+                <button type="button" onClick={useLatestDebriefConflicts} style={styles.conflictButton}>
+                  Use latest
+                </button>
+                <button type="button" onClick={keepMineDebriefConflicts} style={{ ...styles.conflictButton, ...styles.keepMineButton }}>
+                  Keep mine
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {mode === 'quick' ? (
         <div style={styles.panel}>
@@ -1224,7 +1359,7 @@ export default function ShiftDebriefPage({
   )
 }
 
-function DebriefShell({ title, subtitle = '', onBack, children }) {
+function DebriefShell({ title, subtitle = '', children }) {
   return (
     <div className="transport-page debrief-page">
       <div className="transport-header">
@@ -1232,7 +1367,6 @@ function DebriefShell({ title, subtitle = '', onBack, children }) {
           <div className="transport-title">{title}</div>
           {subtitle && <div style={styles.metaLine}>{subtitle}</div>}
         </div>
-        <button className="transport-close-btn" onClick={onBack} aria-label="Close">x</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {children}
@@ -1414,6 +1548,39 @@ const styles = {
     color: '#2F7D57',
     fontSize: '14px',
     fontWeight: 700
+  },
+  collaborationBanner: {
+    padding: '12px 14px',
+    borderRadius: '8px',
+    backgroundColor: 'rgba(47,125,87,0.10)',
+    border: '1px solid rgba(47,125,87,0.26)',
+    color: '#2F7D57',
+    fontSize: '13px',
+    fontWeight: 700
+  },
+  collaborationBannerConflict: {
+    backgroundColor: 'rgba(205,78,66,0.10)',
+    border: '1px solid rgba(205,78,66,0.28)',
+    color: '#9D362E'
+  },
+  conflictActions: {
+    display: 'flex',
+    gap: '8px',
+    flexWrap: 'wrap',
+    marginTop: '8px'
+  },
+  conflictButton: {
+    padding: '7px 11px',
+    borderRadius: '6px',
+    border: '1px solid rgba(17,47,82,0.24)',
+    backgroundColor: '#FFFFFF',
+    color: 'var(--text-primary)',
+    fontWeight: 700,
+    cursor: 'pointer'
+  },
+  keepMineButton: {
+    border: '1px solid rgba(205,78,66,0.36)',
+    color: '#9D362E'
   },
   checkboxRow: {
     display: 'flex',

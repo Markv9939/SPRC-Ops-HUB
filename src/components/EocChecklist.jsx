@@ -714,27 +714,8 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
   return (
     <div className="eoc-checklist-page" style={{ padding: '16px', maxWidth: '760px', margin: '0 auto', paddingBottom: '140px' }}>
-      {/* Header with back button */}
+      {/* Checklist heading; app shell owns navigation. */}
       <div className="eoc-header-row">
-        <button
-          aria-label="Back to BHT hub"
-          onClick={onBack}
-          style={{
-            background: 'none',
-            border: 'none',
-            fontSize: '22px',
-            cursor: 'pointer',
-            color: 'var(--text-secondary)',
-            padding: '8px',
-            minWidth: '44px',
-            minHeight: '44px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          ←
-        </button>
         <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0, fontSize: '20px', lineHeight: 1.2, color: 'var(--text-primary)', fontWeight: 700 }}>
             {eocType === 'van' ? 'Van EOC' : 'House EOC'}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { db, auth } from '../firebase'
-import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, getDocs, updateDoc, serverTimestamp, writeBatch } from 'firebase/firestore'
+import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, getDocs, updateDoc, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
 import { signInAnonymously, signOut } from 'firebase/auth'
 import * as XLSX from 'xlsx'
 import DashboardSummaryPanel from './DashboardSummaryPanel'
@@ -18,6 +18,7 @@ import { findDuplicatePinUser } from '../services/pinConflictService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
 import { writeAuditLog as writeAuditEntry } from '../services/notificationService'
+import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import useUserScope from '../hooks/useUserScope'
 import useScopedIssues from '../hooks/useScopedIssues'
 import useScopedFleet from '../hooks/useScopedFleet'
@@ -42,20 +43,6 @@ import {
   roleOptionsForActor
 } from '../utils/orgModel'
 
-const TAB_LABELS = {
-  dashboard: '\u{1F4C8} Dashboard',
-  transports: '\u{1F4CA} Transports',
-  debriefs: 'Debriefs',
-  users: '\u{1F465} Users',
-  eoc: '\u{1F527} EOC',
-  compliance: '\u{1F4CB} Compliance',
-  properties: '\u{1F3E0} Properties',
-  fleet: '\u{1F69A} Fleet',
-  cintas: '\u{1F9FC} Cintas',
-  audit: '\u{1F9FE} Audit'
-}
-const TAB_KEYS = Object.keys(TAB_LABELS)
-
 function normalizeVanIdList(values, fallbackVanId = '') {
   const base = Array.isArray(values) ? values : []
   const normalized = base
@@ -72,12 +59,17 @@ function SupervisorDashboard({
   eocAlerts = [],
   fleetAlerts = [],
   debriefAlerts = [],
+  activeTab: controlledActiveTab = 'dashboard',
+  onActiveTabChange,
   navigationTarget = null,
   onNavigationHandled
 }) {
-  const [activeTab, setActiveTab] = useState('dashboard')
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
-  const [headerOffset, setHeaderOffset] = useState(64)
+  const activeTab = controlledActiveTab
+  const setActiveTab = useCallback((nextTab) => {
+    const resolvedTab = typeof nextTab === 'function' ? nextTab(activeTab) : nextTab
+    onActiveTabChange?.(resolvedTab)
+  }, [activeTab, onActiveTabChange])
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024)
   const [transports, setTransports] = useState([])
   const [filteredTransports, setFilteredTransports] = useState([])
 
@@ -135,37 +127,23 @@ function SupervisorDashboard({
   const { issues: eocIssues, overdueTasks: eocOverdueTasks } = useScopedIssues({ inEocScope })
   const { overdueTasks: fleetOverdueTasks, upcomingTasks: fleetUpcomingTasks } = useScopedFleet({ inComplianceScope })
 
-  const availableTabKeys = isAdmin ? TAB_KEYS : TAB_KEYS.filter(k => k !== 'audit')
   const actorRoleOptions = useMemo(
     () => roleOptionsForActor(user?.role),
     [user?.role]
   )
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 600px)')
+    const mq = window.matchMedia('(max-width: 1023px)')
     const handler = (e) => setIsMobile(e.matches)
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
   }, [])
 
   useEffect(() => {
-    const readHeaderHeight = () => {
-      const headerEl = document.querySelector('.header')
-      if (!headerEl) return
-      const measuredHeight = Math.max(56, Math.ceil(headerEl.getBoundingClientRect().height))
-      setHeaderOffset(prev => (prev === measuredHeight ? prev : measuredHeight))
-    }
-
-    readHeaderHeight()
-    window.addEventListener('resize', readHeaderHeight)
-    return () => window.removeEventListener('resize', readHeaderHeight)
-  }, [])
-
-  useEffect(() => {
     if (!isAdmin && activeTab === 'audit') {
       setActiveTab('dashboard')
     }
-  }, [activeTab, isAdmin])
+  }, [activeTab, isAdmin, setActiveTab])
 
   useEffect(() => {
     if (!navigationTarget?.type) return
@@ -182,7 +160,7 @@ function SupervisorDashboard({
       setActiveTab('debriefs')
       onNavigationHandled?.()
     }
-  }, [navigationTarget, onNavigationHandled])
+  }, [navigationTarget, onNavigationHandled, setActiveTab])
 
 
 
@@ -242,9 +220,15 @@ function SupervisorDashboard({
 
     setStartDate(firstDay.toISOString().split('T')[0])
     setEndDate(lastDay.toISOString().split('T')[0])
+  }, [])
 
-    // Load users
-    loadUsers()
+  useEffect(() => {
+    const unsubUsers = onSnapshot(
+      collection(db, 'users'),
+      () => loadUsers(),
+      (err) => console.error('User live update failed:', err)
+    )
+    return () => unsubUsers()
   }, [loadUsers])
 
   useEffect(() => {
@@ -341,6 +325,7 @@ function SupervisorDashboard({
 
     setUserForm({
       ...managedUser,
+      _version: getVersionNumber(managedUser),
       role: normalizedRole,
       location: normalizedLocation,
       site: normalizedLocation,
@@ -482,10 +467,26 @@ function SupervisorDashboard({
         if (editingUser === 'new') {
           await setDoc(doc(db, 'users', userForm.id), {
             ...payload,
+            version: 1,
             createdAt: serverTimestamp()
           })
         } else {
-          await updateDoc(doc(db, 'users', userForm.id), payload)
+          await runTransaction(db, async (transaction) => {
+            const userRef = doc(db, 'users', userForm.id)
+            const latestSnap = await transaction.get(userRef)
+            if (!latestSnap.exists()) throw new Error('User record no longer exists.')
+            const latest = latestSnap.data()
+            const { nextVersion } = assertExpectedVersion({
+              expectedVersion: userForm._version,
+              currentVersion: getVersionNumber(latest),
+              documentId: userForm.id,
+              recordLabel: 'User'
+            })
+            transaction.update(userRef, {
+              ...payload,
+              version: nextVersion
+            })
+          })
         }
 
         await syncDerivedAssignmentForUser(userForm.id, {
@@ -528,7 +529,7 @@ function SupervisorDashboard({
       loadUsers()
     } catch (error) {
       console.error('Error saving user:', error)
-      alert('Error saving user: ' + error.message)
+      alert(formatVersionConflictMessage(error, 'Error saving user: ' + error.message))
     }
   }
 
@@ -1115,19 +1116,8 @@ function SupervisorDashboard({
     setOverdueFilter('all')
     setClientSearch('')
   }
-  const tabRailStyle = {
-    position: 'sticky',
-    top: `${headerOffset}px`,
-    zIndex: 95,
-    marginBottom: '20px',
-    paddingTop: '8px',
-    paddingBottom: '6px',
-    background: 'linear-gradient(180deg, rgba(248,245,241,0.98) 0%, rgba(248,245,241,0.92) 72%, rgba(248,245,241,0) 100%)',
-    backdropFilter: 'blur(6px)'
-  }
-
   return (
-    <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
+    <div className="supervisor-dashboard" style={{ padding: '20px', maxWidth: '1440px', margin: '0 auto' }}>
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -1194,67 +1184,6 @@ function SupervisorDashboard({
           Offline mode is active. Supervisor/Admin write actions are disabled until connection is restored.
         </div>
       )}
-
-      {/* Tabs - dropdown on mobile, button strip on desktop */}
-      <div style={tabRailStyle}>
-        {isMobile ? (
-          <div>
-            <select
-              value={activeTab}
-              onChange={(e) => setActiveTab(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '12px 16px',
-                backgroundColor: 'rgba(229,57,53,0.15)',
-                color: 'var(--text-primary)',
-                border: '2px solid #CD4E42',
-                borderRadius: '10px',
-                fontSize: '15px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                appearance: 'none',
-                WebkitAppearance: 'none',
-                backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%278%27 viewBox=%270 0 12 8%27%3E%3Cpath fill=%27%23E53935%27 d=%27M6 8L0 0h12z%27/%3E%3C/svg%3E")',
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 14px center',
-                backgroundSize: '12px'
-              }}
-            >
-              {availableTabKeys.map(tab => (
-                <option key={tab} value={tab}>{TAB_LABELS[tab]}</option>
-              ))}
-            </select>
-          </div>
-        ) : (
-          <div style={{
-            display: 'flex',
-            gap: '8px',
-            borderBottom: '2px solid rgba(17,47,82,0.14)',
-            flexWrap: 'wrap'
-          }}>
-            {availableTabKeys.map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                style={{
-                  padding: '12px 24px',
-                  backgroundColor: activeTab === tab ? '#CD4E42' : 'transparent',
-                  color: activeTab === tab ? 'white' : 'var(--text-secondary)',
-                  border: 'none',
-                  borderBottom: activeTab === tab ? '3px solid #CD4E42' : 'none',
-                  borderRadius: '8px 8px 0 0',
-                  fontSize: '14px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  marginBottom: '-2px'
-                }}
-              >
-                {TAB_LABELS[tab]}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
 
       {/* EOC Tab */}
       {activeTab === 'eoc' && (

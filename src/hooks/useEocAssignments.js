@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore'
+import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore'
 
 /**
  * Hook to load active BHT assignment for a user.
@@ -13,50 +13,63 @@ export default function useEocAssignments(user) {
 
   useEffect(() => {
     if (!user || !user.id) {
-      setLoading(false)
-      return
+      const timer = window.setTimeout(() => {
+        setAssignment(null)
+        setLoading(false)
+      }, 0)
+      return () => window.clearTimeout(timer)
     }
     const normalizedUserId = String(user.id || '').trim()
     if (!normalizedUserId) {
-      setLoading(false)
-      return
+      const timer = window.setTimeout(() => {
+        setAssignment(null)
+        setLoading(false)
+      }, 0)
+      return () => window.clearTimeout(timer)
     }
 
-    async function loadAssignment() {
-      try {
-        const canonicalRef = doc(db, 'shiftAssignments', `asg_${normalizedUserId}`)
-        const canonicalSnap = await getDoc(canonicalRef)
+    const canonicalRef = doc(db, 'shiftAssignments', `asg_${normalizedUserId}`)
+    const unsubscribe = onSnapshot(
+      canonicalRef,
+      async (canonicalSnap) => {
+        try {
+          if (canonicalSnap.exists()) {
+            const canonicalData = canonicalSnap.data()
+            if (canonicalData.active === true && canonicalData.deleted !== true) {
+              setAssignment({ id: canonicalSnap.id, ...canonicalData })
+              setLoading(false)
+              return
+            }
+          }
 
-        if (canonicalSnap.exists()) {
-          const canonicalData = canonicalSnap.data()
-          if (canonicalData.active === true && canonicalData.deleted !== true) {
-            setAssignment({ id: canonicalSnap.id, ...canonicalData })
+          const q = query(
+            collection(db, 'shiftAssignments'),
+            where('bhtUserId', '==', normalizedUserId),
+            where('active', '==', true)
+          )
+          const snap = await getDocs(q)
+          if (snap.empty) {
+            setAssignment(null)
+            setLoading(false)
             return
           }
-        }
 
-        const q = query(
-          collection(db, 'shiftAssignments'),
-          where('bhtUserId', '==', normalizedUserId),
-          where('active', '==', true)
-        )
-        const snap = await getDocs(q)
-        if (snap.empty) {
+          const fallback = snap.docs[0]
+          setAssignment({ id: fallback.id, ...fallback.data() })
+          setLoading(false)
+        } catch (err) {
+          console.error('Error loading BHT assignment:', err)
           setAssignment(null)
-          return
+          setLoading(false)
         }
-
-        const fallback = snap.docs[0]
-        setAssignment({ id: fallback.id, ...fallback.data() })
-      } catch (err) {
+      },
+      (err) => {
         console.error('Error loading BHT assignment:', err)
         setAssignment(null)
-      } finally {
         setLoading(false)
       }
-    }
-
-    loadAssignment()
+    )
+    return () => unsubscribe()
   }, [user])
 
   return { assignment, loading }
