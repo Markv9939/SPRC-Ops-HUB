@@ -89,13 +89,6 @@ const CLIENT_NOTE_PLACEHOLDERS = {
   client_progress_concerns: name => `Add a progress note for ${name}...`
 }
 
-const GENERAL_EDIT_SECTIONS = [
-  { id: 'pending_task', label: 'Pending Task', placeholder: 'Add what still needs to be done, who is responsible, and timing...' },
-  { id: 'urgent_time_sensitive_task', label: 'Urgent / Time-Sensitive', placeholder: 'Add what needs attention soon, deadline, and who should handle it...' },
-  { id: 'maintenance_van_facility_operational', label: 'Maintenance / Van / Facility', placeholder: 'Add the issue, location/van, and what follow-up is needed...' },
-  { id: 'notes_discrepancies', label: 'Notes & Discrepancies', placeholder: 'Add the discrepancy, context, and what incoming staff should know...' }
-]
-
 function getDebriefNotePlaceholder(type, sectionId, clientName) {
   if (type === 'client') {
     const name = String(clientName || '').trim() || 'this client'
@@ -103,7 +96,7 @@ function getDebriefNotePlaceholder(type, sectionId, clientName) {
     return getPlaceholder(name)
   }
 
-  return GENERAL_EDIT_SECTIONS.find(section => section.id === sectionId)?.placeholder || 'Add a general handoff note...'
+  return 'Write your note...'
 }
 
 function normalizeClientKey(value) {
@@ -606,37 +599,40 @@ function SectionTabsDraftEditor({
   const [emptyClients, setEmptyClients] = useState([])
   const [clientDrafts, setClientDrafts] = useState({})
   const [noteDrafts, setNoteDrafts] = useState({})
-  const [generalDrafts, setGeneralDrafts] = useState({})
+  const [generalComposerOpen, setGeneralComposerOpen] = useState(false)
+  const [generalLabel, setGeneralLabel] = useState('')
+  const [generalNote, setGeneralNote] = useState('')
   const [invalidClientSections, setInvalidClientSections] = useState({})
   const clientInputRefs = useRef({})
   const noteInputRefs = useRef({})
-  const generalInputRefs = useRef({})
+  const generalNoteInputRef = useRef(null)
 
   const clientGroups = useMemo(
     () => buildClientGroups(items, emptyClients),
     [emptyClients, items]
   )
 
-  const generalGroups = useMemo(
-    () => GENERAL_EDIT_SECTIONS.map(section => ({
-      ...section,
-      notes: items
-        .map((item, index) => ({ item, index }))
-        .filter(({ item }) => item?.type === 'general' && item.section === section.id)
-    })),
+  const generalNotes = useMemo(
+    () => items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item?.type === 'general')
+      .sort((a, b) => String(a.item.createdAtIso || '').localeCompare(String(b.item.createdAtIso || ''))),
     [items]
   )
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (activeTab === 'general') {
-        generalInputRefs.current[GENERAL_EDIT_SECTIONS[0].id]?.focus()
-        return
-      }
+      if (activeTab === 'general') return
       clientInputRefs.current[activeTab]?.focus()
     }, 80)
     return () => clearTimeout(timer)
   }, [activeTab])
+
+  useEffect(() => {
+    if (!generalComposerOpen) return
+    const timer = setTimeout(() => generalNoteInputRef.current?.focus(), 80)
+    return () => clearTimeout(timer)
+  }, [generalComposerOpen])
 
   const applyItemsChange = (updater) => {
     onItemsChange(updater)
@@ -727,44 +723,30 @@ function SectionTabsDraftEditor({
     clientInputRefs.current[group.sectionId]?.focus()
   }
 
-  const focusGeneralInput = (sectionId) => {
-    setTimeout(() => generalInputRefs.current[sectionId]?.focus(), 80)
+  const closeGeneralComposer = () => {
+    setGeneralComposerOpen(false)
+    setGeneralLabel('')
+    setGeneralNote('')
   }
 
-  const addGeneralNote = (sectionId) => {
-    const noteText = (generalDrafts[sectionId] || '').trim()
-    if (!noteText) {
-      focusGeneralInput(sectionId)
-      return
-    }
+  const addGeneralNote = () => {
+    const noteText = generalNote.trim()
+    if (!generalLabel || !noteText) return
 
     const item = createDebriefItem({
       type: 'general',
-      section: sectionId,
+      section: generalLabel,
       clientName: '',
       note: noteText,
       user
     })
 
     applyItemsChange(prev => [...prev, item])
-    setGeneralDrafts(prev => ({ ...prev, [sectionId]: '' }))
-    focusGeneralInput(sectionId)
+    closeGeneralComposer()
   }
 
-  const updateGeneralNote = (itemIndex, note) => {
-    applyItemsChange(prev => {
-      const nextItems = prev.map((item, index) => (
-        index === itemIndex
-          ? { ...item, note, updatedAtIso: new Date().toISOString() }
-          : item
-      ))
-      return nextItems
-    })
-  }
-
-  const removeGeneralNote = (itemIndex, sectionId) => {
+  const removeGeneralNote = (itemIndex) => {
     applyItemsChange(prev => prev.filter((_, index) => index !== itemIndex))
-    focusGeneralInput(sectionId)
   }
 
   const activeTabConfig = EDIT_SECTION_TABS.find(tab => tab.id === activeTab) || EDIT_SECTION_TABS[0]
@@ -810,68 +792,98 @@ function SectionTabsDraftEditor({
       </div>
 
       <div key={activeTabConfig.id} className="debrief-section-panel">
-        <div className={`debrief-section-header ${activeTabConfig.tone === 'slate' ? 'debrief-section-header-slate' : ''}`}>
-          <span>{activeTabConfig.icon}</span>
-          <span>{activeTabConfig.header}</span>
-        </div>
+        {activeTabConfig.id !== 'general' && (
+          <div className="debrief-section-header">
+            <span>{activeTabConfig.icon}</span>
+            <span>{activeTabConfig.header}</span>
+          </div>
+        )}
 
         {activeTabConfig.id === 'general' ? (
-          <div className="debrief-general-body">
-            {generalGroups.map(group => (
-              <div key={group.id} className="debrief-general-card">
-                <div className="debrief-general-card-title">{group.label}</div>
-                {group.notes.length > 0 && (
-                  <div className="debrief-note-list">
-                    {group.notes.map(({ item, index }) => (
-                      <div key={item.id || index} className="debrief-note-row">
-                        <span className="debrief-note-dash">-</span>
-                        <textarea
-                          className="debrief-note-edit debrief-general-note-edit"
-                          value={item.note || ''}
-                          onChange={(e) => updateGeneralNote(index, e.target.value)}
-                          rows={1}
-                          aria-label={`Edit ${group.label} note`}
-                        />
-                        <button
-                          type="button"
-                          className="debrief-note-remove"
-                          onClick={() => removeGeneralNote(index, group.id)}
-                          aria-label="Remove note"
-                        >
-                          x
-                        </button>
+          <div className="debrief-handoff-body">
+            {generalNotes.length === 0 ? (
+              <div className="debrief-handoff-empty">
+                No handoff notes yet — tap Add to get started
+              </div>
+            ) : (
+              <div className="debrief-handoff-list">
+                {generalNotes.map(({ item, index }) => {
+                  const label = GENERAL_HANDOFF_SECTIONS.find(section => section.id === item.section)
+                  const tone = label?.tone || 'general'
+                  return (
+                    <div key={item.id || index} className={`debrief-handoff-card debrief-handoff-card-${tone}`}>
+                      <div className="debrief-handoff-card-content">
+                        <span className={`debrief-handoff-tag debrief-handoff-tag-${tone}`}>
+                          {label?.label || item.section}
+                        </span>
+                        <div className="debrief-handoff-text">{item.note}</div>
                       </div>
-                    ))}
-                  </div>
-                )}
-                <div className="debrief-add-note-row">
-                  <textarea
-                    ref={node => {
-                      if (node) generalInputRefs.current[group.id] = node
-                    }}
-                    className="input debrief-note-input debrief-general-note-input"
-                    value={generalDrafts[group.id] || ''}
-                    onChange={(e) => setGeneralDrafts(prev => ({ ...prev, [group.id]: e.target.value }))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        addGeneralNote(group.id)
-                      }
-                    }}
-                    rows={1}
-                    placeholder={group.placeholder}
-                  />
+                      <button
+                        type="button"
+                        className="debrief-handoff-remove"
+                        onClick={() => removeGeneralNote(index)}
+                        aria-label={`Remove ${label?.label || 'handoff'} note`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {generalComposerOpen ? (
+              <div className="debrief-handoff-composer">
+                <div className="debrief-handoff-composer-title">Add handoff note</div>
+                <div className="debrief-handoff-labels" role="radiogroup" aria-label="Handoff note label">
+                  {GENERAL_HANDOFF_SECTIONS.map(section => (
+                    <button
+                      key={section.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={generalLabel === section.id}
+                      className={`debrief-handoff-label debrief-handoff-label-${section.tone} ${generalLabel === section.id ? 'debrief-handoff-label-selected' : ''}`}
+                      onClick={() => setGeneralLabel(section.id)}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  ref={generalNoteInputRef}
+                  className="input debrief-handoff-input"
+                  value={generalNote}
+                  onChange={(e) => setGeneralNote(e.target.value)}
+                  rows={4}
+                  placeholder="Write your note..."
+                />
+                <div className="debrief-handoff-actions">
                   <button
                     type="button"
-                    className="debrief-note-button debrief-general-note-button"
-                    onClick={() => addGeneralNote(group.id)}
-                    aria-label={`Add ${group.label} note`}
+                    className="debrief-handoff-cancel"
+                    onClick={closeGeneralComposer}
                   >
-                    +
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="debrief-handoff-add"
+                    onClick={addGeneralNote}
+                    disabled={!generalLabel || !generalNote.trim()}
+                  >
+                    Add note
                   </button>
                 </div>
               </div>
-            ))}
+            ) : (
+              <button
+                type="button"
+                className="debrief-handoff-open"
+                onClick={() => setGeneralComposerOpen(true)}
+              >
+                + Add handoff note
+              </button>
+            )}
           </div>
         ) : (
           <>

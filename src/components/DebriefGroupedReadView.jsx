@@ -1,5 +1,5 @@
 import {
-  getDebriefSectionLabel,
+  getGeneralHandoffSection,
   groupDebriefItemsForReadView
 } from '../services/shiftDebriefService'
 
@@ -11,15 +11,12 @@ function isFlaggedNote(item) {
     || (letters.length >= 12 && uppercaseLetters.length / letters.length >= 0.75)
 }
 
-function NoteText({ item, showSectionLabel = false }) {
+function NoteText({ item }) {
   const flagged = isFlaggedNote(item)
   return (
     <div style={styles.noteRow}>
       <span style={styles.noteDash}>-</span>
       <div style={{ ...styles.noteContent, ...(flagged ? styles.flaggedNote : {}) }}>
-        {showSectionLabel && (
-          <div style={styles.generalNoteLabel}>{getDebriefSectionLabel(item.section)}</div>
-        )}
         <div>{item.note}</div>
       </div>
     </div>
@@ -60,9 +57,20 @@ function GeneralBlock({ notes }) {
     <section style={styles.sectionBlock}>
       <div style={{ ...styles.sectionHeader, ...styles.generalHeader }}>General Handoff Notes</div>
       <div style={styles.generalBody}>
-        {notes.map(note => (
-          <NoteText key={note.id || note.createdAtIso} item={note} showSectionLabel />
-        ))}
+        {notes.map(note => {
+          const section = getGeneralHandoffSection(note.section)
+          return (
+            <div
+              key={note.id || note.createdAtIso}
+              className={`debrief-handoff-read-card debrief-handoff-card-${section.tone}`}
+            >
+              <span className={`debrief-handoff-tag debrief-handoff-tag-${section.tone}`}>
+                {section.label}
+              </span>
+              <div className="debrief-handoff-text">{note.note}</div>
+            </div>
+          )
+        })}
       </div>
     </section>
   )
@@ -172,15 +180,6 @@ const styles = {
     flexDirection: 'column',
     gap: '8px',
     padding: '14px 18px 16px'
-  },
-  generalNoteLabel: {
-    marginBottom: '2px',
-    fontSize: '11px',
-    lineHeight: 1.35,
-    fontWeight: 800,
-    color: '#556677',
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em'
   },
   emptyText: {
     fontSize: '14px',

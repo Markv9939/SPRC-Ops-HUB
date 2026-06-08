@@ -33,10 +33,10 @@ export const CLIENT_NOTE_SECTIONS = [
 ]
 
 export const GENERAL_HANDOFF_SECTIONS = [
-  { id: 'pending_task', label: 'Pending task' },
-  { id: 'urgent_time_sensitive_task', label: 'Urgent/time-sensitive task' },
-  { id: 'maintenance_van_facility_operational', label: 'Maintenance/van/facility/operational concern' },
-  { id: 'notes_discrepancies', label: 'Notes/discrepancies' }
+  { id: 'pending_task', label: 'Pending task', tone: 'pending' },
+  { id: 'urgent_time_sensitive_task', label: 'Urgent / Time-sensitive', tone: 'urgent' },
+  { id: 'maintenance_van_facility_operational', label: 'Maintenance / Van / Facility', tone: 'maintenance' },
+  { id: 'notes_discrepancies', label: 'General note', tone: 'general' }
 ]
 
 export const DEBRIEF_READ_SECTION_ORDER = [
@@ -77,6 +77,14 @@ export function getLocalDateKey(date = new Date()) {
 export function getDebriefSectionLabel(sectionId) {
   return [...CLIENT_NOTE_SECTIONS, ...GENERAL_HANDOFF_SECTIONS]
     .find(section => section.id === sectionId)?.label || sectionId
+}
+
+export function getGeneralHandoffSection(sectionId) {
+  return GENERAL_HANDOFF_SECTIONS.find(section => section.id === sectionId) || {
+    id: sectionId,
+    label: getDebriefSectionLabel(sectionId),
+    tone: 'general'
+  }
 }
 
 export function groupDebriefItemsForReadView(items) {
