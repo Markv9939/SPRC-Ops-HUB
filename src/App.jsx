@@ -65,7 +65,7 @@ const DASHBOARD_TABS = new Set([
   'audit'
 ])
 
-function parseAppRoute(pathname) {
+function parseAppRoute(pathname, search = '') {
   const parts = String(pathname || '/').split('/').filter(Boolean).map(decodeURIComponent)
   if (parts[0] === 'transport' && parts[1]) {
     return { page: 'transport', currentTransportId: parts[1] }
@@ -79,6 +79,16 @@ function parseAppRoute(pathname) {
   }
   if (parts[0] === 'dashboard') {
     const dashboardTab = DASHBOARD_TABS.has(parts[1]) ? parts[1] : 'dashboard'
+    if (dashboardTab === 'transports') {
+      const nestedTransportId = parts[2] || ''
+      const queryTransportId = new URLSearchParams(search).get('transport') || ''
+      return {
+        page: 'home',
+        dashboardTab,
+        managementTransportId: nestedTransportId || queryTransportId || null,
+        managementTransportMode: nestedTransportId ? 'full' : queryTransportId ? 'panel' : 'list'
+      }
+    }
     return { page: 'home', dashboardTab }
   }
   return { page: 'home' }
@@ -243,7 +253,10 @@ function buildBhtHeaderSubtitle(sessionUser) {
 function App() {
   const location = useLocation()
   const navigate = useNavigate()
-  const activeRoute = useMemo(() => parseAppRoute(location.pathname), [location.pathname])
+  const activeRoute = useMemo(
+    () => parseAppRoute(location.pathname, location.search),
+    [location.pathname, location.search]
+  )
   const [user, setUser] = useState(() => {
     const saved = sessionStorage.getItem('bhtUser')
     if (!saved) return null
@@ -266,6 +279,8 @@ function App() {
   const currentTaskId = activeRoute.currentTaskId || null
   const currentDebriefId = activeRoute.currentDebriefId || null
   const currentDebriefMode = activeRoute.currentDebriefMode || 'full'
+  const managementTransportId = activeRoute.managementTransportId || null
+  const managementTransportMode = activeRoute.managementTransportMode || 'list'
   const [bhtDebriefAssignment, setBhtDebriefAssignment] = useState(null)
   const [bhtDebriefSummary, setBhtDebriefSummary] = useState({ available: false, status: 'none', itemCount: 0 })
   // Alert count and issue updates from shared hooks
@@ -338,6 +353,24 @@ function App() {
   const navigateDashboardTab = useCallback((tab) => {
     const safeTab = DASHBOARD_TABS.has(tab) ? tab : 'dashboard'
     navigate(`/dashboard/${safeTab}`)
+  }, [navigate])
+
+  const openManagementTransportPanel = useCallback((transportId, options = {}) => {
+    if (!transportId) return
+    navigate(`/dashboard/transports?transport=${encodeURIComponent(transportId)}`, options)
+  }, [navigate])
+
+  const openManagementTransportRecord = useCallback((transportId, options = {}) => {
+    if (!transportId) return
+    navigate(`/dashboard/transports/${encodeURIComponent(transportId)}`, options)
+  }, [navigate])
+
+  const closeManagementTransportDetails = useCallback(() => {
+    navigate('/dashboard/transports', { replace: true })
+  }, [navigate])
+
+  const returnToManagementTransportLog = useCallback(() => {
+    navigate('/dashboard/transports')
   }, [navigate])
 
   const getActiveTransport = useCallback(() => {
@@ -1098,6 +1131,12 @@ function App() {
           onActiveTabChange={navigateDashboardTab}
           navigationTarget={dashboardNavigationTarget}
           onNavigationHandled={() => setDashboardNavigationTarget(null)}
+          transportRecordId={managementTransportId}
+          transportRecordMode={managementTransportMode}
+          onOpenTransportPanel={openManagementTransportPanel}
+          onOpenTransportRecord={openManagementTransportRecord}
+          onCloseTransportDetails={closeManagementTransportDetails}
+          onBackToTransportLog={returnToManagementTransportLog}
         />
       </>,
       { title: sectionTitle }

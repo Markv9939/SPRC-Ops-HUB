@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { db, auth } from '../firebase'
-import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, setDoc, getDocs, updateDoc, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
+import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, getDoc, setDoc, getDocs, updateDoc, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
 import { signInAnonymously, signOut } from 'firebase/auth'
+import { ChevronRight } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import DashboardSummaryPanel from './DashboardSummaryPanel'
 import SupervisorEocPanel from './SupervisorEocPanel'
@@ -11,6 +12,8 @@ import FleetPanel from './FleetPanel'
 import CintasPanel from './CintasPanel'
 import AccessGrantPanel from './AccessGrantPanel'
 import SupervisorDebriefsPanel from './SupervisorDebriefsPanel'
+import TransportDetailsDrawer from './TransportDetailsDrawer'
+import TransportRecordPage from './TransportRecordPage'
 import { LOCATIONS, VANS, getShiftLabel, getShiftOptionsForMainLocation, isShiftAllowedForMainLocation } from '../data/eocConstants'
 import { hashPin } from '../utils/pinHash'
 import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../services/assignmentService'
@@ -22,6 +25,13 @@ import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber }
 import useUserScope from '../hooks/useUserScope'
 import useScopedIssues from '../hooks/useScopedIssues'
 import useScopedFleet from '../hooks/useScopedFleet'
+import {
+  formatTransportRecordDate,
+  formatTransportRecordTime,
+  getTransportStatusBadgeClass,
+  isCompletedTransportRecord,
+  isOverdueTransportRecord
+} from '../utils/transportRecord'
 import {
   GLOBAL_SCOPE,
   MAIN_LOCATIONS,
@@ -53,6 +63,31 @@ function normalizeVanIdList(values, fallbackVanId = '') {
   return [...new Set(merged)]
 }
 
+function getTransportDestinationSummary(transport) {
+  const destinations = Array.isArray(transport?.destinations) ? transport.destinations : []
+  const destinationText = destinations
+    .map(destination => destination?.name || destination?.address || '')
+    .filter(Boolean)
+    .join(', ')
+  if (destinationText) return destinationText
+
+  const stops = Array.isArray(transport?.stops) ? transport.stops : []
+  return stops
+    .map(stop => stop?.destinationName || stop?.destinationAddress || stop?.name || stop?.address || '')
+    .filter(Boolean)
+    .join(', ')
+}
+
+function getTransportAccessibleLabel(transport) {
+  const clients = Array.isArray(transport?.clients) && transport.clients.length > 0
+    ? transport.clients.join(', ')
+    : 'no client recorded'
+  const date = formatTransportRecordDate(transport?.departedAt)
+  const driver = transport?.createdByName || 'unknown driver'
+  const status = transport?.status || 'unknown status'
+  return `View transport for ${clients}, ${date}, ${driver}, ${status}`
+}
+
 function SupervisorDashboard({
   user,
   isOffline = false,
@@ -62,7 +97,13 @@ function SupervisorDashboard({
   activeTab: controlledActiveTab = 'dashboard',
   onActiveTabChange,
   navigationTarget = null,
-  onNavigationHandled
+  onNavigationHandled,
+  transportRecordId = null,
+  transportRecordMode = 'list',
+  onOpenTransportPanel,
+  onOpenTransportRecord,
+  onCloseTransportDetails,
+  onBackToTransportLog
 }) {
   const activeTab = controlledActiveTab
   const setActiveTab = useCallback((nextTab) => {
@@ -72,6 +113,17 @@ function SupervisorDashboard({
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024)
   const [transports, setTransports] = useState([])
   const [filteredTransports, setFilteredTransports] = useState([])
+  const [transportsLoaded, setTransportsLoaded] = useState(false)
+  const [fallbackTransport, setFallbackTransport] = useState(null)
+  const [transportLoadState, setTransportLoadState] = useState('idle')
+  const [transportLoadError, setTransportLoadError] = useState('')
+  const [transportLoadRetry, setTransportLoadRetry] = useState(0)
+  const transportRowRefs = useRef(new Map())
+  const transportResultsHeadingRef = useRef(null)
+  const selectionWasFilteredRef = useRef(false)
+  const previousSelectionIdRef = useRef(null)
+  const previousTransportModeRef = useRef(transportRecordMode)
+  const transportListScrollRef = useRef(0)
 
   // Dashboard stats
   // Filters
@@ -921,7 +973,8 @@ function SupervisorDashboard({
   }
 
   useEffect(() => {
-    if (!startDate || !endDate) return
+    if (!startDate || !endDate) return undefined
+    setTransportsLoaded(false)
 
     const transportsRef = collection(db, 'transports')
 
@@ -950,6 +1003,10 @@ function SupervisorDashboard({
       // Extract unique drivers
       const uniqueDrivers = [...new Set(data.map(t => t.createdByName))].filter(Boolean)
       setDrivers(uniqueDrivers)
+      setTransportsLoaded(true)
+    }, (error) => {
+      console.error('Transport live update failed:', error)
+      setTransportsLoaded(true)
     })
 
     return () => unsubscribe()
@@ -995,42 +1052,13 @@ function SupervisorDashboard({
     setFilteredTransports(filtered)
   }, [transports, transportSiteFilter, transportStatusFilter, transportReasonFilter, selectedDriver, overdueFilter, clientSearch])
 
-  const isCompletedTransport = (transport) => {
-    const normalizedStatus = String(transport?.status || '').trim().toLowerCase()
-    return normalizedStatus === 'closed' || normalizedStatus === 'returned'
-  }
+  const isCompletedTransport = (transport) => isCompletedTransportRecord(transport)
 
-  const isOverdue = (transport) => {
-    if (transport.status === 'closed' || transport.status === 'returned') {
-      return false
-    }
+  const isOverdue = (transport) => isOverdueTransportRecord(transport)
 
-    if (!transport.departedAt) return false
+  const formatTime = (timestamp) => formatTransportRecordTime(timestamp, '--:--')
 
-    const departedDate = transport.departedAt.toDate ? transport.departedAt.toDate() : new Date(transport.departedAt)
-    const hoursSinceDeparted = (Date.now() - departedDate.getTime()) / (1000 * 60 * 60)
-
-    return hoursSinceDeparted > 8
-  }
-
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '--:--'
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
-
-  const formatDate = (timestamp) => {
-    if (!timestamp) return '--'
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
-    return date.toLocaleDateString('en-US', {
-      month: '2-digit',
-      day: '2-digit',
-      year: 'numeric'
-    })
-  }
+  const formatDate = (timestamp) => formatTransportRecordDate(timestamp, { fallback: '--' })
 
   const formatScopeExpiry = (value) => {
     if (!value) return '--'
@@ -1063,6 +1091,157 @@ function SupervisorDashboard({
     }
     return options
   }, [transports, transportReasonFilter])
+
+  const subscribedSelectedTransport = useMemo(
+    () => transports.find(transport => transport.id === transportRecordId) || null,
+    [transportRecordId, transports]
+  )
+  const selectedFilteredIndex = useMemo(
+    () => filteredTransports.findIndex(transport => transport.id === transportRecordId),
+    [filteredTransports, transportRecordId]
+  )
+  const selectedTransport = subscribedSelectedTransport
+    || (fallbackTransport?.id === transportRecordId ? fallbackTransport : null)
+  const effectiveTransportLoadState = subscribedSelectedTransport
+    ? 'ready'
+    : transportRecordId && transportLoadState === 'idle'
+      ? 'loading'
+      : transportLoadState
+  const transportPositionLabel = selectedFilteredIndex >= 0
+    ? `${selectedFilteredIndex + 1} of ${filteredTransports.length}`
+    : ''
+  const canGoPreviousTransport = selectedFilteredIndex > 0
+  const canGoNextTransport = selectedFilteredIndex >= 0 && selectedFilteredIndex < filteredTransports.length - 1
+
+  useEffect(() => {
+    if (!transportRecordId) {
+      setFallbackTransport(null)
+      setTransportLoadState('idle')
+      setTransportLoadError('')
+      return undefined
+    }
+    if (subscribedSelectedTransport) {
+      setFallbackTransport(null)
+      setTransportLoadState('ready')
+      setTransportLoadError('')
+      return undefined
+    }
+    if (!transportsLoaded) {
+      setTransportLoadState('loading')
+      return undefined
+    }
+
+    let cancelled = false
+    setFallbackTransport(null)
+    setTransportLoadState('loading')
+    setTransportLoadError('')
+
+    getDoc(doc(db, 'transports', transportRecordId))
+      .then(snapshot => {
+        if (cancelled) return
+        if (!snapshot.exists()) {
+          setTransportLoadState('not-found')
+          return
+        }
+        const loadedTransport = {
+          id: snapshot.id,
+          ...snapshot.data(),
+          site: normalizeTransportSite(snapshot.data()?.site)
+        }
+        if (!inTransportScope(loadedTransport.site)) {
+          setTransportLoadState('access-denied')
+          return
+        }
+        setFallbackTransport(loadedTransport)
+        setTransportLoadState('ready')
+      })
+      .catch(error => {
+        if (cancelled) return
+        console.error('Transport fallback load failed:', error)
+        setTransportLoadError(error?.message || 'The transport could not be loaded.')
+        setTransportLoadState('error')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    inTransportScope,
+    subscribedSelectedTransport,
+    transportLoadRetry,
+    transportRecordId,
+    transportsLoaded
+  ])
+
+  useEffect(() => {
+    if (previousSelectionIdRef.current !== transportRecordId) {
+      previousSelectionIdRef.current = transportRecordId
+      selectionWasFilteredRef.current = false
+    }
+    if (!transportRecordId) return
+    if (selectedFilteredIndex >= 0) {
+      selectionWasFilteredRef.current = true
+      return
+    }
+    if (!selectionWasFilteredRef.current) return
+
+    selectionWasFilteredRef.current = false
+    onCloseTransportDetails?.()
+    window.requestAnimationFrame(() => transportResultsHeadingRef.current?.focus())
+  }, [onCloseTransportDetails, selectedFilteredIndex, transportRecordId])
+
+  useEffect(() => {
+    if (!transportRecordId || selectedFilteredIndex < 0) return
+    transportRowRefs.current.get(transportRecordId)?.scrollIntoView({
+      block: 'nearest',
+      behavior: 'smooth'
+    })
+  }, [selectedFilteredIndex, transportRecordId])
+
+  useEffect(() => {
+    const previousMode = previousTransportModeRef.current
+    previousTransportModeRef.current = transportRecordMode
+
+    if (previousMode !== 'full' && transportRecordMode === 'full') {
+      window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }))
+      return
+    }
+    if (previousMode === 'full' && transportRecordMode !== 'full') {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          window.scrollTo({ top: transportListScrollRef.current, behavior: 'auto' })
+        })
+      })
+    }
+  }, [transportRecordMode])
+
+  const retryTransportLoad = useCallback(() => {
+    setTransportLoadRetry(previous => previous + 1)
+  }, [])
+
+  const selectTransportAtIndex = useCallback((index) => {
+    const target = filteredTransports[index]
+    if (!target?.id) return
+    if (transportRecordMode === 'full') {
+      onOpenTransportRecord?.(target.id, { replace: true })
+    } else {
+      onOpenTransportPanel?.(target.id, { replace: true })
+    }
+  }, [filteredTransports, onOpenTransportPanel, onOpenTransportRecord, transportRecordMode])
+
+  const openPreviousTransport = useCallback(() => {
+    if (canGoPreviousTransport) selectTransportAtIndex(selectedFilteredIndex - 1)
+  }, [canGoPreviousTransport, selectTransportAtIndex, selectedFilteredIndex])
+
+  const openNextTransport = useCallback(() => {
+    if (canGoNextTransport) selectTransportAtIndex(selectedFilteredIndex + 1)
+  }, [canGoNextTransport, selectTransportAtIndex, selectedFilteredIndex])
+
+  const openSelectedTransportFullRecord = useCallback(() => {
+    if (!transportRecordId) return
+    transportListScrollRef.current = window.scrollY
+    onOpenTransportRecord?.(transportRecordId)
+  }, [onOpenTransportRecord, transportRecordId])
 
   const exportToExcel = () => {
     const sanitizeForExcelCell = (value) => {
@@ -1579,6 +1758,20 @@ function SupervisorDashboard({
 
       {/* Transports Tab */}
       {activeTab === 'transports' && (
+        transportRecordMode === 'full' && transportRecordId ? (
+          <TransportRecordPage
+            transport={selectedTransport}
+            loadState={effectiveTransportLoadState}
+            errorMessage={transportLoadError}
+            onRetry={retryTransportLoad}
+            onBackToLog={onBackToTransportLog}
+            onPrevious={openPreviousTransport}
+            onNext={openNextTransport}
+            canPrevious={canGoPreviousTransport}
+            canNext={canGoNextTransport}
+            positionLabel={transportPositionLabel}
+          />
+        ) : (
         <div>
           {/* Filters */}
           <div style={{
@@ -1826,7 +2019,11 @@ function SupervisorDashboard({
         padding: '20px',
         border: '1px solid #eee'
       }}>
-        <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: 'var(--text-primary)' }}>
+        <h3
+          ref={transportResultsHeadingRef}
+          tabIndex={-1}
+          style={{ margin: '0 0 16px 0', fontSize: '16px', color: 'var(--text-primary)', outline: 'none' }}
+        >
           Transports ({filteredTransports.length})
         </h3>
 
@@ -1840,68 +2037,85 @@ function SupervisorDashboard({
             flexDirection: 'column',
             gap: '12px'
           }}>
-            {filteredTransports.map(t => (
+            {filteredTransports.map(t => {
+              const selected = t.id === transportRecordId
+              const overdue = isOverdue(t)
+              const destinationSummary = getTransportDestinationSummary(t)
+              const reasonSummary = Array.isArray(t.reasons) ? t.reasons.filter(Boolean).join(', ') : ''
+              return (
               <div
                 key={t.id}
-                style={{
-                  padding: '16px',
-                  borderRadius: '8px',
-                  border: isOverdue(t) ? '2px solid #B75E54' : '1px solid rgba(17,47,82,0.14)',
-                  backgroundColor: 'rgba(17,47,82,0.05)',
-                  position: 'relative'
+                ref={element => {
+                  if (element) transportRowRefs.current.set(t.id, element)
+                  else transportRowRefs.current.delete(t.id)
+                }}
+                className={`management-transport-row ${selected ? 'management-transport-row-selected' : ''} ${overdue ? 'management-transport-row-overdue' : ''}`}
+                role="button"
+                tabIndex={0}
+                aria-label={getTransportAccessibleLabel(t)}
+                aria-pressed={selected}
+                onClick={() => onOpenTransportPanel?.(t.id)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    onOpenTransportPanel?.(t.id)
+                  }
                 }}
               >
-                {isOverdue(t) && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '-8px',
-                    right: '12px',
-                    backgroundColor: '#B75E54',
-                    color: 'white',
-                    padding: '4px 12px',
-                    borderRadius: '12px',
-                    fontSize: '11px',
-                    fontWeight: 'bold'
-                  }}>
-                    OVERDUE
-                  </div>
+                {overdue && (
+                  <span className="badge badge-overdue management-transport-overdue-badge">OVERDUE</span>
                 )}
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
-                  <div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Date</div>
-                    <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{formatDate(t.departedAt)}</div>
+                <div className="management-transport-row-grid">
+                  <div className="management-transport-field">
+                    <span>Date</span>
+                    <strong>{formatDate(t.departedAt)}</strong>
                   </div>
-                  <div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Driver</div>
-                    <div style={{ fontSize: '14px' }}>{t.createdByName}</div>
+                  <div className="management-transport-field">
+                    <span>Driver</span>
+                    <strong>{t.createdByName || 'Not recorded'}</strong>
                   </div>
-                  <div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Client(s)</div>
-                    <div style={{ fontSize: '14px' }}>{t.clients?.join(', ') || 'None'}</div>
+                  <div className="management-transport-field">
+                    <span>Client(s)</span>
+                    <strong>{t.clients?.join(', ') || 'Not recorded'}</strong>
                   </div>
-                  <div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Status</div>
-                    <div style={{
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      color:
-                        t.status === 'open' ? '#856404' :
-                        t.status === 'arrived' ? '#0C5460' :
-                        t.status === 'returned' ? '#155724' :
-                        t.status === 'closed' ? '#2E7D32' :
-                        '#666'
-                    }}>
-                      {t.status?.toUpperCase()}
-                    </div>
+                  <div className="management-transport-field management-transport-field-wide">
+                    <span>Destination / Reason</span>
+                    <strong>{destinationSummary || reasonSummary || 'Not recorded'}</strong>
+                  </div>
+                  <div className="management-transport-field">
+                    <span>Status</span>
+                    <strong><span className={getTransportStatusBadgeClass(t.status)}>{t.status || 'unknown'}</span></strong>
+                  </div>
+                  <div className="management-transport-view-cue" aria-hidden="true">
+                    <span>View details</span>
+                    <ChevronRight size={20} />
                   </div>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
+
+      {transportRecordMode === 'panel' && transportRecordId && (
+        <TransportDetailsDrawer
+          transport={selectedTransport}
+          loadState={effectiveTransportLoadState}
+          errorMessage={transportLoadError}
+          onRetry={retryTransportLoad}
+          onClose={onCloseTransportDetails}
+          onOpenFull={openSelectedTransportFullRecord}
+          onPrevious={openPreviousTransport}
+          onNext={openNextTransport}
+          canPrevious={canGoPreviousTransport}
+          canNext={canGoNextTransport}
+          positionLabel={transportPositionLabel}
+        />
+      )}
         </div>
+        )
       )}
     </div>
   )
