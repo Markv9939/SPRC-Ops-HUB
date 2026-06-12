@@ -154,10 +154,15 @@ export default function NotificationCenter({
 
   // Dismiss (mark read) single alert
   const handleDismiss = async (alertId) => {
+    const selectedAlert = allAlerts.find(alert => alert.id === alertId)
     setDismissing(prev => new Set(prev).add(alertId))
     try {
       await updateDoc(doc(db, 'alerts', alertId), {
         read: true,
+        readAt: serverTimestamp(),
+        readByUserId: selectedAlert?.targetUserId || null,
+        readByName: selectedAlert?.targetUserName || null,
+        version: Number(selectedAlert?.version || 0) + 1,
         updatedAt: serverTimestamp()
       })
     } catch (err) {
@@ -179,6 +184,10 @@ export default function NotificationCenter({
     toDismiss.forEach(alert => {
       batch.update(doc(db, 'alerts', alert.id), {
         read: true,
+        readAt: serverTimestamp(),
+        readByUserId: alert.targetUserId || null,
+        readByName: alert.targetUserName || null,
+        version: Number(alert.version || 0) + 1,
         updatedAt: serverTimestamp()
       })
     })

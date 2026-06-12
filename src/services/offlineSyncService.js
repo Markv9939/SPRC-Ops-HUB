@@ -17,7 +17,7 @@ import { TEMPLATE_SCOPE_OTC_SHARED, getTemplateScopeForShift } from '../data/eoc
 import { assertExpectedVersion, getVersionNumber } from './versioning'
 import { updateFleetRuntimeFromEocSubmission } from './fleetRuntimeService'
 import { syncFleetTasksForVehicle } from './fleetTaskEngine'
-import { buildEocIssueAlertPayload, createTransportCompletedAlert, writeAuditLog } from './notificationService'
+import { createTransportCompletedAlert, fanOutIssueAlerts, writeAuditLog } from './notificationService'
 import { submitShiftDebrief } from './shiftDebriefService'
 import { submitBhtIssueReportOnline } from './bhtIssueReportService'
 import { parseMileageValue } from '../utils/fleetStatus'
@@ -164,6 +164,7 @@ export async function submitEocSubmissionOnline(payload) {
   const answersData = buildEocAnswersData(activeTemplate, answers, repairDetails)
   const issueItems = answersData.filter(a => a.status === 'repair')
   let submittedEocSubmissionId = ''
+  const issuesToNotify = []
 
   await runTransaction(db, async (transaction) => {
     const taskRef = doc(db, 'eocTasks', task.id)
@@ -239,7 +240,24 @@ export async function submitEocSubmissionOnline(payload) {
 
     for (const issue of issueItems) {
       const issueRef = doc(collection(db, 'eocIssues'))
-      transaction.set(issueRef, {
+      const activityId = 'v1_reported'
+      const activityRef = doc(db, 'eocIssues', issueRef.id, 'activity', activityId)
+      const activity = {
+        issueId: issueRef.id,
+        eventType: 'reported',
+        label: 'Reported',
+        status: 'open',
+        note: issue.description || '',
+        actorUserId: normalizedUserId,
+        actorName: user?.name || '',
+        locationId: task.locationId,
+        issueVersion: 1,
+        version: 1,
+        immutable: true,
+        createdAt: serverTimestamp()
+      }
+      const issueData = {
+        id: issueRef.id,
         taskId: task.id,
         submissionId: submissionRef.id,
         locationId: task.locationId,
@@ -254,20 +272,40 @@ export async function submitEocSubmissionOnline(payload) {
         status: 'open',
         reportedByUserId: normalizedUserId,
         reportedByName: user?.name || '',
-        version: 1,
+        version: 1
+      }
+      const issueDocumentData = { ...issueData }
+      delete issueDocumentData.id
+      transaction.set(issueRef, {
+        ...issueDocumentData,
+        latestActivity: {
+          id: activityId,
+          eventType: 'reported',
+          label: 'Reported',
+          note: issue.description || '',
+          actorUserId: normalizedUserId,
+          actorName: user?.name || '',
+          createdAt: serverTimestamp()
+        },
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       })
-
-      const alertRef = doc(collection(db, 'alerts'))
-      transaction.set(alertRef, buildEocIssueAlertPayload({
-        issueRefId: issueRef.id,
-        task,
-        issue: { ...issue, eocType, severity: 'medium' },
-        userName: user?.name || ''
-      }))
+      transaction.set(activityRef, activity)
+      issuesToNotify.push({
+        issue: issueData,
+        activity: { id: activityId, ...activity }
+      })
     }
   })
+
+  for (const item of issuesToNotify) {
+    await fanOutIssueAlerts({
+      issue: item.issue,
+      activity: item.activity,
+      eventType: 'reported',
+      actorUser: user
+    })
+  }
 
   if (eocType === 'van' && submittedEocSubmissionId) {
     try {

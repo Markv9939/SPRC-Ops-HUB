@@ -61,6 +61,34 @@ function normalizeBaseScopes(userData) {
   return normalizeScopeValues(raw)
 }
 
+function normalizeExactIssueLocation(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'lone_mountain') return 'lone_mountain'
+  if (normalized === 'mesquite') return 'mesquite'
+  if (normalized === 'res') return 'res'
+  return ''
+}
+
+function normalizeIssueLocations(values) {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .map(normalizeExactIssueLocation)
+    .filter(Boolean))]
+}
+
+async function loadEffectiveIssueAccess(userId) {
+  if (!userId) return []
+  try {
+    const snap = await getDoc(doc(db, 'issueAccess', userId))
+    if (!snap.exists()) return []
+    const data = snap.data()
+    if (data.active === false) return []
+    return normalizeIssueLocations(data.locationIds)
+  } catch (error) {
+    console.warn('Issue access lookup failed:', error)
+    return []
+  }
+}
+
 export function deriveAccessGrantState(grant, now = new Date()) {
   if (!grant) return ACCESS_GRANT_STATES.EXPIRED
 
@@ -115,6 +143,14 @@ export async function loadAccessGrantsForUser(userId) {
 export async function getScopedSessionUser(userId, userData) {
   const normalizedRole = normalizeRole(userData?.role)
   const baseScopes = normalizeBaseScopes(userData)
+  const issueAccessLocations = await loadEffectiveIssueAccess(userId)
+  const baseIssueLocations = normalizeIssueLocations(userData?.issueLocationIds)
+  const profileLocation = normalizeExactIssueLocation(userData?.locationId)
+  const issueLocationIds = [...new Set([
+    ...baseIssueLocations,
+    ...(profileLocation ? [profileLocation] : []),
+    ...issueAccessLocations
+  ])]
   const grants = await loadAccessGrantsForUser(userId)
   const activeGrantLocations = grants
     .filter(grant => grant.state === ACCESS_GRANT_STATES.ACTIVE)
@@ -129,6 +165,10 @@ export async function getScopedSessionUser(userId, userData) {
     id: userId,
     name: userData.name,
     role: normalizedRole,
+    active: userData.active !== false,
+    email: userData.email || null,
+    emailDomain: userData.emailDomain || null,
+    emailType: userData.emailType || null,
     site: normalizedSite,
     locationId: userData.locationId || null,
     shiftId: userData.shiftId || null,
@@ -137,6 +177,7 @@ export async function getScopedSessionUser(userId, userData) {
       ? userData.vanIds.map(v => String(v || '').trim().toLowerCase()).filter(Boolean)
       : (userData.vanId ? [String(userData.vanId).trim().toLowerCase()] : []),
     authorizedLocations: mergedScopes,
+    issueLocationIds,
     primaryScopes: baseScopes,
     activeBackupGrants,
     scopeRefreshedAt: new Date().toISOString()

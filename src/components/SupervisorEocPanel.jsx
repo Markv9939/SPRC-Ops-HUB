@@ -2,16 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { db } from '../firebase'
 import {
   collection,
-  doc,
   onSnapshot,
   orderBy,
-  query,
-  serverTimestamp,
-  updateDoc
+  query
 } from 'firebase/firestore'
 import { LOCATIONS, VANS } from '../data/eocConstants'
 import { notifySuccess } from '../utils/toast'
-import { createIssueStatusNotification } from '../services/notificationService'
+import { updateIssueStatus } from '../services/issueStatusService'
 import EocTemplateManager from './EocTemplateManager'
 
 function SupervisorEocPanel({ user, isOffline = false, targetIssueId = null, onTargetIssueHandled }) {
@@ -81,16 +78,9 @@ function SupervisorEocPanel({ user, isOffline = false, targetIssueId = null, onT
     }
 
     try {
-      await updateDoc(doc(db, 'eocIssues', resolvingIssue.id), {
-        status: 'resolved',
-        resolvedNotes: resolveNotes.trim(),
-        resolvedAt: serverTimestamp(),
-        resolvedByUserId: user?.id || null,
-        resolvedByName: user?.name || null,
-        updatedAt: serverTimestamp()
-      })
-      await createIssueStatusNotification({
-        issue: resolvingIssue,
+      await updateIssueStatus({
+        issueId: resolvingIssue.id,
+        expectedIssue: resolvingIssue,
         nextStatus: 'resolved',
         note: resolveNotes.trim(),
         actorUser: user

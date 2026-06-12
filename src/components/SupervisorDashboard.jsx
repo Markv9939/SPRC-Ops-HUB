@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { db, auth } from '../firebase'
-import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, getDoc, setDoc, getDocs, updateDoc, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
-import { signInAnonymously, signOut } from 'firebase/auth'
+import { db } from '../firebase'
+import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, getDoc, getDocs, getDocsFromServer, updateDoc, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
 import { ChevronRight } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import DashboardSummaryPanel from './DashboardSummaryPanel'
@@ -15,13 +14,12 @@ import SupervisorDebriefsPanel from './SupervisorDebriefsPanel'
 import TransportDetailsDrawer from './TransportDetailsDrawer'
 import TransportRecordPage from './TransportRecordPage'
 import { LOCATIONS, VANS, getShiftLabel, getShiftOptionsForMainLocation, isShiftAllowedForMainLocation } from '../data/eocConstants'
-import { hashPin } from '../utils/pinHash'
 import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../services/assignmentService'
-import { findDuplicatePinUser } from '../services/pinConflictService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
 import { writeAuditLog as writeAuditEntry } from '../services/notificationService'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
+import { COMPANY_EMAIL_DOMAIN, getEmailDomain, isCompanyEmail, normalizeEmail } from '../services/authProfileService'
 import useUserScope from '../hooks/useUserScope'
 import useScopedIssues from '../hooks/useScopedIssues'
 import useScopedFleet from '../hooks/useScopedFleet'
@@ -61,6 +59,57 @@ function normalizeVanIdList(values, fallbackVanId = '') {
   const fallback = String(fallbackVanId || '').trim().toLowerCase()
   const merged = fallback ? [...normalized, fallback] : normalized
   return [...new Set(merged)]
+}
+
+function buildIssueLocationIds({ role, locationId, mainLocation }) {
+  const normalizedRole = normalizeRole(role)
+  if (normalizedRole === 'admin') return ['lone_mountain', 'mesquite', 'res']
+  if (normalizedRole === 'supervisor') {
+    if (mainLocation === 'OTC') return ['lone_mountain', 'mesquite']
+    if (mainLocation === 'RES') return ['res']
+    return []
+  }
+  const exactLocation = String(locationId || '').trim().toLowerCase()
+  return ['lone_mountain', 'mesquite', 'res'].includes(exactLocation) ? [exactLocation] : []
+}
+
+function buildEmailLinkPayload({ appUserId, email, actorUser }) {
+  const normalizedEmail = normalizeEmail(email)
+  const domain = getEmailDomain(normalizedEmail)
+  const company = isCompanyEmail(normalizedEmail)
+  return {
+    userId: appUserId,
+    email: normalizedEmail,
+    emailDomain: domain,
+    emailType: company ? 'company' : 'external',
+    externalGoogleAllowed: !company,
+    externalReason: company ? null : `Approved by ${actorUser?.name || 'admin'} for Ops Hub access`,
+    externalApprovedByUserId: company ? null : actorUser?.id || null,
+    externalApprovedByName: company ? null : actorUser?.name || null,
+    externalApprovedAt: company ? null : serverTimestamp(),
+    active: true,
+    updatedAt: serverTimestamp()
+  }
+}
+
+function buildInternalUserId(name, existingIds = []) {
+  const baseId = String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'user'
+
+  const existingIdSet = new Set(
+    (Array.isArray(existingIds) ? existingIds : [])
+      .map(value => String(value || '').trim().toLowerCase())
+      .filter(Boolean)
+  )
+
+  if (!existingIdSet.has(baseId)) return baseId
+
+  let suffix = 2
+  while (existingIdSet.has(`${baseId}_${suffix}`)) suffix += 1
+  return `${baseId}_${suffix}`
 }
 
 function getTransportDestinationSummary(transport) {
@@ -149,13 +198,14 @@ function SupervisorDashboard({
   const [userForm, setUserForm] = useState({
     id: '',
     name: '',
-    pin: '',
     role: '',
     location: '',
     house: '',
     shiftId: '',
     vanId: '',
     vanIds: [],
+    email: '',
+    issueLocationIds: [],
     active: true
   })
 
@@ -225,9 +275,8 @@ function SupervisorDashboard({
     return () => unsubCompliance()
   }, [])
 
-  const loadUsers = useCallback(async () => {
-    const usersSnapshot = await getDocs(collection(db, 'users'))
-    const usersData = usersSnapshot.docs
+  const applyLoadedUsers = useCallback((userDocs) => {
+    const usersData = userDocs
       .map(docSnap => ({
         id: docSnap.id,
         ...docSnap.data()
@@ -264,6 +313,17 @@ function SupervisorDashboard({
     )))
   }, [isAdmin, managedMainLocations])
 
+  const loadUsers = useCallback(async () => {
+    try {
+      const usersSnapshot = await getDocsFromServer(collection(db, 'users'))
+      applyLoadedUsers(usersSnapshot.docs)
+    } catch (error) {
+      console.warn('Server user fetch failed, falling back to default Firestore read:', error)
+      const usersSnapshot = await getDocs(collection(db, 'users'))
+      applyLoadedUsers(usersSnapshot.docs)
+    }
+  }, [applyLoadedUsers])
+
   useEffect(() => {
     // Set default to current month
     const now = new Date()
@@ -277,10 +337,16 @@ function SupervisorDashboard({
   useEffect(() => {
     const unsubUsers = onSnapshot(
       collection(db, 'users'),
-      () => loadUsers(),
+      (snapshot) => applyLoadedUsers(snapshot.docs),
       (err) => console.error('User live update failed:', err)
     )
     return () => unsubUsers()
+  }, [applyLoadedUsers])
+
+  useEffect(() => {
+    loadUsers().catch((error) => {
+      console.error('Initial user fetch failed:', error)
+    })
   }, [loadUsers])
 
   useEffect(() => {
@@ -322,25 +388,6 @@ function SupervisorDashboard({
     return true
   }
 
-  const refreshAdminAuthSession = async () => {
-    if (!isAdminRole(user?.role)) return false
-    try {
-      if (auth.currentUser) {
-        await signOut(auth)
-      }
-    } catch (signOutError) {
-      console.warn('Admin auth sign-out before refresh failed:', signOutError)
-    }
-
-    try {
-      await signInAnonymously(auth)
-      return true
-    } catch (signInError) {
-      console.error('Admin auth refresh failed:', signInError)
-      return false
-    }
-  }
-
   const buildDefaultUserForm = useCallback(() => ({
     id: '',
     name: '',
@@ -351,10 +398,16 @@ function SupervisorDashboard({
     shiftId: '',
     vanId: '',
     vanIds: [],
+    email: '',
+    issueLocationIds: [],
     active: true
   }), [])
 
   const handleAddUser = () => {
+    if (!isAdminRole(user?.role)) {
+      alert('Only admins can create login-capable accounts. Supervisors can edit existing BHT operational assignments.')
+      return
+    }
     if (actorRoleOptions.length === 0) {
       alert('Your account does not have permission to manage users.')
       return
@@ -384,8 +437,7 @@ function SupervisorDashboard({
       house: normalizeHouseId(managedUser?.house || managedUser?.locationId),
       shiftId: String(managedUser?.shiftId || '').trim(),
       vanIds: normalizeVanIdList(managedUser?.vanIds, managedUser?.vanId),
-      vanId: normalizeVanIdList(managedUser?.vanIds, managedUser?.vanId)[0] || '',
-      pin: ''
+      vanId: normalizeVanIdList(managedUser?.vanIds, managedUser?.vanId)[0] || ''
     })
     setEditingUser(managedUser.id)
   }
@@ -394,36 +446,47 @@ function SupervisorDashboard({
     if (blockIfOffline('saving users')) return
 
     const isNewUser = editingUser === 'new'
-    const hasPinInput = String(userForm.pin || '').trim().length > 0
 
-    if (!userForm.id || !userForm.name || (isNewUser && !hasPinInput)) {
-      alert(isNewUser
-        ? 'Please fill in all required fields (ID, Name, PIN)'
-        : 'Please fill in all required fields (ID, Name)')
+    if (isNewUser && !isAdminRole(user?.role)) {
+      alert('Only admins can create login-capable accounts.')
       return
     }
 
-    if (hasPinInput && (userForm.pin.length !== 4 || !/^\d+$/.test(userForm.pin))) {
-      alert('PIN must be exactly 4 digits')
+    if (!String(userForm.name || '').trim()) {
+      alert('Please fill in the required name field.')
       return
     }
 
     try {
-      const pinHash = hasPinInput ? await hashPin(userForm.pin) : null
-      if (hasPinInput) {
-        const duplicateUser = await findDuplicatePinUser(userForm.pin, {
-          excludeUserId: isNewUser ? null : userForm.id
-        })
-        if (duplicateUser) {
-          alert(`That PIN is already assigned to ${duplicateUser.name || duplicateUser.id}. Choose a different PIN.`)
-          return
-        }
-      }
-
       const normalizedRole = normalizeRole(userForm.role || '')
+      const appUserId = isNewUser
+        ? buildInternalUserId(userForm.name, users.map(managedUser => managedUser.id))
+        : String(userForm.id || '').trim()
+      const normalizedEmail = normalizeEmail(userForm.email)
+      const adminFallbackEmail = (
+        normalizedRole === 'admin' && appUserId === user?.id
+          ? normalizeEmail(user?.authEmail || user?.email)
+          : ''
+      )
+      const resolvedEmail = normalizedEmail || adminFallbackEmail
 
       if (!normalizedRole) {
         alert('Please select a role.')
+        return
+      }
+
+      if (!appUserId) {
+        alert('Unable to generate an internal user ID from that name. Use at least one letter or number.')
+        return
+      }
+
+      if (isAdminRole(user?.role) && userForm.active === true && !resolvedEmail) {
+        alert(`Enter the user's approved Google email. Company email normally ends in @${COMPANY_EMAIL_DOMAIN}.`)
+        return
+      }
+
+      if (resolvedEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(resolvedEmail)) {
+        alert('Enter a valid Google email address.')
         return
       }
 
@@ -495,9 +558,24 @@ function SupervisorDashboard({
         mainLocation: normalizedLocation,
         houseId: normalizedHouse
       })
+      const issueLocationIds = buildIssueLocationIds({
+        role: normalizedRole,
+        mainLocation: normalizedLocation,
+        locationId: normalizedLocationId
+      })
 
       const payload = {
         name: userForm.name,
+        email: resolvedEmail || null,
+        emailDomain: resolvedEmail ? getEmailDomain(resolvedEmail) : null,
+        emailType: resolvedEmail ? (isCompanyEmail(resolvedEmail) ? 'company' : 'external') : null,
+        externalGoogleAllowed: resolvedEmail ? !isCompanyEmail(resolvedEmail) : false,
+        externalReason: resolvedEmail && !isCompanyEmail(resolvedEmail)
+          ? `Approved by ${user?.name || 'admin'} for Ops Hub access`
+          : null,
+        externalApprovedByUserId: resolvedEmail && !isCompanyEmail(resolvedEmail) ? user?.id || null : null,
+        externalApprovedByName: resolvedEmail && !isCompanyEmail(resolvedEmail) ? user?.name || null : null,
+        externalApprovedAt: resolvedEmail && !isCompanyEmail(resolvedEmail) ? serverTimestamp() : null,
         role: normalizedRole,
         site: normalizedRole === 'admin' ? GLOBAL_SCOPE : normalizedLocation,
         location: normalizedRole === 'admin' ? GLOBAL_SCOPE : normalizedLocation,
@@ -508,40 +586,98 @@ function SupervisorDashboard({
         vanIds: isBhtRole(normalizedRole) ? normalizedVanIds : [],
         active: userForm.active === true,
         authorizedLocations,
+        issueLocationIds,
         updatedAt: serverTimestamp()
       }
-      if (pinHash) {
-        payload.pinHash = pinHash
-        payload.pinVersion = 'v1_sha256'
-        payload.pinUpdatedAt = serverTimestamp()
+      if (!isNewUser && isAdminRole(user?.role)) {
+        const latestBeforeSave = await getDoc(doc(db, 'users', appUserId))
+        const previousEmail = normalizeEmail(latestBeforeSave.data()?.email)
+        if (previousEmail && resolvedEmail && previousEmail !== resolvedEmail) {
+          const oldLinkSnap = await getDoc(doc(db, 'userEmailLinks', previousEmail))
+          if (oldLinkSnap.exists() && oldLinkSnap.data()?.linkedAuthUid) {
+            const confirmed = await showConfirmDialog(
+              'This email is already linked to a Google sign-in. Changing it will deactivate the old email link and require the user to sign in with the new approved email.',
+              {
+                title: 'Change linked email?',
+                tone: 'warning',
+                confirmText: 'Change email',
+                cancelText: 'Cancel'
+              }
+            )
+            if (!confirmed) return
+          }
+        }
       }
+
+      let userProfileSaved = false
       const persistUserAndAssignment = async () => {
-        if (editingUser === 'new') {
-          await setDoc(doc(db, 'users', userForm.id), {
-            ...payload,
-            version: 1,
-            createdAt: serverTimestamp()
-          })
-        } else {
-          await runTransaction(db, async (transaction) => {
-            const userRef = doc(db, 'users', userForm.id)
-            const latestSnap = await transaction.get(userRef)
+        await runTransaction(db, async (transaction) => {
+          const userRef = doc(db, 'users', appUserId)
+          const emailLinkRef = resolvedEmail ? doc(db, 'userEmailLinks', resolvedEmail) : null
+          const latestSnap = await transaction.get(userRef)
+          const emailLinkSnap = emailLinkRef ? await transaction.get(emailLinkRef) : null
+          let nextVersion = 1
+          let previousEmail = ''
+          const existingEmailLink = emailLinkSnap?.exists() ? emailLinkSnap.data() : null
+
+          if (editingUser === 'new') {
+            if (latestSnap.exists()) throw new Error('A user with this ID already exists.')
+          } else {
             if (!latestSnap.exists()) throw new Error('User record no longer exists.')
             const latest = latestSnap.data()
-            const { nextVersion } = assertExpectedVersion({
+            previousEmail = normalizeEmail(latest.email)
+            const versionCheck = assertExpectedVersion({
               expectedVersion: userForm._version,
               currentVersion: getVersionNumber(latest),
-              documentId: userForm.id,
+              documentId: appUserId,
               recordLabel: 'User'
             })
+            nextVersion = versionCheck.nextVersion
+          }
+
+          if (editingUser === 'new') {
+            transaction.set(userRef, {
+              ...payload,
+              version: 1,
+              createdAt: serverTimestamp()
+            })
+          } else {
             transaction.update(userRef, {
               ...payload,
               version: nextVersion
             })
-          })
-        }
+          }
 
-        await syncDerivedAssignmentForUser(userForm.id, {
+          if (isAdminRole(user?.role) && resolvedEmail) {
+            if (existingEmailLink?.userId && existingEmailLink.userId !== appUserId) {
+              throw new Error('That email is already approved for another user.')
+            }
+            const emailLinkPayload = buildEmailLinkPayload({
+              appUserId,
+              email: resolvedEmail,
+              actorUser: user
+            })
+            transaction.set(emailLinkRef, {
+              ...emailLinkPayload,
+              linkedAuthUid: existingEmailLink?.linkedAuthUid || null,
+              linkedAt: existingEmailLink?.linkedAt || null,
+              version: getVersionNumber(existingEmailLink) + 1,
+              createdAt: existingEmailLink?.createdAt || serverTimestamp()
+            }, { merge: true })
+
+            if (previousEmail && previousEmail !== resolvedEmail) {
+              transaction.set(doc(db, 'userEmailLinks', previousEmail), {
+                active: false,
+                linkedAuthUid: null,
+                linkedAt: null,
+                updatedAt: serverTimestamp()
+              }, { merge: true })
+            }
+          }
+        })
+        userProfileSaved = true
+
+        await syncDerivedAssignmentForUser(appUserId, {
           name: userForm.name,
           role: normalizedRole,
           locationId: normalizedLocationId,
@@ -555,22 +691,15 @@ function SupervisorDashboard({
       try {
         await persistUserAndAssignment()
       } catch (persistError) {
+        if (userProfileSaved) {
+          console.error('User saved but derived assignment sync failed:', persistError)
+          alert('User profile saved, but the BHT assignment sync was denied by Firestore rules. Deploy the latest rules, then edit and save this user once more.')
+          setEditingUser(null)
+          loadUsers()
+          return
+        }
         if (persistError?.code === 'permission-denied' && isAdminRole(user?.role)) {
-          const tokenRole = String(user?.authClaimRole || '').trim() || '(none)'
-          const refreshed = await refreshAdminAuthSession()
-          if (refreshed) {
-            try {
-              await persistUserAndAssignment()
-              notifySuccess('User saved after refreshing admin auth session.')
-              setEditingUser(null)
-              loadUsers()
-              return
-            } catch (retryErr) {
-              console.error('Retry failed after admin auth refresh:', retryErr)
-              throw retryErr
-            }
-          }
-          alert(`Admin save failed due to auth scope mismatch (token role: ${tokenRole}). Lock/logout, sign in again, and confirm latest Firestore rules are deployed.`)
+          alert('Admin save was denied by Firestore rules. Sign out, sign in with the approved admin Google email, and confirm the strict rules match this app version.')
           return
         }
         throw persistError
@@ -703,28 +832,6 @@ function SupervisorDashboard({
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
         <div>
           <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-            User ID *
-          </label>
-          <input
-            type="text"
-            value={userForm.id}
-            onChange={(e) => setUserForm({ ...userForm, id: e.target.value })}
-            disabled={!isNewUser}
-            placeholder="e.g., bht3"
-            style={{
-              width: '100%',
-              padding: '8px',
-              border: '2px solid rgba(17,47,82,0.20)',
-              borderRadius: '6px',
-              fontSize: '14px',
-              boxSizing: 'border-box',
-              backgroundColor: !isNewUser ? 'rgba(17,47,82,0.04)' : 'rgba(17,47,82,0.10)',
-              color: 'var(--text-primary)'
-            }}
-          />
-        </div>
-        <div>
-          <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
             Name *
           </label>
           <input
@@ -746,14 +853,14 @@ function SupervisorDashboard({
         </div>
         <div>
           <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-            PIN (4 digits) * {!isNewUser ? '(set new PIN to rotate)' : ''}
+            Approved Google Email *
           </label>
           <input
-            type="text"
-            value={userForm.pin}
-            onChange={(e) => setUserForm({ ...userForm, pin: e.target.value.replace(/\D/g, '') })}
-            placeholder="1234"
-            maxLength="4"
+            type="email"
+            value={userForm.email || ''}
+            onChange={(e) => setUserForm({ ...userForm, email: normalizeEmail(e.target.value) })}
+            placeholder={`name@${COMPANY_EMAIL_DOMAIN}`}
+            disabled={!isAdmin}
             style={{
               width: '100%',
               padding: '8px',
@@ -761,10 +868,15 @@ function SupervisorDashboard({
               borderRadius: '6px',
               fontSize: '14px',
               boxSizing: 'border-box',
-              backgroundColor: 'rgba(17,47,82,0.10)',
+              backgroundColor: isAdmin ? 'rgba(17,47,82,0.10)' : 'rgba(17,47,82,0.04)',
               color: 'var(--text-primary)'
             }}
           />
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+            {isNewUser
+              ? `Internal ID will be generated automatically: ${buildInternalUserId(userForm.name, users.map(managedUser => managedUser.id))}`
+              : `Internal ID: ${userForm.id}`}
+          </div>
         </div>
         <div>
           <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
@@ -1563,17 +1675,16 @@ function SupervisorDashboard({
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', flex: 1 }}>
                         <div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>ID</div>
-                          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{managedUser.id}</div>
-                        </div>
-                        <div>
                           <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Name</div>
-                          <div style={{ fontSize: '14px' }}>{managedUser.name}</div>
+                          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{managedUser.name}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                            Internal ID: {managedUser.id}
+                          </div>
                         </div>
                         <div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>PIN Storage</div>
-                          <div style={{ fontSize: '14px', fontFamily: 'monospace' }}>
-                            {managedUser.pinHash ? 'hashed (v1)' : (managedUser.pin ? 'legacy plaintext' : 'unset')}
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Approved Google Email</div>
+                          <div style={{ fontSize: '14px' }}>
+                            {managedUser.email || '--'}
                           </div>
                         </div>
                         <div>

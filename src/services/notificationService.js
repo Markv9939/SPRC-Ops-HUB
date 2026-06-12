@@ -14,7 +14,7 @@
  */
 
 import { db } from '../firebase'
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
+import { addDoc, collection, doc, getDocs, query, serverTimestamp, where, writeBatch } from 'firebase/firestore'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,6 +34,10 @@ function basePayload() {
   }
 }
 
+function safeIdPart(value) {
+  return String(value || 'unknown').trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120) || 'unknown'
+}
+
 // ---------------------------------------------------------------------------
 // BHT → Supervisor: EOC issue reported
 // ---------------------------------------------------------------------------
@@ -51,6 +55,7 @@ export function buildEocIssueAlertPayload({ issueRefId, task, issue, userName })
   const prefix = fromBhtHome ? 'Issue report' : 'EOC issue'
 
   return {
+    audience: 'supervisor',
     type: 'eoc_issue',
     issueId: issueRefId,
     taskId: issue?.taskId || task?.id || null,
@@ -64,6 +69,112 @@ export function buildEocIssueAlertPayload({ issueRefId, task, issue, userName })
     techName: userName || null,
     ...basePayload()
   }
+}
+
+export async function getIssueNotificationRecipients(issue) {
+  if (!issue?.locationId) return []
+
+  const recipients = new Map()
+  const assignmentSnap = await getDocs(query(
+    collection(db, 'shiftAssignments'),
+    where('locationId', '==', issue.locationId),
+    where('active', '==', true)
+  ))
+
+  assignmentSnap.docs.forEach((docSnap) => {
+    const assignment = docSnap.data()
+    const targetUserId = trimOrNull(assignment.bhtUserId)
+    if (!targetUserId) return
+    recipients.set(targetUserId, {
+      targetUserId,
+      targetUserName: trimOrNull(assignment.bhtUserName),
+      recipientSource: 'assignment'
+    })
+  })
+
+  const reporterUserId = trimOrNull(issue.reportedByUserId)
+  if (reporterUserId) {
+    const existing = recipients.get(reporterUserId)
+    recipients.set(reporterUserId, {
+      targetUserId: reporterUserId,
+      targetUserName: trimOrNull(issue.reportedByName) || existing?.targetUserName || null,
+      recipientSource: existing ? 'assignment_and_reporter' : 'reporter'
+    })
+  }
+
+  return Array.from(recipients.values())
+}
+
+export function buildIssueAlertPayload({
+  issue,
+  activity,
+  eventType,
+  target,
+  actorUser
+}) {
+  const statusLabel = issue?.status === 'resolved'
+    ? 'resolved'
+    : issue?.status === 'voided'
+      ? 'voided'
+      : issue?.status === 'in_progress'
+        ? 'in progress'
+        : 'updated'
+  const actorName = actorUser?.name || activity?.actorName || 'Ops Hub'
+  const type = eventType === 'reported' ? 'eoc_issue' : 'eoc_issue_update'
+
+  return {
+    audience: target?.targetUserId ? 'bht' : 'supervisor',
+    type,
+    issueId: issue.id,
+    activityId: activity.id || null,
+    eventType,
+    locationId: issue.locationId,
+    eocType: issue.eocType || null,
+    severity: issue.severity || 'medium',
+    issueVersion: issue.version || 1,
+    targetUserId: target?.targetUserId || null,
+    targetUserName: target?.targetUserName || null,
+    recipientSource: target?.recipientSource || null,
+    status: issue.status || 'open',
+    statusNote: activity?.note || '',
+    actorUserId: trimOrNull(actorUser?.id || activity?.actorUserId),
+    actorName,
+    message: eventType === 'reported'
+      ? `Location issue reported: ${issue.label || 'Issue'} - ${issue.description || ''}`
+      : `${actorName} marked "${issue.label || 'Issue'}" as ${statusLabel}.`,
+    ...basePayload()
+  }
+}
+
+export async function fanOutIssueAlerts({ issue, activity, eventType, actorUser }) {
+  if (!issue?.id || !activity?.id) return { written: 0 }
+
+  const recipients = eventType === 'reported'
+    ? [{ targetUserId: null, targetUserName: null, recipientSource: 'supervisor_location' }]
+    : await getIssueNotificationRecipients(issue)
+
+  const batch = writeBatch(db)
+  let written = 0
+  recipients.forEach((target) => {
+    const alertId = [
+      'issue',
+      safeIdPart(issue.id),
+      safeIdPart(activity.id),
+      safeIdPart(eventType),
+      safeIdPart(target?.targetUserId || 'supervisor')
+    ].join('__')
+    batch.set(doc(db, 'alerts', alertId), buildIssueAlertPayload({
+      issue,
+      activity,
+      eventType,
+      target,
+      actorUser
+    }), { merge: true })
+    written += 1
+  })
+
+  if (written > 0) await batch.commit()
+  return { written }
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +197,7 @@ export async function createIssueStatusNotification({ issue, nextStatus, note, a
   const statusLabel = nextStatus === 'resolved' ? 'resolved' : 'in progress'
 
   await addDoc(collection(db, 'alerts'), {
+    audience: 'bht',
     type: 'eoc_issue_update',
     issueId: issue.id,
     taskId: issue.taskId || null,
@@ -132,6 +244,7 @@ export function buildFleetAlertPayload(taskDocId, descriptor, status) {
     : ''
 
   return {
+    audience: 'supervisor',
     type: `fleet_${typeSuffix}`,
     taskId: taskDocId,
     taskType: descriptor.taskType,
@@ -164,6 +277,7 @@ export async function createTransportCompletedAlert({ transport, userName }) {
   const clientLabel = `${clientCount} client${clientCount !== 1 ? 's' : ''}`
 
   await addDoc(collection(db, 'alerts'), {
+    audience: 'supervisor',
     type: 'transport_completed',
     transportId: transport.id,
     site,

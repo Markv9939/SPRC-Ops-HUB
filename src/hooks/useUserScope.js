@@ -29,6 +29,7 @@ import {
 
 const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
 const COMPLIANCE_SITES = new Set(MAIN_LOCATIONS)
+const EXACT_ISSUE_LOCATIONS = new Set(['lone_mountain', 'mesquite', 'res'])
 
 function locationScopeAlias(locationId) {
   const normalizedMainLocation = locationIdToMainLocation(locationId)
@@ -39,6 +40,11 @@ function locationScopeAlias(locationId) {
 
 function normalizeComplianceSite(siteId) {
   return locationScopeAlias(siteId)
+}
+
+function normalizeExactIssueLocation(locationId) {
+  const normalized = String(locationId || '').trim().toLowerCase()
+  return EXACT_ISSUE_LOCATIONS.has(normalized) ? normalized : ''
 }
 
 export default function useUserScope(user) {
@@ -68,6 +74,14 @@ export default function useUserScope(user) {
   const activeBackupGrants = Array.isArray(user?.activeBackupGrants)
     ? user.activeBackupGrants.filter(grant => grant?.state === 'active')
     : []
+
+  const exactIssueLocationIds = useMemo(
+    () => [...new Set([
+      ...(Array.isArray(user?.issueLocationIds) ? user.issueLocationIds : []),
+      user?.locationId
+    ].map(normalizeExactIssueLocation).filter(Boolean))],
+    [user]
+  )
 
   const managedMainLocations = useMemo(() => {
     const scopedLocations = getAvailableMainLocationsForUser(user)
@@ -114,6 +128,11 @@ export default function useUserScope(user) {
     [isAdmin, normalizedScopes]
   )
 
+  const inIssueScope = useCallback(
+    (locationId) => isAdmin || exactIssueLocationIds.includes(normalizeExactIssueLocation(locationId)),
+    [exactIssueLocationIds, isAdmin]
+  )
+
   return {
     isAdmin,
     isSupervisor,
@@ -125,8 +144,10 @@ export default function useUserScope(user) {
     defaultManagedMainLocation,
     allowedTransportSites,
     allowedComplianceSites,
+    exactIssueLocationIds,
     inTransportScope,
     inComplianceScope,
-    inEocScope
+    inEocScope,
+    inIssueScope
   }
 }

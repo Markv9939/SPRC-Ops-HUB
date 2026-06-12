@@ -26,6 +26,7 @@ dist-ssr
 # Firebase deploy cache
 .firebase
 .claude/worktrees/
+.codex-remote-attachments/
 
 # Windows
 nul
@@ -34,3 +35,4 @@ nul
 .env
 .env.local
 .env.production
+serviceAccountKey.json

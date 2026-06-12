@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BHT Home + Location Issues — Final Mockups (Phase 1)</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.11.0/dist/tabler-icons.min.css">
+<style>
+  :root{--navy:#112F52;--coral:#CD4E42;--bg:#F8F5F1;--card:#fff;--bd:#ECE6DD;--sec:#6B7787;
+    --green:#2E8B57;--amber:#B07A28;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:#e9e4dc;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--navy);padding:28px 14px 60px;}
+  h1{font-size:20px;font-weight:600;text-align:center;margin:0 0 4px;}
+  .sub{text-align:center;color:#6a665f;font-size:13px;margin:0 0 28px;}
+  .row{display:flex;flex-wrap:wrap;gap:30px;justify-content:center;align-items:flex-start;}
+  .screen{width:390px;}
+  .screen > .label{font-size:13px;font-weight:600;color:#3d3a34;margin:0 0 8px;text-align:center;}
+  .frame{background:#0d0d0f;border-radius:46px;padding:11px;}
+  .scr{background:var(--bg);border-radius:36px;overflow:hidden;}
+  .statusbar{background:var(--navy);padding:10px 18px 13px;}
+  .sb-top{display:flex;align-items:center;justify-content:space-between;color:#fff;font-size:13px;margin-bottom:11px;}
+  .sb-top .bat{display:inline-block;width:22px;height:11px;border:1px solid #fff;border-radius:3px;position:relative;}
+  .sb-top .bat span{position:absolute;left:1px;top:1px;bottom:1px;width:15px;background:#fff;border-radius:1px;}
+  .appbar{display:flex;align-items:center;gap:9px;}
+  .logo{width:28px;height:28px;border-radius:50%;border:1.5px solid #6E86A6;display:flex;align-items:center;justify-content:center;color:#cfd9e6;}
+  .body{padding:15px 17px 22px;}
+  .greet{font-size:25px;font-weight:600;letter-spacing:-.3px;}
+  .loc{display:flex;align-items:center;gap:5px;color:var(--sec);font-size:14px;margin:3px 0 15px;}
+  .sechead{font-size:13.5px;font-weight:600;margin:0 0 8px;}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:15px;padding:12px 13px;display:flex;align-items:center;gap:11px;margin-bottom:9px;box-shadow:0 1px 2px rgba(17,47,82,.05);}
+  .ic{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0;}
+  .ttl{font-size:14.5px;font-weight:500;}
+  .st{font-size:12px;color:var(--sec);}
+  .chev{font-size:19px;color:#9aa6b4;}
+  .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:9px;}
+  .qa{background:var(--card);border:1px solid var(--bd);border-radius:15px;padding:12px;display:flex;align-items:center;gap:9px;box-shadow:0 1px 2px rgba(17,47,82,.05);}
+  .qa .ic{width:30px;height:30px;font-size:15px;}
+  .qa .ttl{font-size:12.5px;line-height:1.2;}
+  .badge{font-size:11px;font-weight:500;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 4px;}
+  .tabs{display:flex;background:var(--card);border:1px solid var(--bd);border-radius:12px;overflow:hidden;margin-bottom:13px;}
+  .tab{flex:1;text-align:center;padding:10px;font-size:13px;font-weight:500;color:var(--sec);}
+  .tab.on{background:var(--coral);color:#fff;}
+  .pill{font-size:11px;font-weight:500;padding:2px 9px;border-radius:9px;}
+  .issuecard{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:13px;margin-bottom:11px;box-shadow:0 1px 2px rgba(17,47,82,.05);}
+  .upd{background:#EAEFF6;border-left:3px solid #6E9BD1;border-radius:0 8px 8px 0;padding:8px 11px;font-size:12px;color:#2b4a6b;margin:9px 0;}
+  .vfa{display:inline-block;font-size:12.5px;font-weight:500;color:var(--navy);border:1px solid #D8D1C6;border-radius:9px;padding:7px 12px;}
+  .note{font-size:11.5px;color:var(--sec);background:#EFEAE2;border-radius:10px;padding:10px 12px;line-height:1.5;}
+  .tl{position:relative;padding-left:22px;}
+  .tl .line{position:absolute;left:6px;top:6px;bottom:10px;width:2px;background:#E3DDD2;}
+  .ev{position:relative;margin-bottom:16px;}
+  .ev .dot{position:absolute;left:-22px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;}
+  .ev .when{font-size:12px;color:#9aa6b4;margin-bottom:2px;}
+  .ev .what{font-size:13px;font-weight:500;}
+  .ev .body2{font-size:13px;color:#465367;line-height:1.45;}
+</style>
+</head>
+<body>
+<h1>BHT Home + Location Issues — Final Mockups (Phase 1)</h1>
+<p class="sub">Reference for the implementation plan (docs/bht-home-implementation-plan.md). Colors/structure are normative; sample data is illustrative.</p>
+
+<div class="row">
+
+  <!-- ============ SCREEN 1: BHT HOME ============ -->
+  <div class="screen">
+    <div class="label">1 · BHT Home</div>
+    <div class="frame"><div class="scr">
+      <div class="statusbar">
+        <div class="sb-top"><span style="font-weight:500;">9:41</span>
+          <span style="display:flex;align-items:center;gap:6px;"><i class="ti ti-antenna-bars-5"></i><i class="ti ti-wifi"></i><span class="bat"><span></span></span></span>
+        </div>
+        <div class="appbar">
+          <div class="logo"><i class="ti ti-mountain" style="font-size:15px;"></i></div>
+          <span style="color:#fff;font-size:15px;font-weight:500;">Ops Hub</span>
+          <span style="flex:1;text-align:center;color:#fff;font-size:15px;font-weight:500;margin-left:-30px;">Home</span>
+          <span style="position:relative;margin-right:4px;"><i class="ti ti-bell" style="font-size:20px;color:#fff;"></i><span class="badge" style="position:absolute;top:-6px;right:-7px;background:var(--coral);color:#fff;">15</span></span>
+          <i class="ti ti-menu-2" style="font-size:20px;color:#fff;"></i>
+        </div>
+      </div>
+      <div class="body">
+        <div class="greet">Hi, Paul</div>
+        <div class="loc"><i class="ti ti-map-pin" style="font-size:15px;"></i> Lone Mountain</div>
+
+        <div class="sechead">Right now</div>
+        <div class="card" style="border:1.5px solid #E08C80;">
+          <div class="ic" style="background:var(--coral);color:#fff;"><i class="ti ti-car"></i></div>
+          <div style="flex:1;min-width:0;"><div class="ttl">Continue transport</div><div class="st">1 client · tap to continue</div></div>
+          <i class="ti ti-chevron-right" style="font-size:19px;color:var(--coral);"></i>
+        </div>
+        <div class="card" style="margin-bottom:17px;">
+          <div class="ic" style="background:#FBE9C8;color:#C2791A;"><i class="ti ti-alert-triangle"></i></div>
+          <div style="flex:1;min-width:0;"><div class="ttl" style="display:flex;align-items:center;gap:7px;">Location issues <span class="badge" style="background:var(--coral);color:#fff;">2</span></div><div class="st">1 open · 1 in progress · tap to view updates</div></div>
+          <i class="ti ti-chevron-right chev"></i>
+        </div>
+
+        <div class="sechead">Shift tasks</div>
+        <div class="card" style="border:1.5px solid #C9B8E8;">
+          <div class="ic" style="background:#ECEAFB;color:#5B4FCF;"><i class="ti ti-clipboard-text"></i></div>
+          <div style="flex:1;min-width:0;"><div class="ttl">Incoming debrief</div><div class="st">From 1st shift · initials needed</div></div>
+          <i class="ti ti-chevron-right" style="font-size:19px;color:#5B4FCF;"></i>
+        </div>
+        <div class="card">
+          <div class="ic" style="background:#E2EDFB;color:#2F6FB5;"><i class="ti ti-bus"></i></div>
+          <div style="flex:1;min-width:0;"><div class="ttl">Van EOC</div><div class="st" style="color:var(--amber);font-weight:500;">Due today</div></div>
+          <i class="ti ti-chevron-right chev"></i>
+        </div>
+        <div class="card" style="opacity:.72;padding:10px 13px;">
+          <div class="ic" style="width:32px;height:32px;font-size:16px;background:#E3F2E4;color:var(--green);"><i class="ti ti-home"></i></div>
+          <div style="flex:1;min-width:0;"><div class="ttl" style="font-size:13.5px;">House EOC</div><div class="st" style="color:var(--green);font-weight:500;">Completed</div></div>
+          <i class="ti ti-circle-check" style="font-size:18px;color:var(--green);"></i>
+        </div>
+        <div class="card" style="margin-bottom:17px;">
+          <div class="ic" style="background:#FBE9C8;color:#9A6212;"><i class="ti ti-clipboard-text"></i></div>
+          <div style="flex:1;min-width:0;"><div class="ttl">Edit shift debrief</div><div class="st" style="color:var(--amber);font-weight:500;">2 draft notes · tap to review &amp; submit</div></div>
+          <i class="ti ti-chevron-right chev"></i>
+        </div>
+
+        <div class="sechead">Quick actions</div>
+        <div class="grid2">
+          <div class="qa"><div class="ic" style="background:var(--navy);color:#fff;"><i class="ti ti-pencil"></i></div><div class="ttl">Add debrief note</div></div>
+          <div class="qa"><div class="ic" style="background:var(--coral);color:#fff;"><i class="ti ti-alert-circle"></i></div><div class="ttl">Report issue</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:0;">
+          <div style="flex:1;font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:8px;">Completed today <span class="badge" style="background:#E4E0D8;color:var(--sec);">3</span></div>
+          <i class="ti ti-chevron-right chev"></i>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ============ SCREEN 2: LOCATION ISSUES BOARD ============ -->
+  <div class="screen">
+    <div class="label">2 · Location Issues board (read-only for BHTs)</div>
+    <div class="frame"><div class="scr">
+      <div class="statusbar" style="padding-bottom:13px;">
+        <div class="sb-top"><span style="font-weight:500;">9:41</span>
+          <span style="display:flex;align-items:center;gap:6px;"><i class="ti ti-antenna-bars-5"></i><i class="ti ti-wifi"></i><span class="bat"><span></span></span></span>
+        </div>
+        <div class="appbar"><i class="ti ti-chevron-left" style="color:#fff;font-size:19px;"></i><span style="color:#fff;font-size:15px;font-weight:500;">Home</span></div>
+      </div>
+      <div class="body">
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          <div style="flex:1;"><div class="greet" style="font-size:22px;">Location Issues</div><div class="st" style="margin-top:4px;">Lone Mountain · Shared across all shifts</div></div>
+          <span style="font-size:13px;font-weight:500;color:#fff;background:var(--coral);border-radius:10px;padding:8px 12px;white-space:nowrap;"><i class="ti ti-plus" style="font-size:13px;vertical-align:-1px;"></i> Report</span>
+        </div>
+
+        <div class="tabs" style="margin-top:14px;">
+          <div class="tab on">Active 2</div>
+          <div class="tab">Resolved 30 Days</div>
+        </div>
+
+        <div class="issuecard">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div class="ttl" style="font-size:15px;">Van/vehicle — Windshield detail</div>
+            <span class="pill" style="background:#fff;color:#C2791A;border:1px solid #E6B864;white-space:nowrap;">OPEN</span>
+          </div>
+          <div style="margin:6px 0 8px;"><span class="pill" style="background:#FBE9C8;color:#9A6212;">MEDIUM</span> <span class="st">· Reported by Paul · 7h ago</span></div>
+          <div style="font-size:13px;color:#2b3a4d;line-height:1.45;">Windshield has a long crack on the passenger side.</div>
+          <div class="upd"><b>Admin, 2h ago:</b> Spoke with maintenance. Vendor is checking availability.</div>
+          <span class="vfa">View full activity</span>
+        </div>
+
+        <div class="issuecard">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div class="ttl" style="font-size:15px;">House/property — Dryer not heating</div>
+            <span class="pill" style="background:#FBE9C8;color:#9A6212;white-space:nowrap;">IN PROGRESS</span>
+          </div>
+          <div style="margin:6px 0 8px;"><span class="pill" style="background:#FBE9C8;color:#9A6212;">MEDIUM</span> <span class="st">· Reported by J. Smith · 1d ago</span></div>
+          <div style="font-size:13px;color:#2b3a4d;line-height:1.45;">The main dryer runs but is not producing heat.</div>
+          <div class="upd"><b>Admin, 5h ago:</b> Vendor contacted; service scheduled for Thursday.</div>
+          <span class="vfa">View full activity</span>
+        </div>
+
+        <div class="note">Everyone assigned to Lone Mountain can see these issues and supervisor updates, regardless of shift.</div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ============ SCREEN 3: ISSUE DETAIL / ACTIVITY ============ -->
+  <div class="screen">
+    <div class="label">3 · Issue detail / activity (notification deep-link target)</div>
+    <div class="frame"><div class="scr">
+      <div class="statusbar" style="padding-bottom:13px;">
+        <div class="sb-top"><span style="font-weight:500;">9:41</span>
+          <span style="display:flex;align-items:center;gap:6px;"><i class="ti ti-antenna-bars-5"></i><i class="ti ti-wifi"></i><span class="bat"><span></span></span></span>
+        </div>
+        <div class="appbar"><i class="ti ti-chevron-left" style="color:#fff;font-size:19px;"></i><span style="color:#fff;font-size:15px;font-weight:500;">Location Issues</span></div>
+      </div>
+      <div class="body">
+        <div style="display:flex;gap:7px;margin-bottom:8px;">
+          <span class="pill" style="background:#fff;color:#C2791A;border:1px solid #E6B864;">IN PROGRESS</span>
+          <span class="pill" style="background:#FBE9C8;color:#9A6212;">MEDIUM</span>
+        </div>
+        <div class="greet" style="font-size:19px;line-height:1.25;">House/property — Dryer not heating</div>
+        <div class="st" style="margin-top:5px;">Reported by J. Smith · 1d ago · Lone Mountain</div>
+        <div class="card" style="display:block;margin-top:13px;font-size:13.5px;color:#2b3a4d;line-height:1.5;">The main dryer runs but is not producing heat. Wet laundry backing up.</div>
+
+        <div class="sechead" style="margin:20px 0 12px;">Activity</div>
+        <div class="tl">
+          <div class="line"></div>
+          <div class="ev"><span class="dot" style="border:2px solid var(--green);"></span><div class="when">2h ago · Admin</div><div class="what">Update</div><div class="body2">Vendor contacted; service scheduled for Thursday.</div></div>
+          <div class="ev"><span class="dot" style="border:2px solid #C2791A;"></span><div class="when">5h ago · Admin</div><div class="what">Marked in progress</div><div class="body2">Looking into repair vs. replacement.</div></div>
+          <div class="ev" style="margin-bottom:0;"><span class="dot" style="border:2px solid #5B4FCF;"></span><div class="when">1d ago · J. Smith</div><div class="what">Reported</div><div class="body2">The main dryer runs but is not producing heat.</div></div>
+        </div>
+
+        <div class="note" style="margin-top:20px;">Read-only · everyone at Lone Mountain sees this record. Supervisor controls aren't shown for BHTs.</div>
+      </div>
+    </div></div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,4 +1,16 @@
-import { useEffect, useState } from 'react'
+import { createElement, useEffect, useState } from 'react'
+import {
+  AlertCircle,
+  AlertTriangle,
+  Bus,
+  Car,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardList,
+  Home,
+  MapPin,
+  Pencil
+} from 'lucide-react'
 import { getShiftById, LOCATIONS, VANS } from '../data/eocConstants'
 import { BHT_HOME_ISSUE_TYPES } from '../services/bhtIssueReportService'
 import useEocAssignments from '../hooks/useEocAssignments'
@@ -6,6 +18,8 @@ import useEocTasks from '../hooks/useEocTasks'
 import { getCurrentCycleDueDate } from '../utils/eocSchedule'
 import { notifyWarning } from '../utils/toast'
 import AppModal from './AppModal'
+import useUserScope from '../hooks/useUserScope'
+import useScopedIssues from '../hooks/useScopedIssues'
 
 const LOCAL_REMINDER_INTERVAL_MS = 60 * 60 * 1000
 
@@ -24,10 +38,19 @@ function BhtHub({
   onDebriefAssignmentChange,
   debriefSummary = { available: false, status: 'none', itemCount: 0 },
   debriefAlerts = [],
-  onNavigateToDebrief
+  onNavigateToDebrief,
+  onNavigateToIssues
 }) {
   const { assignment, loading: assignmentLoading } = useEocAssignments(user)
   const { tasks, loading: tasksLoading } = useEocTasks(user, assignment)
+  const { exactIssueLocationIds, inIssueScope } = useUserScope(user)
+  const { issues: locationIssues } = useScopedIssues({
+    user,
+    inEocScope: inIssueScope,
+    inIssueScope,
+    issueLocationIds: exactIssueLocationIds,
+    enabled: !!user && exactIssueLocationIds.length > 0
+  })
   const [issueModalOpen, setIssueModalOpen] = useState(false)
   const [issueForm, setIssueForm] = useState({
     issueType: BHT_HOME_ISSUE_TYPES[0].value,
@@ -151,6 +174,8 @@ function BhtHub({
   const debriefSubmitted = debriefSummary?.status === 'submitted'
   const debriefHasDraft = debriefSummary?.status === 'draft'
   const debriefItemCount = debriefSummary?.itemCount || 0
+  const openIssueCount = locationIssues.filter(issue => String(issue.status || 'open').toLowerCase() === 'open').length
+  const inProgressIssueCount = locationIssues.filter(issue => String(issue.status || '').toLowerCase() === 'in_progress').length
 
   const locationLabel = hasAssignment
     ? (LOCATIONS.find(l => l.id === assignment.locationId)?.label || assignment.locationId || '')
@@ -345,44 +370,169 @@ function BhtHub({
     )
   }
 
-  return (
-    <div style={{ padding: '16px', maxWidth: '600px', margin: '0 auto' }}>
-      {/* Greeting */}
-      <div className="hub-greeting">Hi, {firstName}</div>
-      <div className="hub-context">{locationLabel}</div>
+  const renderSection = (title, children) => (
+    <section className="hub-section">
+      <div className="hub-section-title">{title}</div>
+      <div className="hub-section-stack">{children}</div>
+    </section>
+  )
 
-      {/* Issue updates */}
+  const renderActionRow = ({
+    icon: RowIcon,
+    iconClassName = '',
+    rowClassName = '',
+    title,
+    titleBadge = null,
+    subtitle,
+    subtitleClassName = '',
+    onClick,
+    disabled = false,
+    complete = false
+  }) => (
+    <button
+      className={`hub-action-row ${rowClassName}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <div className={`hub-action-icon ${iconClassName}`}>
+        {createElement(RowIcon, { size: 20, strokeWidth: 2.25 })}
+      </div>
+      <div className="hub-action-info">
+        <div className="hub-action-title">
+          {title}
+          {titleBadge}
+        </div>
+        <div className={`hub-action-subtitle ${subtitleClassName}`}>
+          {subtitle}
+        </div>
+      </div>
+      <div className="hub-action-chevron">
+        {complete ? <CheckCircle2 size={19} strokeWidth={2.25} /> : <ChevronRight size={20} strokeWidth={2.25} />}
+      </div>
+    </button>
+  )
+
+  const renderQuickAction = ({ icon: QuickIcon, iconClassName, title, onClick }) => (
+    <button className="hub-quick-action" onClick={onClick}>
+      <div className={`hub-quick-icon ${iconClassName}`}>
+        {createElement(QuickIcon, { size: 16, strokeWidth: 2.4 })}
+      </div>
+      <div className="hub-quick-title">{title}</div>
+    </button>
+  )
+
+  return (
+    <div className="hub-home">
+      <div className="hub-greeting">Hi, {firstName}</div>
+      <div className="hub-context">
+        <MapPin size={15} strokeWidth={2.2} />
+        {locationLabel}
+      </div>
+
       {renderIssueUpdates()}
 
-      {pendingIncomingHandoffs.length > 0 && (
-        <div className="glass-card" style={{ marginBottom: '16px', padding: '14px 16px', border: '2px solid rgba(176,122,40,0.34)' }}>
-          <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '8px' }}>
-            Incoming handoff pending
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {pendingIncomingHandoffs.map(alert => (
-              <button
-                key={alert.id}
-                className="hub-action-row hub-action-row-ready"
-                onClick={() => onNavigateToDebrief?.(alert)}
-                style={{ margin: 0 }}
-              >
-                <div className="hub-action-icon hub-action-icon-house">D</div>
-                <div className="hub-action-info">
-                  <div className="hub-action-title">Review handoff</div>
-                  <div className="hub-action-subtitle">
-                    Complete your checklist and initials.
-                  </div>
-                </div>
-                <div className="hub-action-chevron">&gt;</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {renderSection('Right now', (
+        <>
+          {renderActionRow({
+            icon: Car,
+            iconClassName: 'hub-action-icon-transport',
+            rowClassName: hasCurrentTransport ? 'hub-action-row-urgent' : 'hub-action-row-ready',
+            title: hasCurrentTransport ? 'Continue transport' : 'Start transport',
+            subtitle: hasCurrentTransport
+              ? `${currentTransport.clients?.[0] || 'In progress'} - tap to continue`
+              : 'No active transport',
+            subtitleClassName: hasCurrentTransport ? 'hub-action-subtitle-urgent' : '',
+            onClick: handlePrimaryTransportAction
+          })}
 
-      {/* Main action rows */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+          {renderActionRow({
+            icon: AlertTriangle,
+            iconClassName: 'hub-action-icon-issue',
+            rowClassName: locationIssues.length > 0 ? 'hub-action-row-warning' : 'hub-action-row-ready',
+            title: 'Location issues',
+            titleBadge: locationIssues.length > 0
+              ? <span className="badge badge-urgent hub-title-badge">{locationIssues.length}</span>
+              : null,
+            subtitle: locationIssues.length > 0
+              ? `${openIssueCount} open - ${inProgressIssueCount} in progress - tap to view updates`
+              : 'No active location issues',
+            onClick: onNavigateToIssues,
+            disabled: !onNavigateToIssues
+          })}
+        </>
+      ))}
+
+      {renderSection('Shift tasks', (
+        <>
+          {pendingIncomingHandoffs.length > 0 && renderActionRow({
+            icon: ClipboardList,
+            iconClassName: 'hub-action-icon-debrief',
+            rowClassName: 'hub-action-row-debrief',
+            title: 'Incoming debrief',
+            subtitle: pendingIncomingHandoffs.length === 1
+              ? 'From previous shift - initials needed'
+              : `${pendingIncomingHandoffs.length} incoming handoffs - initials needed`,
+            onClick: () => onNavigateToDebrief?.(pendingIncomingHandoffs[0])
+          })}
+
+          {renderActionRow({
+            icon: Bus,
+            iconClassName: 'hub-action-icon-van',
+            rowClassName: vanStatus.rowClass,
+            title: 'Van EOC',
+            subtitle: vanStatus.label,
+            subtitleClassName: vanStatus.className,
+            onClick: () => vanTask && onStartEoc(vanTask.id),
+            disabled: !vanTask,
+            complete: vanCompleted && !vanTask
+          })}
+
+          {renderActionRow({
+            icon: Home,
+            iconClassName: 'hub-action-icon-house',
+            rowClassName: houseStatus.rowClass,
+            title: 'House EOC',
+            subtitle: houseStatus.label,
+            subtitleClassName: houseStatus.className,
+            onClick: () => houseTask && onStartEoc(houseTask.id),
+            disabled: !houseTask,
+            complete: houseCompleted && !houseTask
+          })}
+
+          {debriefAvailable && renderActionRow({
+            icon: ClipboardList,
+            iconClassName: 'hub-action-icon-notes',
+            rowClassName: debriefSubmitted ? 'hub-action-row-done' : (debriefHasDraft ? 'hub-action-row-warning' : 'hub-action-row-ready'),
+            title: debriefSubmitted ? 'View shift debrief' : 'Edit shift debrief',
+            subtitle: debriefSubmitted
+              ? 'Submitted and locked'
+              : debriefHasDraft
+                ? `${debriefItemCount} draft note${debriefItemCount === 1 ? '' : 's'} - tap to review and submit`
+                : 'No draft notes yet',
+            subtitleClassName: debriefSubmitted ? 'hub-action-subtitle-done' : (debriefHasDraft ? 'hub-action-subtitle-warning' : ''),
+            onClick: onEditDebrief
+          })}
+        </>
+      ))}
+
+      {renderSection('Quick actions', (
+        <div className="hub-quick-grid">
+          {debriefAvailable && renderQuickAction({
+            icon: Pencil,
+            iconClassName: 'hub-quick-icon-note',
+            title: 'Add debrief note',
+            onClick: onAddDebriefNote
+          })}
+          {renderQuickAction({
+            icon: AlertCircle,
+            iconClassName: 'hub-quick-icon-issue',
+            title: isOffline ? 'Report issue offline' : 'Report issue',
+            onClick: openIssueReport
+          })}
+        </div>
+      ))}
+
+      <div hidden>
         {/* Transport action */}
         <button
           className={`hub-action-row ${hasCurrentTransport ? 'hub-action-row-urgent' : 'hub-action-row-ready'}`}
@@ -402,6 +552,28 @@ function BhtHub({
             </div>
           </div>
           <div className="hub-action-chevron">›</div>
+        </button>
+
+        <button
+          className="hub-action-row hub-action-row-ready"
+          onClick={onNavigateToIssues}
+          disabled={!onNavigateToIssues}
+        >
+          <div className="hub-action-icon hub-action-icon-house">
+            {'!'}
+          </div>
+          <div className="hub-action-info">
+            <div className="hub-action-title">
+              Location issues
+              {locationIssues.length > 0 && <span className="badge badge-urgent" style={{ marginLeft: '8px' }}>{locationIssues.length}</span>}
+            </div>
+            <div className="hub-action-subtitle">
+              {locationIssues.length > 0
+                ? `${openIssueCount} open - ${inProgressIssueCount} in progress - tap to view updates`
+                : 'No active location issues'}
+            </div>
+          </div>
+          <div className="hub-action-chevron">&gt;</div>
         </button>
 
         {/* Quick issue report */}
@@ -516,43 +688,47 @@ function BhtHub({
         )}
       </div>
 
-      {/* Today's completed transports */}
-      <div className="section-label" style={{ marginBottom: '8px' }}>Completed today</div>
-      {completedTodayTransports.length === 0 ? (
-        <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '20px', padding: '12px 0' }}>
-          No completed transports yet today.
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-          {completedTodayTransports.map((transport) => {
-            const clientLabel = transport.clients?.[0] || 'No client'
-            const extra = transport.clients?.length > 1 ? ` +${transport.clients.length - 1}` : ''
-            const destinationLabel = transport.destinations?.[0]?.name
-              || transport.destinations?.[0]?.address
-              || 'No destination'
+      {renderSection('Completed today', (
+        <>
+          <div className="hub-completed-summary">
+            <span>Completed today</span>
+            <span className="badge badge-closed">{completedTodayTransports.length}</span>
+          </div>
+          {completedTodayTransports.length === 0 ? (
+            <div className="hub-empty-note">No completed transports yet today.</div>
+          ) : (
+            <div className="hub-completed-list">
+              {completedTodayTransports.map((transport) => {
+                const clientLabel = transport.clients?.[0] || 'No client'
+                const extra = transport.clients?.length > 1 ? ` +${transport.clients.length - 1}` : ''
+                const destinationLabel = transport.destinations?.[0]?.name
+                  || transport.destinations?.[0]?.address
+                  || 'No destination'
 
-            return (
-              <button
-                key={transport.id}
-                className="activity-item"
-                onClick={() => onContinueTransport(transport.id)}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {clientLabel}{extra}
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {destinationLabel}
-                  </div>
-                </div>
-                <span className="badge badge-closed" style={{ flexShrink: 0 }}>
-                  {formatActivityTime(transport.__endedAt)}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      )}
+                return (
+                  <button
+                    key={transport.id}
+                    className="activity-item"
+                    onClick={() => onContinueTransport(transport.id)}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {clientLabel}{extra}
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {destinationLabel}
+                      </div>
+                    </div>
+                    <span className="badge badge-closed" style={{ flexShrink: 0 }}>
+                      {formatActivityTime(transport.__endedAt)}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </>
+      ))}
 
       <AppModal
         isOpen={issueModalOpen}

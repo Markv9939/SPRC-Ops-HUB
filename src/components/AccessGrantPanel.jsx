@@ -60,6 +60,7 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState({
     userId: '',
+    userSearch: '',
     locationId: LOCATION_OPTIONS[0],
     startsOn: toDateInputValue(new Date()),
     expiresOn: toDateInputValue(plusDays(7)),
@@ -74,8 +75,33 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
 
   useEffect(() => {
     if (form.userId || selectableUsers.length === 0) return
-    setForm(prev => ({ ...prev, userId: selectableUsers[0].id }))
+    const firstUser = selectableUsers[0]
+    setForm(prev => ({
+      ...prev,
+      userId: firstUser.id,
+      userSearch: firstUser.email ? `${firstUser.name} (${firstUser.email})` : firstUser.name
+    }))
   }, [form.userId, selectableUsers])
+
+  function getUserSearchLabel(user) {
+    if (!user) return ''
+    return user.email ? `${user.name} (${user.email})` : user.name
+  }
+
+  function resolveTypedUser(value) {
+    const normalized = String(value || '').trim().toLowerCase()
+    if (!normalized) return null
+    return selectableUsers.find(user => {
+      const name = String(user.name || '').trim().toLowerCase()
+      const email = String(user.email || '').trim().toLowerCase()
+      const id = String(user.id || '').trim().toLowerCase()
+      const combined = getUserSearchLabel(user).trim().toLowerCase()
+      return normalized === name
+        || normalized === email
+        || normalized === id
+        || normalized === combined
+    }) || null
+  }
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -271,15 +297,36 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px' }}>
           <div>
             <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>User</label>
-            <select
-              value={form.userId}
-              onChange={(event) => setForm(prev => ({ ...prev, userId: event.target.value }))}
+            <input
+              type="text"
+              list="backup-access-users"
+              value={form.userSearch}
+              onChange={(event) => {
+                const nextValue = event.target.value
+                const matchedUser = resolveTypedUser(nextValue)
+                setForm(prev => ({
+                  ...prev,
+                  userSearch: nextValue,
+                  userId: matchedUser?.id || ''
+                }))
+              }}
+              onBlur={() => {
+                const matchedUser = resolveTypedUser(form.userSearch)
+                if (!matchedUser) return
+                setForm(prev => ({
+                  ...prev,
+                  userId: matchedUser.id,
+                  userSearch: getUserSearchLabel(matchedUser)
+                }))
+              }}
+              placeholder="Type a user name or approved email"
               style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid rgba(17,47,82,0.20)', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-primary)' }}
-            >
+            />
+            <datalist id="backup-access-users">
               {selectableUsers.map(user => (
-                <option key={user.id} value={user.id}>{user.name} ({user.id})</option>
+                <option key={user.id} value={getUserSearchLabel(user)} />
               ))}
-            </select>
+            </datalist>
           </div>
 
           <div>

@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { isFleetAlertType } from '../utils/fleetStatus'
-import { isBhtRole } from '../utils/orgModel'
+import { isAdminRole, isBhtRole, isSupervisorRole } from '../utils/orgModel'
 
 const DEBRIEF_ALERT_TYPES = new Set([
   'shift_debrief_submitted',
@@ -43,8 +43,13 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
   // Supervisor/admin: scoped eoc + fleet alerts
   useEffect(() => {
     if (!enabled || !user || !inEocScope || !inComplianceScope) return
+    if (!isSupervisorRole(user.role) && !isAdminRole(user.role)) return
 
-    const q = query(collection(db, 'alerts'), where('read', '==', false))
+    const q = query(
+      collection(db, 'alerts'),
+      where('audience', '==', 'supervisor'),
+      where('read', '==', false)
+    )
 
     const unsubscribe = onSnapshot(q, (snap) => {
       const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
@@ -102,22 +107,27 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
   // BHT: issue status updates targeted at this user
   useEffect(() => {
     if (!enabled || !user?.id) return
+    if (!isBhtRole(user.role)) return
 
     const q = query(
       collection(db, 'alerts'),
-      where('type', '==', 'eoc_issue_update')
+      where('audience', '==', 'bht'),
+      where('targetUserId', '==', user.id),
+      where('read', '==', false)
     )
 
     const unsubscribe = onSnapshot(q, (snap) => {
       const rows = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(item => item.targetUserId === user.id)
+        .filter(item => item.type === 'eoc_issue_update' || item.type === 'shift_debrief_submitted')
       rows.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
-      setIssueUpdates(rows.slice(0, 8))
+      setIssueUpdates(rows.filter(item => item.type === 'eoc_issue_update').slice(0, 8))
+      setDebriefAlerts(rows.filter(item => item.type === 'shift_debrief_submitted'))
+      setUnreadCount(rows.length)
     })
 
     return () => unsubscribe()
-  }, [enabled, user?.id])
+  }, [enabled, user?.id, user?.role])
 
   return {
     eocAlerts,

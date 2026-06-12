@@ -1,5 +1,6 @@
 import { auth, db } from '../firebase'
 import {
+  arrayUnion,
   collection,
   doc,
   getDoc,
@@ -431,6 +432,13 @@ export async function saveDebriefConfirmation(debriefId, confirmation, user) {
 
   if (currentAcknowledged && currentUserId) {
     await markCurrentUserHandoffAlertsRead({ debriefId, userId: currentUserId })
+    await setDoc(doc(db, 'userHomeState', currentUserId), {
+      reviewedDebriefIds: arrayUnion(debriefId),
+      lastReviewedDebriefId: debriefId,
+      lastReviewedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      version: 1
+    }, { merge: true })
   }
 }
 
@@ -458,13 +466,19 @@ export function isDebriefClosedForCorrections(debrief) {
 }
 
 async function getReceivingBhtUsers({ locationId, shiftId, submittedByUserId }) {
-  const usersSnap = await getDocs(query(collection(db, 'users'), where('active', '==', true)))
-  return usersSnap.docs
-    .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-    .filter(row => isBhtRole(row.role))
-    .filter(row => cleanToken(row.locationId).toLowerCase() === cleanToken(locationId).toLowerCase())
-    .filter(row => cleanToken(row.shiftId) === cleanToken(shiftId))
-    .filter(row => row.id !== submittedByUserId)
+  const assignmentsSnap = await getDocs(query(
+    collection(db, 'shiftAssignments'),
+    where('locationId', '==', locationId),
+    where('shiftId', '==', shiftId),
+    where('active', '==', true)
+  ))
+  return assignmentsSnap.docs
+    .map(docSnap => docSnap.data())
+    .map(row => ({
+      id: row.bhtUserId,
+      name: row.bhtUserName || ''
+    }))
+    .filter(row => row.id && row.id !== submittedByUserId)
 }
 
 function cleanAlertIdPart(value) {
@@ -555,16 +569,22 @@ async function createShiftDebriefSubmittedAlerts({ debrief, receivingUsers = [] 
 }
 
 async function markCurrentUserHandoffAlertsRead({ debriefId, userId }) {
-  const alertsSnap = await getDocs(query(collection(db, 'alerts'), where('debriefId', '==', debriefId)))
+  const alertsSnap = await getDocs(query(
+    collection(db, 'alerts'),
+    where('audience', '==', 'bht'),
+    where('debriefId', '==', debriefId),
+    where('type', '==', 'shift_debrief_submitted'),
+    where('targetUserId', '==', userId),
+    where('read', '==', false)
+  ))
   const batch = writeBatch(db)
   let writes = 0
   alertsSnap.docs.forEach(alertDoc => {
-    const alert = alertDoc.data()
-    if (alert.targetUserId !== userId) return
-    if (alert.read === true) return
-    if (alert.type !== 'shift_debrief_submitted') return
     batch.update(alertDoc.ref, {
       read: true,
+      readAt: serverTimestamp(),
+      readByUserId: userId,
+      version: getVersionNumber(alertDoc.data()) + 1,
       updatedAt: serverTimestamp()
     })
     writes += 1

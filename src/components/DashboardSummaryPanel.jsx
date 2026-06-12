@@ -18,10 +18,11 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { db } from '../firebase'
 import {
   collection, query, where, orderBy, doc, getDocs, updateDoc,
-  runTransaction, serverTimestamp, writeBatch, Timestamp
+  runTransaction, serverTimestamp, Timestamp
 } from 'firebase/firestore'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
-import { createIssueStatusNotification as sendIssueStatusNotification, writeAuditLog as writeAuditEntry } from '../services/notificationService'
+import { writeAuditLog as writeAuditEntry } from '../services/notificationService'
+import { updateIssueStatus } from '../services/issueStatusService'
 import { notifySuccess } from '../utils/toast'
 import { getStatus } from '../utils/complianceStatus'
 import { getFleetTaskTypeLabel, parseMileageValue } from '../utils/fleetStatus'
@@ -244,10 +245,6 @@ export default function DashboardSummaryPanel({
     await writeAuditEntry({ action, collectionPath, documentId, reason, actorUser: user, extra })
   }
 
-  const createIssueStatusNotification = async ({ issue, nextStatus, note }) => {
-    await sendIssueStatusNotification({ issue, nextStatus, note, actorUser: user })
-  }
-
   // ── Issue action note helpers ──
   const getIssueActionNote = (issueId) => String(eocIssueActionNotes[issueId] || '')
   const updateIssueActionNote = (issueId, note) => {
@@ -302,28 +299,15 @@ export default function DashboardSummaryPanel({
 
     const selectedIssue = eocIssues.find(issue => issue.id === issueId)
     if (!selectedIssue) { alert('Issue no longer exists.'); return }
-    const expectedVersion = getVersionNumber(selectedIssue)
 
     try {
-      await runTransaction(db, async (transaction) => {
-        const issueRef = doc(db, 'eocIssues', issueId)
-        const issueSnap = await transaction.get(issueRef)
-        if (!issueSnap.exists()) throw new Error('Issue no longer exists.')
-
-        const latestIssue = issueSnap.data()
-        const { nextVersion } = assertExpectedVersion({
-          expectedVersion, currentVersion: getVersionNumber(latestIssue),
-          documentId: issueId, recordLabel: 'EOC Issue'
-        })
-
-        transaction.update(issueRef, {
-          status: 'in_progress', inProgressNotes: trimmedProgressNote,
-          inProgressAt: serverTimestamp(), inProgressByUserId: user?.id || null,
-          inProgressByName: user?.name || null, version: nextVersion, updatedAt: serverTimestamp()
-        })
+      await updateIssueStatus({
+        issueId,
+        expectedIssue: selectedIssue,
+        nextStatus: 'in_progress',
+        note: trimmedProgressNote,
+        actorUser: user
       })
-      await createIssueStatusNotification({ issue: selectedIssue, nextStatus: 'in_progress', note: trimmedProgressNote })
-      await writeAuditLog({ action: 'issue_in_progress', collectionPath: 'eocIssues', documentId: issueId, reason: trimmedProgressNote })
       clearIssueActionNote(issueId)
     } catch (err) {
       console.error('Error moving issue to in_progress:', err)
@@ -338,41 +322,15 @@ export default function DashboardSummaryPanel({
 
     const selectedIssue = eocIssues.find(issue => issue.id === issueId)
     if (!selectedIssue) { alert('Issue no longer exists.'); return }
-    const expectedVersion = getVersionNumber(selectedIssue)
 
     try {
-      await runTransaction(db, async (transaction) => {
-        const issueRef = doc(db, 'eocIssues', issueId)
-        const issueSnap = await transaction.get(issueRef)
-        if (!issueSnap.exists()) throw new Error('Issue no longer exists.')
-
-        const latestIssue = issueSnap.data()
-        const { nextVersion } = assertExpectedVersion({
-          expectedVersion, currentVersion: getVersionNumber(latestIssue),
-          documentId: issueId, recordLabel: 'EOC Issue'
-        })
-
-        transaction.update(issueRef, {
-          status: 'resolved', resolvedNotes: trimmedResolveNote,
-          resolvedAt: serverTimestamp(), resolvedByUserId: user?.id || null,
-          resolvedByName: user?.name || null, version: nextVersion, updatedAt: serverTimestamp()
-        })
+      await updateIssueStatus({
+        issueId,
+        expectedIssue: selectedIssue,
+        nextStatus: 'resolved',
+        note: trimmedResolveNote,
+        actorUser: user
       })
-
-      const relatedAlerts = await getDocs(query(collection(db, 'alerts'), where('issueId', '==', issueId)))
-      const alertBatch = writeBatch(db)
-      let alertMutations = 0
-      relatedAlerts.docs.forEach(alertDoc => {
-        if (alertDoc.data().type !== 'eoc_issue' || alertDoc.data().read === true) return
-        alertBatch.update(alertDoc.ref, {
-          read: true, resolvedAt: serverTimestamp(), resolvedByUserId: user?.id || null,
-          resolvedByName: user?.name || null, version: getVersionNumber(alertDoc.data()) + 1, updatedAt: serverTimestamp()
-        })
-        alertMutations += 1
-      })
-      if (alertMutations > 0) await alertBatch.commit()
-      await createIssueStatusNotification({ issue: selectedIssue, nextStatus: 'resolved', note: trimmedResolveNote })
-      await writeAuditLog({ action: 'issue_resolved', collectionPath: 'eocIssues', documentId: issueId, reason: trimmedResolveNote })
       clearIssueActionNote(issueId)
     } catch (err) {
       console.error('Error resolving issue:', err)

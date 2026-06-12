@@ -3,9 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { db, auth } from './firebase'
 import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, getDocs, doc } from 'firebase/firestore'
 import { signOut } from 'firebase/auth'
-import PinLogin from './components/PinLogin'
+import GoogleLogin from './components/GoogleLogin'
 import Header from './components/Header'
 import BhtHub from './components/BhtHub'
+import LocationIssuesBoard from './components/LocationIssuesBoard'
+import IssueDetail from './components/IssueDetail'
 import TransportCard from './components/TransportCard'
 import EocChecklist from './components/EocChecklist'
 import ShiftDebriefPage from './components/ShiftDebriefPage'
@@ -18,7 +20,6 @@ import { syncFleetTasksForUserScope } from './services/fleetTaskEngine'
 import { syncDerivedAssignmentForUser } from './services/assignmentService'
 import { refreshScopedSessionUser } from './services/accessGrantService'
 import { changeOwnPin } from './services/userPinService'
-import { getAuthPolicy } from './services/authPolicyService'
 import { listAllOfflineActions, saveOfflineDraft } from './services/offlineStore'
 import {
   OFFLINE_ACTION_TYPES,
@@ -76,6 +77,9 @@ function parseAppRoute(pathname, search = '') {
   if (parts[0] === 'debrief') {
     const mode = parts[1] === 'quick' ? 'quick' : 'full'
     return { page: 'debrief', currentDebriefMode: mode, currentDebriefId: parts[2] || null }
+  }
+  if (parts[0] === 'issues') {
+    return { page: parts[1] ? 'issueDetail' : 'issues', currentIssueId: parts[1] || null }
   }
   if (parts[0] === 'dashboard') {
     const dashboardTab = DASHBOARD_TABS.has(parts[1]) ? parts[1] : 'dashboard'
@@ -279,12 +283,13 @@ function App() {
   const currentTaskId = activeRoute.currentTaskId || null
   const currentDebriefId = activeRoute.currentDebriefId || null
   const currentDebriefMode = activeRoute.currentDebriefMode || 'full'
+  const currentIssueId = activeRoute.currentIssueId || null
   const managementTransportId = activeRoute.managementTransportId || null
   const managementTransportMode = activeRoute.managementTransportMode || 'list'
   const [bhtDebriefAssignment, setBhtDebriefAssignment] = useState(null)
   const [bhtDebriefSummary, setBhtDebriefSummary] = useState({ available: false, status: 'none', itemCount: 0 })
   // Alert count and issue updates from shared hooks
-  const { inEocScope, inComplianceScope } = useUserScope(user)
+  const { inEocScope, inComplianceScope, exactIssueLocationIds, inIssueScope } = useUserScope(user)
   const { eocAlerts, fleetAlerts, debriefAlerts, unreadCount: alertCount, issueUpdates } = useScopedAlerts({
     user,
     inEocScope,
@@ -391,7 +396,7 @@ function App() {
     const isManagement = isSupervisorRole(userData?.role) || isAdminRole(userData?.role)
     const routeMatchesRole = isManagement
       ? location.pathname.startsWith('/dashboard/')
-      : ['home', 'transport', 'eocForm', 'debrief'].includes(route.page)
+      : ['home', 'transport', 'eocForm', 'debrief', 'issues', 'issueDetail'].includes(route.page)
     if (location.pathname === '/' || !routeMatchesRole) {
       navigate(getDefaultRoute(userData), { replace: true })
     }
@@ -399,8 +404,6 @@ function App() {
       setShowOnboarding(true)
     }
   }
-
-  const canChangeOwnPin = Boolean(user) && (isBhtRole(user?.role) || isSupervisorRole(user?.role) || isAdminRole(user?.role))
 
   async function handleChangeOwnPin({ currentPin, newPin, confirmPin }) {
     if (!requireOnline('changing PIN')) {
@@ -416,15 +419,17 @@ function App() {
   }
 
   const handleLogout = useCallback(async () => {
+    try {
+      await signOut(auth)
+    } catch (err) {
+      console.warn('Firebase signOut failed:', err)
+    }
     sessionStorage.removeItem('bhtUser')
     setUser(null)
     setTransports([])
     setBhtDebriefAssignment(null)
     localStorage.removeItem('lastActivity')
     navigate('/', { replace: true })
-    signOut(auth).catch((err) => {
-      console.warn('Auth signOut skipped:', err)
-    })
   }, [navigate])
 
   useEffect(() => {
@@ -562,9 +567,6 @@ function App() {
         const refreshedUser = await refreshScopedSessionUser(user.id)
         if (cancelled) return
 
-        const policy = await getAuthPolicy()
-        const authScopeEnforced = policy?.authScopeEnforced === true
-
         if (!refreshedUser) {
           alert('Your account is no longer active. Please log in again.')
           sessionStorage.removeItem('bhtUser')
@@ -581,20 +583,9 @@ function App() {
           const mergedUser = {
             ...refreshedUser,
             authUid: prev.authUid || null,
-            authClaimsReady: prev.authClaimsReady || false,
-            authClaimRole: prev.authClaimRole || null,
-            authClaimLocations: Array.isArray(prev.authClaimLocations) ? prev.authClaimLocations : [],
-            authScopeEnforced
-          }
-
-          if (mergedUser.authScopeEnforced && !mergedUser.authClaimsReady) {
-            alert('Access policy changed: auth claims are now required. Please re-login with a claim-enabled account.')
-            sessionStorage.removeItem('bhtUser')
-            localStorage.removeItem('lastActivity')
-            setTransports([])
-            setBhtDebriefAssignment(null)
-            navigate('/', { replace: true })
-            return null
+            authEmail: prev.authEmail || prev.email || null,
+            authProvider: 'google',
+            authScopeEnforced: true
           }
 
           if (toScopeSignature(prev) === toScopeSignature(mergedUser)) return prev
@@ -915,7 +906,7 @@ function App() {
     } catch (error) {
       console.error('Error creating transport:', error)
       if (error?.code === 'permission-denied' || /insufficient permissions/i.test(String(error?.message || ''))) {
-        alert('Missing permissions for transport write. Re-login with the correct account, or disable auth-claims enforcement mismatch in rules/policy.')
+        alert('Your account is missing transport access for this location. Please contact a supervisor or admin.')
       } else {
         alert(error?.message || 'Failed to create transport. Please try again.')
       }
@@ -976,6 +967,10 @@ function App() {
     }
 
     setFocusedIssueUpdateId(alert?.id || null)
+    if (alert?.issueId) {
+      navigate(`/issues/${encodeURIComponent(alert.issueId)}`)
+      return
+    }
     navigateHome()
   }
 
@@ -1007,7 +1002,7 @@ function App() {
   if (user === null) {
     return (
       <>
-        <PinLogin onLogin={handleLogin} />
+        <GoogleLogin onLogin={handleLogin} />
         <DialogHost />
         <ToastHost />
       </>
@@ -1024,8 +1019,8 @@ function App() {
     onNavigateHome: () => navigateHome(),
     onNavigateSection: navigateDashboardTab,
     onLogout: handleLogout,
-    onChangePin: () => setIsChangePinOpen(true),
-    canChangeOwnPin,
+    onChangePin: null,
+    canChangeOwnPin: false,
     alertCount,
     isOffline,
     pendingSyncCount,
@@ -1114,6 +1109,34 @@ function App() {
     )
   }
 
+  if (page === 'issues') {
+    return renderShell(
+      <LocationIssuesBoard
+        user={user}
+        locationIds={exactIssueLocationIds}
+        inIssueScope={inIssueScope}
+        isOffline={isOffline}
+        onBack={() => navigateHome()}
+        onOpenIssue={(issueId) => navigate(`/issues/${encodeURIComponent(issueId)}`)}
+        onReportIssue={handleReportIssue}
+        assignment={bhtDebriefAssignment}
+      />,
+      { title: 'Location Issues', showBack: true, onBack: () => navigateHome() }
+    )
+  }
+
+  if (page === 'issueDetail') {
+    return renderShell(
+      <IssueDetail
+        user={user}
+        issueId={currentIssueId}
+        inIssueScope={inIssueScope}
+        onBack={() => navigate('/issues')}
+      />,
+      { title: 'Location Issues', showBack: true, onBack: () => navigate('/issues') }
+    )
+  }
+
   if (isManagementUser) {
     const sectionTitle = dashboardTab.charAt(0).toUpperCase() + dashboardTab.slice(1)
     return renderShell(
@@ -1161,6 +1184,7 @@ function App() {
         debriefSummary={effectiveBhtDebriefSummary}
         debriefAlerts={debriefAlerts}
         onNavigateToDebrief={handleNavigateToDebrief}
+        onNavigateToIssues={() => navigate('/issues')}
       />
       {showOnboarding && (
         <Onboarding onComplete={() => setShowOnboarding(false)} />

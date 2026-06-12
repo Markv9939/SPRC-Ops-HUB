@@ -1,6 +1,33 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore'
+import { doc, onSnapshot } from 'firebase/firestore'
+
+function buildProfileAssignment(user) {
+  const userId = String(user?.id || '').trim()
+  const locationId = String(user?.locationId || '').trim().toLowerCase()
+  const shiftId = String(user?.shiftId || '').trim()
+  const vanIds = Array.isArray(user?.vanIds)
+    ? user.vanIds.map(vanId => String(vanId || '').trim().toLowerCase()).filter(Boolean)
+    : []
+  const fallbackVanId = String(user?.vanId || '').trim().toLowerCase()
+  const mergedVanIds = [...new Set([...(vanIds || []), fallbackVanId].filter(Boolean))]
+
+  if (!userId || user?.active === false || !locationId || !shiftId || mergedVanIds.length === 0) {
+    return null
+  }
+
+  return {
+    id: `profile_${userId}`,
+    bhtUserId: userId,
+    bhtUserName: user?.name || userId,
+    locationId,
+    shiftId,
+    vanId: mergedVanIds[0],
+    vanIds: mergedVanIds,
+    active: true,
+    source: 'user_profile_fallback'
+  }
+}
 
 /**
  * Hook to load active BHT assignment for a user.
@@ -42,30 +69,17 @@ export default function useEocAssignments(user) {
             }
           }
 
-          const q = query(
-            collection(db, 'shiftAssignments'),
-            where('bhtUserId', '==', normalizedUserId),
-            where('active', '==', true)
-          )
-          const snap = await getDocs(q)
-          if (snap.empty) {
-            setAssignment(null)
-            setLoading(false)
-            return
-          }
-
-          const fallback = snap.docs[0]
-          setAssignment({ id: fallback.id, ...fallback.data() })
+          setAssignment(buildProfileAssignment(user))
           setLoading(false)
         } catch (err) {
           console.error('Error loading BHT assignment:', err)
-          setAssignment(null)
+          setAssignment(buildProfileAssignment(user))
           setLoading(false)
         }
       },
       (err) => {
         console.error('Error loading BHT assignment:', err)
-        setAssignment(null)
+        setAssignment(buildProfileAssignment(user))
         setLoading(false)
       }
     )

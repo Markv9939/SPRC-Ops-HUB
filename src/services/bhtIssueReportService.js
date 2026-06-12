@@ -1,6 +1,6 @@
-import { collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore'
+import { collection, doc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../firebase'
-import { buildEocIssueAlertPayload } from './notificationService'
+import { createIssueWithActivity } from './issueStatusService'
 
 export const BHT_HOME_ISSUE_TYPES = [
   { value: 'house_property', label: 'House/property', eocType: 'house', severity: 'medium' },
@@ -11,6 +11,10 @@ export const BHT_HOME_ISSUE_TYPES = [
 
 function trimText(value) {
   return String(value || '').trim()
+}
+
+function safeIdPart(value) {
+  return String(value || '').trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80)
 }
 
 function getIssueTypeMeta(issueType) {
@@ -57,21 +61,17 @@ function buildBhtHomeIssueData({ user, assignment, issueType, description, vanId
 
 export async function submitBhtIssueReportOnline(payload) {
   const issueData = buildBhtHomeIssueData(payload || {})
-  let issueId = ''
+  const localReportId = safeIdPart(payload?.localReportId)
+  const issueRef = localReportId
+    ? doc(db, 'eocIssues', `bht_${localReportId}`)
+    : doc(collection(db, 'eocIssues'))
 
-  await runTransaction(db, async (transaction) => {
-    const issueRef = doc(collection(db, 'eocIssues'))
-    const alertRef = doc(collection(db, 'alerts'))
-    issueId = issueRef.id
-
-    transaction.set(issueRef, issueData)
-    transaction.set(alertRef, buildEocIssueAlertPayload({
-      issueRefId: issueRef.id,
-      task: null,
-      issue: issueData,
-      userName: payload?.user?.name || ''
-    }))
+  const result = await createIssueWithActivity({
+    issueRef,
+    issueData,
+    actorUser: payload?.user,
+    eventType: 'reported'
   })
 
-  return { issueId }
+  return { issueId: result.issueId }
 }
