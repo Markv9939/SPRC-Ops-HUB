@@ -1,5 +1,11 @@
 export function toTransportRecordDate(value) {
   if (!value) return null
+  const seconds = Number(value?.seconds ?? value?._seconds)
+  const nanoseconds = Number(value?.nanoseconds ?? value?._nanoseconds ?? 0)
+  if (Number.isFinite(seconds)) {
+    const timestampDate = new Date((seconds * 1000) + (Number.isFinite(nanoseconds) ? nanoseconds / 1e6 : 0))
+    return Number.isNaN(timestampDate.getTime()) ? null : timestampDate
+  }
   const date = typeof value?.toDate === 'function'
     ? value.toDate()
     : value instanceof Date

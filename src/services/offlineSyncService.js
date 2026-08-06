@@ -18,7 +18,7 @@ import { assertExpectedVersion, getVersionNumber } from './versioning'
 import { updateFleetRuntimeFromEocSubmission } from './fleetRuntimeService'
 import { syncFleetTasksForVehicle } from './fleetTaskEngine'
 import { createTransportCompletedAlert, fanOutIssueAlerts, writeAuditLog } from './notificationService'
-import { saveQuickDebriefNote, submitShiftDebrief } from './shiftDebriefService'
+import { appendExtraDebriefNote, saveDebriefConfirmation, saveQuickDebriefNote, submitShiftDebrief } from './shiftDebriefService'
 import { submitBhtIssueReportOnline } from './bhtIssueReportService'
 import { parseMileageValue } from '../utils/fleetStatus'
 import {
@@ -32,11 +32,14 @@ import {
   saveOfflineDraft,
   updateOfflineAction
 } from './offlineStore'
+import { toTransportRecordDate } from '../utils/transportRecord'
 
 export const OFFLINE_ACTION_TYPES = {
   EOC_SUBMISSION: 'eocSubmission',
   SHIFT_DEBRIEF_QUICK_NOTE: 'shiftDebriefQuickNote',
   SHIFT_DEBRIEF_SUBMISSION: 'shiftDebriefSubmission',
+  SHIFT_DEBRIEF_EXTRA_NOTE: 'shiftDebriefExtraNote',
+  SHIFT_DEBRIEF_CONFIRMATION: 'shiftDebriefConfirmation',
   BHT_ISSUE_REPORT: 'bhtIssueReport',
   TRANSPORT_CREATE: 'transportCreate',
   TRANSPORT_UPDATE: 'transportUpdate',
@@ -101,6 +104,22 @@ export function queueShiftDebriefQuickNote(payload) {
   return queueOfflineAction({
     id: `debrief-quick:${payload?.context?.id || ''}:${payload?.item?.id || ''}`,
     type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_QUICK_NOTE,
+    payload
+  })
+}
+
+export function queueShiftDebriefExtraNote(payload) {
+  return queueOfflineAction({
+    id: `debrief-extra:${payload?.debriefId || ''}:${payload?.extraNote?.id || ''}`,
+    type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_EXTRA_NOTE,
+    payload
+  })
+}
+
+export function queueShiftDebriefConfirmation(payload) {
+  return queueOfflineAction({
+    id: `debrief-confirmation:${payload?.debriefId || ''}:${payload?.user?.id || ''}`,
+    type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_CONFIRMATION,
     payload
   })
 }
@@ -371,11 +390,7 @@ async function submitBhtIssueReportActionOnline(payload) {
 }
 
 function toDate(value, fallback = new Date()) {
-  if (!value) return fallback
-  if (typeof value?.toDate === 'function') return value.toDate()
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? fallback : value
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? fallback : date
+  return toTransportRecordDate(value) || fallback
 }
 
 function toTimestamp(value, fallback = new Date()) {
@@ -483,7 +498,12 @@ async function applyTransportUpdateOnline(payload) {
     version: increment(1),
     updatedAt: serverTimestamp()
   })
-  await deleteOfflineDraft(getTransportDraftId(transportId))
+  const queuedActions = await listOfflineActions(['pending', 'failed', 'syncing', 'needsReview'])
+  const hasQueuedClose = queuedActions.some(action => (
+    action.type === OFFLINE_ACTION_TYPES.TRANSPORT_CLOSE
+    && String(action.payload?.transportId || '') === String(transportId)
+  ))
+  if (!hasQueuedClose) await deleteOfflineDraft(getTransportDraftId(transportId))
 }
 
 async function applyTransportCloseOnline(payload) {
@@ -543,6 +563,10 @@ async function processAction(action) {
       syncResult = await syncShiftDebriefQuickNoteOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION) {
       syncResult = await submitShiftDebriefOnline(action.payload)
+    } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_EXTRA_NOTE) {
+      await appendExtraDebriefNote(action.payload.debriefId, action.payload.extraNote)
+    } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_CONFIRMATION) {
+      await saveDebriefConfirmation(action.payload.debriefId, action.payload.confirmation, action.payload.user)
     } else if (action.type === OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT) {
       syncResult = await submitBhtIssueReportActionOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.TRANSPORT_CREATE) {

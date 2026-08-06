@@ -70,6 +70,14 @@ export async function getOfflineDraft(id) {
   return withStore(DRAFTS_STORE, 'readonly', (store) => requestToPromise(store.get(id)))
 }
 
+export async function listOfflineDrafts(type = '') {
+  const drafts = await withStore(DRAFTS_STORE, 'readonly', (store) => requestToPromise(store.getAll()))
+  const normalizedType = String(type || '').trim()
+  return (Array.isArray(drafts) ? drafts : [])
+    .filter(draft => !normalizedType || draft?.type === normalizedType)
+    .sort((a, b) => String(b?.updatedAtIso || '').localeCompare(String(a?.updatedAtIso || '')))
+}
+
 export async function deleteOfflineDraft(id) {
   if (!id) return
   await withStore(DRAFTS_STORE, 'readwrite', (store) => {

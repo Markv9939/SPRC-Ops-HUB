@@ -103,6 +103,7 @@ export default function NotificationCenter({
   fleetAlerts = [],
   debriefAlerts = [],
   issueUpdates = [],
+  isOffline = false,
   onNavigateToIssue,
   onNavigateToFleet,
   onNavigateToDebrief,
@@ -154,6 +155,7 @@ export default function NotificationCenter({
 
   // Dismiss (mark read) single alert
   const handleDismiss = async (alertId) => {
+    if (isOffline) return
     const selectedAlert = allAlerts.find(alert => alert.id === alertId)
     setDismissing(prev => new Set(prev).add(alertId))
     try {
@@ -177,6 +179,7 @@ export default function NotificationCenter({
 
   // Mark all as read
   const handleMarkAllRead = async () => {
+    if (isOffline) return
     const batch = writeBatch(db)
     const toDismiss = filteredAlerts.filter(a => !a.read)
     if (toDismiss.length === 0) return
@@ -226,6 +229,8 @@ export default function NotificationCenter({
             {filteredAlerts.length > 0 && (
               <button
                 onClick={handleMarkAllRead}
+                disabled={isOffline}
+                title={isOffline ? 'Reconnect to mark notifications read' : undefined}
                 style={styles.markAllBtn}
               >
                 Mark all read
@@ -315,7 +320,8 @@ export default function NotificationCenter({
                   </button>
                   <button
                     onClick={() => handleDismiss(alert.id)}
-                    disabled={dismissing.has(alert.id)}
+                    disabled={isOffline || dismissing.has(alert.id)}
+                    title={isOffline ? 'Reconnect to dismiss this notification' : undefined}
                     style={styles.dismissBtn}
                   >
                     Dismiss

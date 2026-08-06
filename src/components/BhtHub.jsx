@@ -20,6 +20,7 @@ import { notifyWarning } from '../utils/toast'
 import AppModal from './AppModal'
 import useUserScope from '../hooks/useUserScope'
 import useScopedIssues from '../hooks/useScopedIssues'
+import { toTransportRecordDate } from '../utils/transportRecord'
 
 const LOCAL_REMINDER_INTERVAL_MS = 60 * 60 * 1000
 
@@ -27,6 +28,7 @@ function BhtHub({
   user,
   transports,
   isOffline = false,
+  pendingEocTaskIds = [],
   issueUpdates = [],
   focusedIssueUpdateId = null,
   onNewTransport,
@@ -67,10 +69,7 @@ function BhtHub({
   }, [assignment, onDebriefAssignmentChange])
 
   const toDate = (value) => {
-    if (!value) return null
-    if (typeof value?.toDate === 'function') return value.toDate()
-    const date = new Date(value)
-    return Number.isNaN(date.getTime()) ? null : date
+    return toTransportRecordDate(value)
   }
 
   const isSameDay = (a, b) => (
@@ -132,6 +131,7 @@ function BhtHub({
 
   const currentCycleHouseTasks = currentCycleTasks.filter(t => t.taskType === 'house')
   const currentCycleVanTasks = currentCycleTasks.filter(t => t.taskType === 'van')
+  const pendingEocTaskIdSet = new Set(pendingEocTaskIds)
 
   const getPriorityTask = (taskList) => {
     const actionable = taskList.filter(t => t.status === 'pending' || t.status === 'overdue')
@@ -144,10 +144,12 @@ function BhtHub({
     })[0]
   }
 
-  const houseTask = getPriorityTask(currentCycleHouseTasks)
-  const vanTask = getPriorityTask(currentCycleVanTasks)
-  const houseCompleted = !houseTask && currentCycleHouseTasks.some(t => t.status === 'completed')
-  const vanCompleted = !vanTask && currentCycleVanTasks.some(t => t.status === 'completed')
+  const pendingHouseCompletion = currentCycleHouseTasks.some(task => pendingEocTaskIdSet.has(task.id))
+  const pendingVanCompletion = currentCycleVanTasks.some(task => pendingEocTaskIdSet.has(task.id))
+  const houseTask = getPriorityTask(currentCycleHouseTasks.filter(task => !pendingEocTaskIdSet.has(task.id)))
+  const vanTask = getPriorityTask(currentCycleVanTasks.filter(task => !pendingEocTaskIdSet.has(task.id)))
+  const houseCompleted = !houseTask && (pendingHouseCompletion || currentCycleHouseTasks.some(t => t.status === 'completed'))
+  const vanCompleted = !vanTask && (pendingVanCompletion || currentCycleVanTasks.some(t => t.status === 'completed'))
 
   // --- Completed transports today ---
   const today = new Date()
@@ -158,20 +160,22 @@ function BhtHub({
     .sort((a, b) => b.__endedAt.getTime() - a.__endedAt.getTime())
 
   // --- Helpers for action row status ---
-  const getEocStatus = (task, completed) => {
+  const getEocStatus = (task, completed, pendingCompletion) => {
+    if (pendingCompletion) return { label: 'Completed - pending sync', className: 'hub-action-subtitle-warning', rowClass: 'hub-action-row-warning' }
     if (task?.status === 'overdue') return { label: 'Overdue - tap to complete', className: 'hub-action-subtitle-urgent', rowClass: 'hub-action-row-urgent' }
     if (task?.status === 'pending') return { label: 'Due today', className: 'hub-action-subtitle-warning', rowClass: 'hub-action-row-ready' }
     if (completed) return { label: 'Completed', className: 'hub-action-subtitle-done', rowClass: 'hub-action-row-done' }
     return { label: 'No tasks', className: '', rowClass: '' }
   }
 
-  const vanStatus = getEocStatus(vanTask, vanCompleted)
-  const houseStatus = getEocStatus(houseTask, houseCompleted)
+  const vanStatus = getEocStatus(vanTask, vanCompleted, pendingVanCompletion)
+  const houseStatus = getEocStatus(houseTask, houseCompleted, pendingHouseCompletion)
   const pendingIncomingHandoffs = debriefAlerts
     .filter(alert => alert.type === 'shift_debrief_submitted')
     .filter(alert => alert.targetUserId === user?.id)
   const debriefAvailable = debriefSummary?.available === true
   const debriefSubmitted = debriefSummary?.status === 'submitted'
+  const debriefPendingSubmission = debriefSummary?.status === 'pendingSubmission'
   const debriefHasDraft = debriefSummary?.status === 'draft'
   const debriefItemCount = debriefSummary?.itemCount || 0
   const pendingQuickItemCount = debriefSummary?.pendingQuickItemCount || 0
@@ -503,25 +507,32 @@ function BhtHub({
           {debriefAvailable && renderActionRow({
             icon: ClipboardList,
             iconClassName: 'hub-action-icon-notes',
-            rowClassName: pendingQuickItemCount > 0
+            rowClassName: debriefPendingSubmission
+              ? 'hub-action-row-warning'
+              : pendingQuickItemCount > 0
               ? 'hub-action-row-warning'
               : debriefSubmitted
                 ? 'hub-action-row-done'
                 : (debriefHasDraft ? 'hub-action-row-warning' : 'hub-action-row-ready'),
-            title: debriefSubmitted ? 'View shift debrief' : 'Edit shift debrief',
-            subtitle: pendingQuickItemCount > 0
+            title: debriefPendingSubmission ? 'Shift debrief' : (debriefSubmitted ? 'View shift debrief' : 'Edit shift debrief'),
+            subtitle: debriefPendingSubmission
+              ? 'Submitted - pending sync'
+              : pendingQuickItemCount > 0
               ? `${pendingQuickItemCount} offline note${pendingQuickItemCount === 1 ? '' : 's'} pending sync`
               : debriefSubmitted
                 ? 'Submitted and locked'
               : debriefHasDraft
                 ? `${debriefItemCount} draft note${debriefItemCount === 1 ? '' : 's'} - tap to review and submit`
                 : 'No draft notes yet',
-            subtitleClassName: pendingQuickItemCount > 0
+            subtitleClassName: debriefPendingSubmission
+              ? 'hub-action-subtitle-warning'
+              : pendingQuickItemCount > 0
               ? 'hub-action-subtitle-warning'
               : debriefSubmitted
                 ? 'hub-action-subtitle-done'
                 : (debriefHasDraft ? 'hub-action-subtitle-warning' : ''),
-            onClick: onEditDebrief
+            onClick: onEditDebrief,
+            disabled: debriefPendingSubmission
           })}
         </>
       ))}
@@ -630,18 +641,21 @@ function BhtHub({
         {/* Shift Debrief editor/viewer */}
         {debriefAvailable && (
           <button
-            className={`hub-action-row ${debriefSubmitted ? 'hub-action-row-done' : (debriefHasDraft ? 'hub-action-row-ready' : '')}`}
+            className={`hub-action-row ${debriefSubmitted ? 'hub-action-row-done' : ((debriefHasDraft || debriefPendingSubmission) ? 'hub-action-row-ready' : '')}`}
             onClick={onEditDebrief}
+            disabled={debriefPendingSubmission}
           >
             <div className="hub-action-icon hub-action-icon-house">
               {'D'}
             </div>
             <div className="hub-action-info">
               <div className="hub-action-title">
-                {debriefSubmitted ? 'View Shift Debrief' : 'Edit Shift Debrief'}
+                {debriefPendingSubmission ? 'Shift Debrief' : (debriefSubmitted ? 'View Shift Debrief' : 'Edit Shift Debrief')}
               </div>
               <div className={`hub-action-subtitle ${debriefSubmitted ? 'hub-action-subtitle-done' : ''}`}>
-                {debriefSubmitted
+                {debriefPendingSubmission
+                  ? 'Submitted - pending sync'
+                  : debriefSubmitted
                   ? 'Submitted and locked'
                   : debriefHasDraft
                     ? `${debriefItemCount} draft item${debriefItemCount === 1 ? '' : 's'}`

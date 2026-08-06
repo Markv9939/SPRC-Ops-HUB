@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sprc-ops-shell-v5'
+const CACHE_NAME = 'sprc-ops-shell-v7'
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -6,12 +6,21 @@ const APP_SHELL = [
   '/branding/sprc-mark-red-solid.png'
 ]
 
+async function cacheAppShell() {
+  const cache = await caches.open(CACHE_NAME)
+  await cache.addAll(APP_SHELL)
+
+  const indexResponse = await cache.match('/index.html')
+  if (!indexResponse) return
+  const html = await indexResponse.text()
+  const assetUrls = Array.from(html.matchAll(/(?:src|href)="([^"]+)"/g))
+    .map(match => match[1])
+    .filter(path => path.startsWith('/assets/'))
+  if (assetUrls.length > 0) await cache.addAll(assetUrls)
+}
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
-  )
+  event.waitUntil(cacheAppShell().then(() => self.skipWaiting()))
 })
 
 self.addEventListener('message', (event) => {
@@ -37,8 +46,6 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
-  if (url.pathname.startsWith('/assets/')) return
-
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)

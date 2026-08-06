@@ -24,10 +24,13 @@ import {
   createExtraNote,
   upsertSharedClientName
 } from '../services/shiftDebriefService'
-import { deleteOfflineDraft, getOfflineDraft, saveOfflineDraft } from '../services/offlineStore'
+import { deleteOfflineDraft, getOfflineDraft, listAllOfflineActions, saveOfflineDraft } from '../services/offlineStore'
 import {
+  OFFLINE_ACTION_TYPES,
   getDebriefDraftId,
   getDebriefQuickDraftId,
+  queueShiftDebriefConfirmation,
+  queueShiftDebriefExtraNote,
   queueShiftDebriefQuickNote,
   queueShiftDebriefSubmission,
   syncOfflineOutbox
@@ -337,16 +340,44 @@ function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = fa
   )
 }
 
-function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
+function SubmittedDebriefView({ debrief, user, onExtraNoteAdded, isOffline = false }) {
   const [extraNoteText, setExtraNoteText] = useState('')
   const [confirmation, setConfirmation] = useState(() => getCurrentUserConfirmation(debrief, user))
   const [savingExtra, setSavingExtra] = useState(false)
   const [savingConfirmation, setSavingConfirmation] = useState(false)
+  const [pendingExtraNotes, setPendingExtraNotes] = useState([])
+  const [confirmationPending, setConfirmationPending] = useState(false)
   const correctionsClosed = isDebriefClosedForCorrections(debrief)
 
   useEffect(() => {
     setConfirmation(getCurrentUserConfirmation(debrief, user))
   }, [debrief, user])
+
+  useEffect(() => {
+    let cancelled = false
+    const refreshPending = async () => {
+      const actions = await listAllOfflineActions().catch(() => [])
+      if (cancelled) return
+      const pendingStatuses = new Set(['pending', 'syncing', 'failed', 'needsReview'])
+      const matching = actions.filter(action => pendingStatuses.has(action.status) && action.payload?.debriefId === debrief.id)
+      setPendingExtraNotes(matching
+        .filter(action => action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_EXTRA_NOTE)
+        .map(action => action.payload?.extraNote)
+        .filter(Boolean))
+      const pendingConfirmation = matching.find(action => (
+        action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_CONFIRMATION
+        && String(action.payload?.user?.id || '') === String(user?.id || '')
+      ))
+      setConfirmationPending(Boolean(pendingConfirmation))
+      if (pendingConfirmation?.payload?.confirmation) setConfirmation(pendingConfirmation.payload.confirmation)
+    }
+    refreshPending()
+    window.addEventListener('offline-outbox-changed', refreshPending)
+    return () => {
+      cancelled = true
+      window.removeEventListener('offline-outbox-changed', refreshPending)
+    }
+  }, [debrief.id, user?.id])
 
   const addExtraNote = async () => {
     if (correctionsClosed) {
@@ -359,13 +390,18 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
     }
     setSavingExtra(true)
     try {
-      await appendExtraDebriefNote(debrief.id, createExtraNote({
+      const extraNote = createExtraNote({
         note: extraNoteText,
         user,
         source: 'submitted_view'
-      }))
+      })
+      if (isOffline) {
+        await queueShiftDebriefExtraNote({ debriefId: debrief.id, extraNote, user })
+      } else {
+        await appendExtraDebriefNote(debrief.id, extraNote)
+      }
       setExtraNoteText('')
-      notifySuccess('Extra note added')
+      notifySuccess(isOffline ? 'Extra note saved on this device' : 'Extra note added')
       onExtraNoteAdded?.()
     } finally {
       setSavingExtra(false)
@@ -375,8 +411,12 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
   const saveConfirmation = async () => {
     setSavingConfirmation(true)
     try {
-      await saveDebriefConfirmation(debrief.id, confirmation, user)
-      notifySuccess('Confirmation saved')
+      if (isOffline) {
+        await queueShiftDebriefConfirmation({ debriefId: debrief.id, confirmation, user })
+      } else {
+        await saveDebriefConfirmation(debrief.id, confirmation, user)
+      }
+      notifySuccess(isOffline ? 'Confirmation saved on this device' : 'Confirmation saved')
     } finally {
       setSavingConfirmation(false)
     }
@@ -415,6 +455,11 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
             ))}
           </div>
         )}
+        {pendingExtraNotes.map(note => (
+          <div key={note.id} style={styles.pendingOfflineItem}>
+            <strong>Pending sync: </strong>{note.note}
+          </div>
+        ))}
         {correctionsClosed ? (
           <div style={styles.closedText}>No more corrections can be added after review.</div>
         ) : (
@@ -468,6 +513,7 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
             Confirmed by {confirmation?.confirmedByName || 'incoming staff'} on {formatTimestamp(confirmation?.confirmedAt)}
           </div>
         )}
+        {confirmationPending && <div style={styles.savedText}>Confirmation pending sync</div>}
         <button
           className="btn btn-finish"
           onClick={saveConfirmation}
@@ -1331,6 +1377,7 @@ export default function ShiftDebriefPage({
         await queueShiftDebriefSubmission({ context, items: validItems, user })
         setHasLocalDraft(true)
         notifySuccess('Shift debrief saved on this device. It will sync when internet returns.')
+        onBack()
       } else {
         await submitShiftDebrief(context, validItems, user)
         await deleteOfflineDraft(getDebriefDraftId(context.id))
@@ -1468,7 +1515,7 @@ export default function ShiftDebriefPage({
           {quickStatus && <div style={styles.savedText}>{quickStatus}</div>}
         </div>
       ) : submitted ? (
-        <SubmittedDebriefView debrief={submitted} user={user} />
+        <SubmittedDebriefView debrief={submitted} user={user} isOffline={isOffline} />
       ) : (
         <SectionTabsDraftEditor
           items={items}
