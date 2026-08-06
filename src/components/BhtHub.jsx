@@ -174,6 +174,7 @@ function BhtHub({
   const debriefSubmitted = debriefSummary?.status === 'submitted'
   const debriefHasDraft = debriefSummary?.status === 'draft'
   const debriefItemCount = debriefSummary?.itemCount || 0
+  const pendingQuickItemCount = debriefSummary?.pendingQuickItemCount || 0
   const openIssueCount = locationIssues.filter(issue => String(issue.status || 'open').toLowerCase() === 'open').length
   const inProgressIssueCount = locationIssues.filter(issue => String(issue.status || '').toLowerCase() === 'in_progress').length
 
@@ -502,14 +503,24 @@ function BhtHub({
           {debriefAvailable && renderActionRow({
             icon: ClipboardList,
             iconClassName: 'hub-action-icon-notes',
-            rowClassName: debriefSubmitted ? 'hub-action-row-done' : (debriefHasDraft ? 'hub-action-row-warning' : 'hub-action-row-ready'),
+            rowClassName: pendingQuickItemCount > 0
+              ? 'hub-action-row-warning'
+              : debriefSubmitted
+                ? 'hub-action-row-done'
+                : (debriefHasDraft ? 'hub-action-row-warning' : 'hub-action-row-ready'),
             title: debriefSubmitted ? 'View shift debrief' : 'Edit shift debrief',
-            subtitle: debriefSubmitted
-              ? 'Submitted and locked'
+            subtitle: pendingQuickItemCount > 0
+              ? `${pendingQuickItemCount} offline note${pendingQuickItemCount === 1 ? '' : 's'} pending sync`
+              : debriefSubmitted
+                ? 'Submitted and locked'
               : debriefHasDraft
                 ? `${debriefItemCount} draft note${debriefItemCount === 1 ? '' : 's'} - tap to review and submit`
                 : 'No draft notes yet',
-            subtitleClassName: debriefSubmitted ? 'hub-action-subtitle-done' : (debriefHasDraft ? 'hub-action-subtitle-warning' : ''),
+            subtitleClassName: pendingQuickItemCount > 0
+              ? 'hub-action-subtitle-warning'
+              : debriefSubmitted
+                ? 'hub-action-subtitle-done'
+                : (debriefHasDraft ? 'hub-action-subtitle-warning' : ''),
             onClick: onEditDebrief
           })}
         </>

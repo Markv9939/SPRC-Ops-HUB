@@ -11,7 +11,7 @@ import AutocompleteDropdown from './AutocompleteDropdown'
  * - Queries by normalized name and address
  * - Dedupes by normalized address
  */
-function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }) {
+function DestinationAutocomplete({ onAddDestination, existingDestinations = [], isOffline = false }) {
   const [nameInput, setNameInput] = useState('')
   const [addressInput, setAddressInput] = useState('')
   const [suggestions, setSuggestions] = useState([])
@@ -33,6 +33,13 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
   // Search destinations in Firestore
   const searchDestinations = async (searchTerm, searchType) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
+
+    if (isOffline) {
+      setSuggestions([])
+      setShowSuggestions(false)
+      setIsLoading(false)
+      return
+    }
 
     if (!searchTerm.trim()) {
       setSuggestions([])
@@ -110,30 +117,26 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
       return
     }
 
-    // Persist to Firestore
-    try {
-      await setDoc(
-        doc(db, 'destinations', normalizedAddress),
-        {
-          name: name || '',
-          address: address,
-          normalizedName: normalize(name || ''),
-          normalizedAddress: normalizedAddress,
-          createdAt: serverTimestamp()
-        },
-        { merge: true }
-      )
-    } catch (error) {
-      console.error('Error persisting destination:', error)
-    }
-
-    // Call parent handler
-    onAddDestination({ name, address })
+    await onAddDestination({ name, address })
 
     // Clear inputs
     setNameInput('')
     setAddressInput('')
     setShowSuggestions(false)
+
+    if (isOffline) return
+
+    setDoc(
+      doc(db, 'destinations', normalizedAddress),
+      {
+        name: name || '',
+        address,
+        normalizedName: normalize(name || ''),
+        normalizedAddress,
+        createdAt: serverTimestamp()
+      },
+      { merge: true }
+    ).catch(error => console.error('Error persisting destination:', error))
   }
 
   const selectSuggestion = (suggestion) => {
@@ -199,7 +202,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
         onChange={handleNameChange}
         onFocus={() => {
           setActiveField('name')
-          if (nameInput.trim()) setShowSuggestions(suggestions.length > 0)
+          if (!isOffline && nameInput.trim()) setShowSuggestions(suggestions.length > 0)
         }}
         onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
         placeholder="Location name (optional)"
@@ -218,7 +221,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
         onKeyDown={handleKeyDown}
         onFocus={() => {
           setActiveField('address')
-          if (addressInput.trim()) setShowSuggestions(suggestions.length > 0)
+          if (!isOffline && addressInput.trim()) setShowSuggestions(suggestions.length > 0)
         }}
         onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
         placeholder="Address *"
@@ -251,7 +254,7 @@ function DestinationAutocomplete({ onAddDestination, existingDestinations = [] }
 
       <AutocompleteDropdown
         suggestions={suggestions}
-        isVisible={showSuggestions}
+        isVisible={!isOffline && showSuggestions}
         onSelect={selectSuggestion}
         loading={isLoading}
         inputRef={activeField === 'name' ? nameRef : addressRef}

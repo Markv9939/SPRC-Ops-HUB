@@ -748,6 +748,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
               onAddClient={handleAddClient}
               existingClients={clients}
               transportId={transportId}
+              isOffline={isOffline}
             />
           )}
         </div>
@@ -778,6 +779,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
             <DestinationAutocomplete
               onAddDestination={handleAddDestination}
               existingDestinations={destinations}
+              isOffline={isOffline}
             />
           )}
         </div>

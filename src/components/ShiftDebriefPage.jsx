@@ -25,7 +25,13 @@ import {
   upsertSharedClientName
 } from '../services/shiftDebriefService'
 import { deleteOfflineDraft, getOfflineDraft, saveOfflineDraft } from '../services/offlineStore'
-import { getDebriefDraftId, queueShiftDebriefSubmission } from '../services/offlineSyncService'
+import {
+  getDebriefDraftId,
+  getDebriefQuickDraftId,
+  queueShiftDebriefQuickNote,
+  queueShiftDebriefSubmission,
+  syncOfflineOutbox
+} from '../services/offlineSyncService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
 import { cloneRecord, formatConflictFields, mergeRecordFields } from '../utils/collaboration'
@@ -59,6 +65,14 @@ function sortItems(items) {
   return [...(Array.isArray(items) ? items : [])].sort((a, b) => (
     String(a.createdAtIso || '').localeCompare(String(b.createdAtIso || ''))
   ))
+}
+
+function mergeUniqueItems(...groups) {
+  const byId = new Map()
+  groups.flat().forEach(item => {
+    if (item?.id) byId.set(item.id, item)
+  })
+  return sortItems(Array.from(byId.values()))
 }
 
 function editableDebriefDraft(data = {}) {
@@ -200,7 +214,7 @@ function SectionSelect({ type, value, onChange }) {
   )
 }
 
-function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = false }) {
+function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = false, isOffline = false }) {
   const [type, setType] = useState('client')
   const [clientName, setClientName] = useState('')
   const [section, setSection] = useState(CLIENT_NOTE_SECTIONS[0].id)
@@ -282,6 +296,7 @@ function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = fa
             <ClientAutocomplete
               onAddClient={(name) => setClientName(name)}
               existingClients={[]}
+              isOffline={isOffline}
             />
           )}
           <div style={styles.hintText}>Use first name and last initial when possible.</div>
@@ -1033,6 +1048,7 @@ export default function ShiftDebriefPage({
   const [dirty, setDirty] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState(null)
   const [hasLocalDraft, setHasLocalDraft] = useState(false)
+  const [pendingQuickItems, setPendingQuickItems] = useState([])
   const [manualSaving, setManualSaving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [showGuide, setShowGuide] = useState(() => !localStorage.getItem(GUIDE_KEY))
@@ -1131,6 +1147,60 @@ export default function ShiftDebriefPage({
       setDirty(false)
     })()
     return () => { cancelled = true }
+  }, [context?.id, debriefId])
+
+  useEffect(() => {
+    if (!context?.id || !submitted?.id || debriefId) return undefined
+    let cancelled = false
+    ;(async () => {
+      const legacyDraftId = getDebriefDraftId(context.id)
+      const legacyDraft = await getOfflineDraft(legacyDraftId).catch(() => null)
+      const legacyItems = Array.isArray(legacyDraft?.payload?.items) ? legacyDraft.payload.items : []
+      if (legacyItems.length === 0 || cancelled) return
+
+      const submittedItemIds = new Set((Array.isArray(submitted.items) ? submitted.items : []).map(item => item?.id))
+      const submittedExtraItemIds = new Set((Array.isArray(submitted.extraNotes) ? submitted.extraNotes : [])
+        .map(note => String(note?.id || '').replace(/^quick_/, '')))
+      const recoverableItems = legacyItems.filter(item => (
+        item?.id
+        && !submittedItemIds.has(item.id)
+        && !submittedExtraItemIds.has(item.id)
+      ))
+      if (recoverableItems.length === 0) return
+
+      const quickDraftId = getDebriefQuickDraftId(context.id)
+      const quickDraft = await getOfflineDraft(quickDraftId).catch(() => null)
+      const existingQuickItems = Array.isArray(quickDraft?.payload?.items) ? quickDraft.payload.items : []
+      const nextQuickItems = mergeUniqueItems(existingQuickItems, recoverableItems)
+      await saveOfflineDraft(quickDraftId, 'debriefQuick', { context, items: nextQuickItems })
+      for (const item of recoverableItems) {
+        await queueShiftDebriefQuickNote({ context, item, user })
+      }
+      await deleteOfflineDraft(legacyDraftId)
+      if (!isOffline) await syncOfflineOutbox()
+      if (!cancelled) {
+        const remainingDraft = await getOfflineDraft(quickDraftId).catch(() => null)
+        setPendingQuickItems(sortItems(remainingDraft?.payload?.items || []))
+      }
+    })().catch(err => console.warn('Legacy offline debrief note recovery failed:', err))
+    return () => { cancelled = true }
+  }, [context, debriefId, isOffline, submitted, user])
+
+  useEffect(() => {
+    if (!context?.id || debriefId) return undefined
+    let cancelled = false
+    const loadPendingQuickItems = async () => {
+      const localDraft = await getOfflineDraft(getDebriefQuickDraftId(context.id)).catch(() => null)
+      if (!cancelled) {
+        setPendingQuickItems(sortItems(localDraft?.payload?.items || []))
+      }
+    }
+    loadPendingQuickItems()
+    window.addEventListener('offline-outbox-changed', loadPendingQuickItems)
+    return () => {
+      cancelled = true
+      window.removeEventListener('offline-outbox-changed', loadPendingQuickItems)
+    }
   }, [context?.id, debriefId])
 
   useEffect(() => {
@@ -1239,7 +1309,8 @@ export default function ShiftDebriefPage({
       alert(`Debrief changed elsewhere: ${formatConflictFields(collaborationConflicts)}. Use latest or keep yours before submitting.`)
       return
     }
-    const validItems = items.filter(item => item.note?.trim() && (item.type !== 'client' || item.clientName?.trim()))
+    const validItems = mergeUniqueItems(items, pendingQuickItems)
+      .filter(item => item.note?.trim() && (item.type !== 'client' || item.clientName?.trim()))
     if (validItems.length === 0) {
       alert('Please add at least one complete debrief note before submitting.')
       return
@@ -1287,12 +1358,13 @@ export default function ShiftDebriefPage({
         throw new Error(CLOSED_DEBRIEF_MESSAGE)
       }
       if (isOffline) {
-        const localDraft = await getOfflineDraft(getDebriefDraftId(context.id)).catch(() => null)
-        const existingItems = Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items : items
-        const nextItems = [...existingItems, item]
-        await saveOfflineDraft(getDebriefDraftId(context.id), 'debrief', { context, items: nextItems })
-        setItems(sortItems(nextItems))
-        setHasLocalDraft(true)
+        const quickDraftId = getDebriefQuickDraftId(context.id)
+        const localDraft = await getOfflineDraft(quickDraftId).catch(() => null)
+        const existingItems = Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items : []
+        const nextItems = mergeUniqueItems(existingItems, [item])
+        await saveOfflineDraft(quickDraftId, 'debriefQuick', { context, items: nextItems })
+        await queueShiftDebriefQuickNote({ context, item, user })
+        setPendingQuickItems(nextItems)
         setLastSavedAt(new Date())
         setQuickStatus('Saved on this device. It will sync when internet returns.')
         notifySuccess('Debrief note saved on this device')
@@ -1371,6 +1443,17 @@ export default function ShiftDebriefPage({
         </div>
       )}
 
+      {pendingQuickItems.length > 0 && (
+        <div style={styles.pendingOfflinePanel}>
+          <strong>{pendingQuickItems.length} offline debrief note{pendingQuickItems.length === 1 ? '' : 's'} pending sync</strong>
+          {pendingQuickItems.map(item => (
+            <div key={item.id} style={styles.pendingOfflineItem}>
+              {item.clientName ? `${item.clientName}: ` : ''}{item.note}
+            </div>
+          ))}
+        </div>
+      )}
+
       {mode === 'quick' ? (
         <div style={styles.panel}>
           <h3 style={styles.panelTitle}>Quick Note</h3>
@@ -1380,7 +1463,7 @@ export default function ShiftDebriefPage({
               : 'Save a client note or general handoff item. If the debrief is already submitted, this saves as an extra note.'}
           </p>
           {submitted && isDebriefClosedForCorrections(submitted) ? null : (
-            <DebriefNoteForm user={user} onSave={handleQuickSave} buttonLabel="Save Debrief Note" compact />
+            <DebriefNoteForm user={user} onSave={handleQuickSave} buttonLabel="Save Debrief Note" compact isOffline={isOffline} />
           )}
           {quickStatus && <div style={styles.savedText}>{quickStatus}</div>}
         </div>
@@ -1582,6 +1665,21 @@ const styles = {
     fontSize: '13px',
     color: '#2F7D57',
     fontWeight: 700
+  },
+  pendingOfflinePanel: {
+    padding: '12px 14px',
+    borderRadius: '8px',
+    backgroundColor: 'rgba(176,122,40,0.10)',
+    border: '1px solid rgba(176,122,40,0.28)',
+    color: '#765116',
+    fontSize: '13px'
+  },
+  pendingOfflineItem: {
+    marginTop: '7px',
+    paddingTop: '7px',
+    borderTop: '1px solid rgba(176,122,40,0.22)',
+    color: 'var(--text-primary)',
+    whiteSpace: 'pre-wrap'
   },
   lockedBanner: {
     padding: '12px 14px',

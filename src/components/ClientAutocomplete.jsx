@@ -12,7 +12,7 @@ import AutocompleteDropdown from './AutocompleteDropdown'
  * - Queries Firestore clients collection (active only)
  * - Upserts new clients to Firestore with lastUsedAt tracking
  */
-function ClientAutocomplete({ onAddClient, existingClients = [] }) {
+function ClientAutocomplete({ onAddClient, existingClients = [], isOffline = false }) {
   const [inputValue, setInputValue] = useState('')
   const inputRef = useRef(null)
   const { suggestions, isVisible, search, select, hide, show } = useAutocomplete(
@@ -40,33 +40,33 @@ function ClientAutocomplete({ onAddClient, existingClients = [] }) {
       return
     }
 
-    // Persist to Firestore with lastUsedAt tracking
-    try {
-      const normalizedLabel = normalize(trimmed)
-      await setDoc(
-        doc(db, 'clients', normalizedLabel),
-        {
-          label: trimmed,
-          normalizedLabel: normalizedLabel,
-          active: true,
-          lastUsedAt: serverTimestamp(),
-          createdAt: serverTimestamp()
-        },
-        { merge: true }
-      )
-    } catch (error) {
-      console.error('Error persisting client:', error)
-    }
-
-    // Call parent handler
-    onAddClient(trimmed)
+    await onAddClient(trimmed)
     setInputValue('')
     hide()
+
+    if (isOffline) return
+
+    const normalizedLabel = normalize(trimmed)
+    setDoc(
+      doc(db, 'clients', normalizedLabel),
+      {
+        label: trimmed,
+        normalizedLabel,
+        active: true,
+        lastUsedAt: serverTimestamp(),
+        createdAt: serverTimestamp()
+      },
+      { merge: true }
+    ).catch(error => console.error('Error persisting client:', error))
   }
 
   const handleInputChange = (e) => {
     const value = e.target.value
     setInputValue(value)
+    if (isOffline) {
+      hide()
+      return
+    }
     search(value)
   }
 
@@ -83,7 +83,7 @@ function ClientAutocomplete({ onAddClient, existingClients = [] }) {
   }
 
   const handleFocus = () => {
-    if (inputValue.trim()) {
+    if (!isOffline && inputValue.trim()) {
       show()
     }
   }
@@ -113,7 +113,7 @@ function ClientAutocomplete({ onAddClient, existingClients = [] }) {
       />
       <AutocompleteDropdown
         suggestions={filteredSuggestions}
-        isVisible={isVisible && filteredSuggestions.length > 0}
+        isVisible={!isOffline && isVisible && filteredSuggestions.length > 0}
         onSelect={handleSuggestionSelect}
         inputRef={inputRef}
         renderItem={(suggestion) => (

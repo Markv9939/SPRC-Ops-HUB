@@ -300,6 +300,7 @@ export async function saveDebriefDraft(context, items, options = {}) {
 export async function addDraftItem(context, item) {
   const draft = await getCurrentDraftDebrief(context)
   const items = Array.isArray(draft?.items) ? draft.items : []
+  if (items.some(existing => existing?.id === item?.id)) return
   await saveDebriefDraft(context, [...items, item])
 }
 
@@ -374,6 +375,7 @@ export async function appendExtraDebriefNote(debriefId, extraNote) {
     throw new Error(CLOSED_DEBRIEF_MESSAGE)
   }
   const extraNotes = Array.isArray(existing.extraNotes) ? existing.extraNotes : []
+  if (extraNotes.some(note => note?.id === extraNote?.id)) return
   await updateDoc(doc(db, DEBRIEFS_COLLECTION, debriefId), {
     extraNotes: [...extraNotes, extraNote],
     updatedAt: serverTimestamp()
@@ -450,13 +452,16 @@ export async function saveQuickDebriefNote(context, item, user) {
     if (isDebriefClosedForCorrections(submitted)) {
       throw new Error(CLOSED_DEBRIEF_MESSAGE)
     }
-    await appendExtraDebriefNote(submitted.id, createExtraNote({
+    const extraNote = createExtraNote({
       note: item.type === 'client'
         ? `${item.clientName} - ${getDebriefSectionLabel(item.section)}: ${item.note}`
         : `${getDebriefSectionLabel(item.section)}: ${item.note}`,
       user,
       source: 'post_submit_quick_note'
-    }))
+    })
+    extraNote.id = `quick_${item.id}`
+    extraNote.createdAtIso = item.createdAtIso || extraNote.createdAtIso
+    await appendExtraDebriefNote(submitted.id, extraNote)
     return { mode: 'extra', debriefId: submitted.id }
   }
   await addDraftItem(context, item)

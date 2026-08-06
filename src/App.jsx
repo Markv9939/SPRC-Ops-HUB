@@ -19,9 +19,10 @@ import { syncEocTasksForUserScope } from './services/eocTaskEngine'
 import { syncFleetTasksForUserScope } from './services/fleetTaskEngine'
 import { refreshScopedSessionUser } from './services/accessGrantService'
 import { changeOwnPin } from './services/userPinService'
-import { listAllOfflineActions, saveOfflineDraft } from './services/offlineStore'
+import { getOfflineDraft, listAllOfflineActions, saveOfflineDraft } from './services/offlineStore'
 import {
   OFFLINE_ACTION_TYPES,
+  getDebriefQuickDraftId,
   getTransportDraftId,
   isLocalTransportId,
   makeLocalTransportId,
@@ -286,7 +287,7 @@ function App() {
   const managementTransportId = activeRoute.managementTransportId || null
   const managementTransportMode = activeRoute.managementTransportMode || 'list'
   const [bhtDebriefAssignment, setBhtDebriefAssignment] = useState(null)
-  const [bhtDebriefSummary, setBhtDebriefSummary] = useState({ available: false, status: 'none', itemCount: 0 })
+  const [bhtDebriefSummary, setBhtDebriefSummary] = useState({ available: false, status: 'none', itemCount: 0, pendingQuickItemCount: 0 })
   // Alert count and issue updates from shared hooks
   const { inEocScope, inComplianceScope, exactIssueLocationIds, inIssueScope } = useUserScope(user)
   const { eocAlerts, fleetAlerts, debriefAlerts, unreadCount: alertCount, issueUpdates } = useScopedAlerts({
@@ -295,7 +296,10 @@ function App() {
     inComplianceScope,
     enabled: !!user
   })
-  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
+  const [isOffline, setIsOffline] = useState(() => (
+    (typeof navigator !== 'undefined' && navigator.onLine === false)
+    || (import.meta.env.DEV && new URLSearchParams(window.location.search).has('offline-test'))
+  ))
   const [offlineOutboxSummary, setOfflineOutboxSummary] = useState({ pending: 0, syncing: 0, failed: 0, needsReview: 0 })
   const [isChangePinOpen, setIsChangePinOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
@@ -314,10 +318,11 @@ function App() {
         available: true,
         status: 'none',
         itemCount: 0,
+        pendingQuickItemCount: 0,
         debriefId: bhtDebriefContext.id,
         ...(bhtDebriefSummary.debriefId === bhtDebriefContext.id ? bhtDebriefSummary : {})
       }
-    : { available: false, status: 'none', itemCount: 0 }
+    : { available: false, status: 'none', itemCount: 0, pendingQuickItemCount: 0 }
 
   useEffect(() => {
     const restoreAlerts = installAlertDialogBridge()
@@ -654,22 +659,24 @@ function App() {
   useEffect(() => {
     if (!bhtDebriefContext?.id) {
       const resetTimer = window.setTimeout(() => {
-        setBhtDebriefSummary({ available: false, status: 'none', itemCount: 0 })
+        setBhtDebriefSummary({ available: false, status: 'none', itemCount: 0, pendingQuickItemCount: 0 })
       }, 0)
       return () => window.clearTimeout(resetTimer)
     }
 
     const initialTimer = window.setTimeout(() => {
-      setBhtDebriefSummary({ available: true, status: 'none', itemCount: 0, debriefId: bhtDebriefContext.id })
+      setBhtDebriefSummary({ available: true, status: 'none', itemCount: 0, pendingQuickItemCount: 0, debriefId: bhtDebriefContext.id })
     }, 0)
     let latestDraft = null
     let latestSubmitted = null
+    let pendingQuickItemCount = 0
     const updateSummary = () => {
       if (latestSubmitted) {
         setBhtDebriefSummary({
           available: true,
           status: 'submitted',
           itemCount: Array.isArray(latestSubmitted.items) ? latestSubmitted.items.length : 0,
+          pendingQuickItemCount,
           debriefId: latestSubmitted.id
         })
         return
@@ -678,13 +685,28 @@ function App() {
         setBhtDebriefSummary({
           available: true,
           status: 'draft',
-          itemCount: Array.isArray(latestDraft.items) ? latestDraft.items.length : 0,
+          itemCount: (Array.isArray(latestDraft.items) ? latestDraft.items.length : 0) + pendingQuickItemCount,
+          pendingQuickItemCount,
           debriefId: latestDraft.id
         })
         return
       }
-      setBhtDebriefSummary({ available: true, status: 'none', itemCount: 0, debriefId: bhtDebriefContext.id })
+      setBhtDebriefSummary({
+        available: true,
+        status: pendingQuickItemCount > 0 ? 'draft' : 'none',
+        itemCount: pendingQuickItemCount,
+        pendingQuickItemCount,
+        debriefId: bhtDebriefContext.id
+      })
     }
+
+    const refreshPendingQuickSummary = async () => {
+      const localDraft = await getOfflineDraft(getDebriefQuickDraftId(bhtDebriefContext.id)).catch(() => null)
+      pendingQuickItemCount = Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items.length : 0
+      updateSummary()
+    }
+    refreshPendingQuickSummary()
+    window.addEventListener('offline-outbox-changed', refreshPendingQuickSummary)
 
     const unsubDraft = onSnapshot(
       doc(db, DEBRIEF_DRAFTS_COLLECTION, bhtDebriefContext.id),
@@ -713,6 +735,7 @@ function App() {
 
     return () => {
       window.clearTimeout(initialTimer)
+      window.removeEventListener('offline-outbox-changed', refreshPendingQuickSummary)
       unsubDraft()
       unsubSubmitted()
     }

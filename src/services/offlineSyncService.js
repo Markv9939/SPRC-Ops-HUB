@@ -18,21 +18,24 @@ import { assertExpectedVersion, getVersionNumber } from './versioning'
 import { updateFleetRuntimeFromEocSubmission } from './fleetRuntimeService'
 import { syncFleetTasksForVehicle } from './fleetTaskEngine'
 import { createTransportCompletedAlert, fanOutIssueAlerts, writeAuditLog } from './notificationService'
-import { submitShiftDebrief } from './shiftDebriefService'
+import { saveQuickDebriefNote, submitShiftDebrief } from './shiftDebriefService'
 import { submitBhtIssueReportOnline } from './bhtIssueReportService'
 import { parseMileageValue } from '../utils/fleetStatus'
 import {
   deleteOfflineDraft,
+  getOfflineDraft,
   listOfflineActions,
   markOfflineActionFailed,
   markOfflineActionNeedsReview,
   markOfflineActionSynced,
   queueOfflineAction,
+  saveOfflineDraft,
   updateOfflineAction
 } from './offlineStore'
 
 export const OFFLINE_ACTION_TYPES = {
   EOC_SUBMISSION: 'eocSubmission',
+  SHIFT_DEBRIEF_QUICK_NOTE: 'shiftDebriefQuickNote',
   SHIFT_DEBRIEF_SUBMISSION: 'shiftDebriefSubmission',
   BHT_ISSUE_REPORT: 'bhtIssueReport',
   TRANSPORT_CREATE: 'transportCreate',
@@ -46,6 +49,10 @@ export function getEocDraftId(taskId, userId) {
 
 export function getDebriefDraftId(contextId) {
   return `debrief:${String(contextId || '').trim()}`
+}
+
+export function getDebriefQuickDraftId(contextId) {
+  return `debrief-quick:${String(contextId || '').trim()}`
 }
 
 export function getTransportDraftId(transportId) {
@@ -86,6 +93,14 @@ export function queueShiftDebriefSubmission(payload) {
   return queueOfflineAction({
     id: `debrief-submit:${payload?.context?.id || ''}`,
     type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION,
+    payload
+  })
+}
+
+export function queueShiftDebriefQuickNote(payload) {
+  return queueOfflineAction({
+    id: `debrief-quick:${payload?.context?.id || ''}:${payload?.item?.id || ''}`,
+    type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_QUICK_NOTE,
     payload
   })
 }
@@ -327,6 +342,29 @@ async function submitShiftDebriefOnline(payload) {
   await deleteOfflineDraft(getDebriefDraftId(payload?.context?.id))
 }
 
+async function syncShiftDebriefQuickNoteOnline(payload) {
+  const contextId = String(payload?.context?.id || '').trim()
+  const itemId = String(payload?.item?.id || '').trim()
+  if (!contextId || !itemId) throw new Error('Missing offline debrief note details.')
+
+  const result = await saveQuickDebriefNote(payload.context, payload.item, payload.user)
+  const draftId = getDebriefQuickDraftId(contextId)
+  const localDraft = await getOfflineDraft(draftId).catch(() => null)
+  const remainingItems = (Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items : [])
+    .filter(item => String(item?.id || '').trim() !== itemId)
+
+  if (remainingItems.length > 0) {
+    await saveOfflineDraft(draftId, 'debriefQuick', {
+      context: localDraft?.payload?.context || payload.context,
+      items: remainingItems
+    })
+  } else {
+    await deleteOfflineDraft(draftId)
+  }
+
+  return result
+}
+
 async function submitBhtIssueReportActionOnline(payload) {
   const result = await submitBhtIssueReportOnline(payload)
   return { syncedDocumentId: result?.issueId || '' }
@@ -501,6 +539,8 @@ async function processAction(action) {
     let syncResult = null
     if (action.type === OFFLINE_ACTION_TYPES.EOC_SUBMISSION) {
       syncResult = await submitEocSubmissionOnline(action.payload)
+    } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_QUICK_NOTE) {
+      syncResult = await syncShiftDebriefQuickNoteOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION) {
       syncResult = await submitShiftDebriefOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT) {
