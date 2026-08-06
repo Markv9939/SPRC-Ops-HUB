@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { db } from '../firebase'
-import { doc, getDoc, deleteDoc, serverTimestamp, setDoc, runTransaction, onSnapshot } from 'firebase/firestore'
+import { doc, getDoc, deleteDoc, serverTimestamp, runTransaction, onSnapshot } from 'firebase/firestore'
 import DCPaperworkModal from './DCCheckModal'
 import ClientAutocomplete from './ClientAutocomplete'
 import DestinationAutocomplete from './DestinationAutocomplete'
@@ -64,6 +64,8 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
   const [conflictRemoteData, setConflictRemoteData] = useState(null)
   const baseTransportRef = useRef(null)
   const dirtyFieldsRef = useRef(new Set())
+  const versionRef = useRef(1)
+  const saveQueueRef = useRef(Promise.resolve())
 
   const normalizedStatus = String(status || '').trim().toLowerCase()
   const localOnlyTransport = isLocalTransportId(transportId) || transportMeta.localOnly === true
@@ -93,7 +95,9 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     setNotes(typeof d.notes === 'string' ? d.notes : '')
     setDcPaperworkStatus(d.dcPaperworkStatus || null)
     setDcPaperworkOtherNote(d.dcPaperworkOtherNote || '')
-    setVersion(Number(d.version || 1))
+    const nextVersion = Number(d.version || 1)
+    versionRef.current = nextVersion
+    setVersion(nextVersion)
     setTransportMeta({
       site: d.site || '',
       createdByUserId: d.createdByUserId || '',
@@ -154,8 +158,6 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     const d = ts.toDate ? ts.toDate() : new Date(ts)
     return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
   }
-
-  const norm = (t) => t.toLowerCase().trim().replace(/\s+/g, ' ')
 
   const buildSnapshot = useCallback((updates = {}) => ({
     id: transportId,
@@ -262,17 +264,22 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     return () => window.clearTimeout(timer)
   }, [buildSnapshot, localOnlyTransport, notes, transportId, version, writeLocked])
 
-  const save = async (updates) => {
+  const performSave = async (updates) => {
     if (!transportId) return
     if (writeLocked) return
     if (collaborationConflicts.length > 0) {
       throw makeConflictError(collaborationConflicts)
     }
-    const snapshot = buildSnapshot({ ...updates, notes: updates?.notes ?? notes })
+    const expectedVersion = versionRef.current
+    const snapshot = buildSnapshot({
+      ...updates,
+      notes: updates?.notes ?? notes,
+      version: expectedVersion
+    })
     if (localOnlyTransport) {
       await saveOfflineDraft(getTransportDraftId(transportId), 'transport', {
         snapshot,
-        expectedVersion: version,
+        expectedVersion,
         localOnly: true
       })
       await queueTransportCreate({
@@ -294,10 +301,10 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
         ...updates,
         notes: updates?.notes ?? notes
       }
-      await saveOfflineDraft(getTransportDraftId(transportId), 'transport', { snapshot, expectedVersion: version })
+      await saveOfflineDraft(getTransportDraftId(transportId), 'transport', { snapshot, expectedVersion })
       await queueTransportUpdate({
         transportId,
-        expectedVersion: version,
+        expectedVersion,
         updates: offlineUpdates,
         snapshot,
         user
@@ -306,6 +313,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
       return
     }
     try {
+      let committedVersion = expectedVersion
       const updateFields = {
         ...updates,
         notes,
@@ -317,7 +325,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
         if (!latestSnap.exists()) throw new Error('Transport no longer exists.')
         const latest = latestSnap.data()
         const { nextVersion } = assertExpectedVersion({
-          expectedVersion: version,
+          expectedVersion,
           currentVersion: getVersionNumber(latest),
           documentId: transportId,
           recordLabel: 'Transport'
@@ -326,8 +334,10 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
           ...updateFields,
           version: nextVersion
         })
+        committedVersion = nextVersion
       })
-      setVersion(prev => Number(prev || 1) + 1)
+      versionRef.current = committedVersion
+      setVersion(committedVersion)
       setHasLocalDraft(false)
       Object.keys(updates || {}).concat('notes').forEach(field => dirtyFieldsRef.current.delete(field))
       setCollaborationNotice('')
@@ -347,6 +357,12 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     }
   }
 
+  const save = (updates) => {
+    const queuedSave = saveQueueRef.current.then(() => performSave(updates))
+    saveQueueRef.current = queuedSave.catch(() => {})
+    return queuedSave
+  }
+
   const blockIfLocked = () => {
     if (!submitLocked) return false
     if (normalizedStatus === 'closed') {
@@ -357,33 +373,12 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     return true
   }
 
-  const touchClientUsage = async (clientName) => {
-    if (isOffline) return
-    try {
-      const n = norm(clientName)
-      await setDoc(
-        doc(db, 'clients', n),
-        {
-          label: clientName,
-          normalizedLabel: n,
-          active: true,
-          lastUsedAt: serverTimestamp(),
-          createdAt: serverTimestamp()
-        },
-        { merge: true }
-      )
-    } catch (e) {
-      console.error('Error updating client usage:', e)
-    }
-  }
-
   const handleAddClient = async (clientName) => {
     if (blockIfLocked()) return
     const updated = [...clients, clientName]
     dirtyFieldsRef.current.add('clients')
     setClients(updated)
     try {
-      await touchClientUsage(clientName)
       await save({ clients: updated })
     } catch {
       // Error already handled in save()
