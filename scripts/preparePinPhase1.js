@@ -9,6 +9,7 @@ const PROJECT_ID = 'sprc-tx-l'
 const CONFIRM_PHRASE = 'PREPARE_PIN_PHASE_1'
 const TEST_USER_ID = 'tech_test_house'
 const TEST_ASSIGNMENT_ID = `asg_${TEST_USER_ID}`
+const TEST_PIN = '8064'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -64,11 +65,16 @@ async function main() {
   const policyRef = db.doc('appSettings/authPolicy')
   const userRef = db.doc(`users/${TEST_USER_ID}`)
   const assignmentRef = db.doc(`shiftAssignments/${TEST_ASSIGNMENT_ID}`)
-  const [policySnap, userSnap, assignmentSnap] = await Promise.all([
+  const pinHash = hashPin(TEST_PIN)
+  const [policySnap, userSnap, assignmentSnap, pinMatchesSnap] = await Promise.all([
     policyRef.get(),
     userRef.get(),
-    assignmentRef.get()
+    assignmentRef.get(),
+    db.collection('users').where('pinHash', '==', pinHash).where('active', '==', true).get()
   ])
+  const conflictingUsers = pinMatchesSnap.docs
+    .filter(snapshot => snapshot.id !== TEST_USER_ID)
+    .map(snapshot => ({ id: snapshot.id, name: snapshot.data()?.name || null }))
 
   const policy = policySnap.exists ? policySnap.data() || {} : {}
   console.log(JSON.stringify({
@@ -85,7 +91,8 @@ async function main() {
     proposed: {
       authScopeEnforced: false,
       testUserId: TEST_USER_ID,
-      testUserPin: '8888',
+      testUserPin: TEST_PIN,
+      conflictingUsers,
       locationId: 'test_house',
       shiftId: 'shift_1',
       assignmentId: TEST_ASSIGNMENT_ID
@@ -100,6 +107,9 @@ async function main() {
   }
   if (confirmedProject !== PROJECT_ID) {
     throw new Error(`Refusing write: --project must exactly equal ${PROJECT_ID}.`)
+  }
+  if (conflictingUsers.length > 0) {
+    throw new Error(`Refusing write: PIN ${TEST_PIN} is already assigned to another active user.`)
   }
 
   const now = admin.firestore.FieldValue.serverTimestamp()
@@ -121,7 +131,7 @@ async function main() {
     active: true,
     authorizedLocations: ['OTC', 'TEST_HOUSE'],
     issueLocationIds: ['test_house'],
-    pinHash: hashPin('8888'),
+    pinHash,
     pinVersion: 'v1_sha256',
     pinUpdatedAt: now,
     version: Number(userSnap.data()?.version || 0) + 1,
