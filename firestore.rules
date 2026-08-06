@@ -4,11 +4,10 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ============================================================================
-    // CLAIM-SCOPE STRICT AUTH MODEL (FREE-TIER V1)
+    // PIN-COMPATIBLE AUTH MODEL
     // ============================================================================
-    // Current login remains PIN-based with Firebase Auth session bootstrap.
-    // Role/location claims (`role`, `locations`) are required for scoped access.
-    // PIN storage is hash-only (`pinHash`) and plaintext PIN fallback is retired.
+    // PIN mode uses the application-selected `users/{id}` profile. Strict mapped
+    // Firebase Auth remains available behind `authScopeEnforced` for rollback.
     // ============================================================================
 
     // Helper: prevent createdAt from being changed after creation
@@ -168,6 +167,21 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function hasAuthScopeClaims() {
+      return signedIn()
+        && request.auth.token.role is string
+        && request.auth.token.locations is list;
+    }
+
+    function authScopeEnforced() {
+      return exists(/databases/$(database)/documents/appSettings/authPolicy)
+        && get(/databases/$(database)/documents/appSettings/authPolicy).data.authScopeEnforced == true;
+    }
+
+    function hasLegacyAuthSession() {
+      return !authScopeEnforced();
+    }
+
     function authEmail() {
       return signedIn() && request.auth.token.email is string
         ? request.auth.token.email.lower()
@@ -214,7 +228,7 @@ service cloud.firestore {
     }
 
     function activeAuthProfileLocations() {
-      return authProfile().authorizedLocations is list
+      return hasActiveAuthProfile() && authProfile().authorizedLocations is list
         ? authProfile().authorizedLocations
         : [];
     }
@@ -226,7 +240,8 @@ service cloud.firestore {
     }
 
     function authRoleAllowed(roles) {
-      return hasActiveAuthProfile() && authProfile().role in roles;
+      return hasLegacyAuthSession()
+        || (hasActiveAuthProfile() && authProfile().role in roles);
     }
 
     // Map house location IDs to supervisor site scopes used in auth claims.
@@ -256,7 +271,7 @@ service cloud.firestore {
         (normalizedLocation == 'OTC' && ('PHP' in authLocations() || 'RTC' in authLocations()))
         || (normalizedLocation == 'RES' && ('PHP' in authLocations()))
       );
-      return (
+      return hasLegacyAuthSession() || (
         hasActiveAuthProfile()
         && (
           authRole() == 'admin'
@@ -274,14 +289,14 @@ service cloud.firestore {
         (normalizedLocation == 'OTC' && ('PHP' in locations || 'RTC' in locations))
         || (normalizedLocation == 'RES' && ('PHP' in locations))
       );
-      return hasActiveAuthProfile()
+      return hasLegacyAuthSession() || (hasActiveAuthProfile()
         && authProfile().role in roles
         && (
           authProfile().role == 'admin'
           || locationId in locations
           || normalizedLocation in locations
           || legacyLocationAllowed
-        );
+        ));
     }
 
     function authTransportLocationAllowed(locationId) {
@@ -310,7 +325,7 @@ service cloud.firestore {
     }
 
     function authTransportWriteAllowed(data) {
-      return hasActiveAuthProfile()
+      return hasLegacyAuthSession() || (hasActiveAuthProfile()
         && data.site in ['OTC', 'RES']
         && authProfile().role in ['bht', 'tech', 'supervisor', 'admin']
         && (
@@ -320,11 +335,12 @@ service cloud.firestore {
         && (
           authProfile().role in ['supervisor', 'admin']
           || data.createdByUserId == authAppUserId()
-        );
+        ));
     }
 
     function authTransportDeleteAllowed(data) {
-      return authRoleAllowed(['admin'])
+      return hasLegacyAuthSession()
+        || authRoleAllowed(['admin'])
         || (
           authRoleAllowed(['bht', 'tech'])
           && data.site in ['OTC', 'RES']
@@ -335,7 +351,7 @@ service cloud.firestore {
     }
 
     function exactIssueLocationAllowed(locationId) {
-      return hasActiveAuthProfile()
+      return hasLegacyAuthSession() || (hasActiveAuthProfile()
         && (
           authRole() == 'admin'
           || locationId in authIssueLocations()
@@ -344,20 +360,20 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.active == true
             && locationId in get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.locationIds
           )
-        );
+        ));
     }
 
     function eocRoleAndLocationAllowed(roles, locationId) {
       let normalizedLocation = locationScopeAlias(locationId);
       let locations = activeAuthProfileLocations();
-      let issueLocations = authProfile().issueLocationIds is list
+      let issueLocations = hasActiveAuthProfile() && authProfile().issueLocationIds is list
         ? authProfile().issueLocationIds
         : [];
       let legacyLocationAllowed = (
         (normalizedLocation == 'OTC' && ('PHP' in locations || 'RTC' in locations))
         || (normalizedLocation == 'RES' && ('PHP' in locations))
       );
-      return hasActiveAuthProfile()
+      return hasLegacyAuthSession() || (hasActiveAuthProfile()
         && authProfile().role in roles
         && (
           authProfile().role == 'admin'
@@ -370,7 +386,7 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.active == true
             && locationId in get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.locationIds
           )
-        );
+        ));
     }
 
     function validUserWriteData(data) {
@@ -486,7 +502,8 @@ service cloud.firestore {
     }
 
     function templateCreateAllowed() {
-      return authRoleAllowed(['admin'])
+      return hasLegacyAuthSession()
+        || authRoleAllowed(['admin'])
         || (
           authRoleAllowed(['supervisor'])
           && request.auth != null
@@ -496,7 +513,8 @@ service cloud.firestore {
     }
 
     function templateUpdateAllowed() {
-      return authRoleAllowed(['admin'])
+      return hasLegacyAuthSession()
+        || authRoleAllowed(['admin'])
         || (
           authRoleAllowed(['supervisor'])
           && request.auth != null
@@ -579,7 +597,6 @@ service cloud.firestore {
       return validShiftDebriefBase(data)
         && data.draftByUserId is string
         && data.draftByName is string
-        && data.draftByAuthUid is string
         && data.status in ['draft', 'submitted']
         && (!('items' in data) || data.items is list)
         && (!('itemCount' in data) || data.itemCount is int);
@@ -594,12 +611,6 @@ service cloud.firestore {
         && data.extraNotes is list
         && data.confirmation is map
         && data.confirmed is bool;
-    }
-
-    function debriefDraftAuthUidAllowed(data) {
-      return request.auth != null
-        && data.draftByAuthUid is string
-        && data.draftByAuthUid == request.auth.uid;
     }
 
     match /usersByAuthUid/{uid} {
@@ -869,22 +880,19 @@ service cloud.firestore {
 
     // EOC Submission Drafts (autosave while checklist is in progress)
     match /eocSubmissionDrafts/{docId} {
-      allow get: if request.auth != null
-        && authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
-        && (
+      allow get: if (
           !exists(/databases/$(database)/documents/eocSubmissionDrafts/$(docId))
           || (
             eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId)
-            && resource.data.draftByAuthUid == request.auth.uid
+            && resource.data.draftByUserId is string
           )
         );
       allow list: if false;
 
       allow create: if request.resource.data.keys().hasAll([
-        'taskId', 'locationId', 'shiftId', 'eocType', 'draftByUserId', 'draftByAuthUid', 'templateScope'
+        'taskId', 'locationId', 'shiftId', 'eocType', 'draftByUserId', 'templateScope'
       ])
-        && request.auth != null
-        && request.resource.data.draftByAuthUid == request.auth.uid
+        && request.resource.data.draftByUserId is string
         && request.resource.data.shiftId is string
         && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
         && request.resource.data.templateScope is string
@@ -892,10 +900,7 @@ service cloud.firestore {
         && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
-      allow update: if request.auth != null
-        && resource.data.draftByAuthUid == request.auth.uid
-        && request.resource.data.draftByAuthUid == request.auth.uid
-        && request.resource.data.draftByUserId == resource.data.draftByUserId
+      allow update: if request.resource.data.draftByUserId == resource.data.draftByUserId
         && (!('shiftId' in request.resource.data)
           || (
             request.resource.data.shiftId is string
@@ -910,8 +915,7 @@ service cloud.firestore {
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
-      allow delete: if request.auth != null
-        && resource.data.draftByAuthUid == request.auth.uid
+      allow delete: if resource.data.draftByUserId is string
         && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
     }
 
@@ -920,17 +924,12 @@ service cloud.firestore {
       allow get: if authRoleAllowed(['bht', 'tech', 'supervisor', 'admin']);
       allow list: if false;
 
-      allow read: if debriefDraftAuthUidAllowed(resource.data)
-        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
+      allow read: if authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
 
       allow create: if validShiftDebriefDraftData(request.resource.data)
-        && debriefDraftAuthUidAllowed(request.resource.data)
         && authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId);
 
       allow update: if validShiftDebriefDraftData(request.resource.data)
-        && debriefDraftAuthUidAllowed(resource.data)
-        && debriefDraftAuthUidAllowed(request.resource.data)
-        && request.resource.data.draftByAuthUid == resource.data.draftByAuthUid
         && request.resource.data.draftByUserId == resource.data.draftByUserId
         && authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId)
         && createdAtUnchanged();
@@ -942,6 +941,8 @@ service cloud.firestore {
     match /shiftDebriefs/{docId} {
       allow get: if authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
         && (
+          hasLegacyAuthSession()
+          ||
           !exists(/databases/$(database)/documents/shiftDebriefs/$(docId))
           || exactIssueLocationAllowed(resource.data.locationId)
           || resource.data.submittedByUserId == authAppUserId()
@@ -953,8 +954,7 @@ service cloud.firestore {
       allow list: if authRoleAllowed(['supervisor', 'admin']);
 
       allow create: if validSubmittedShiftDebriefData(request.resource.data)
-        && request.resource.data.submittedByUserId == authAppUserId()
-        && request.resource.data.draftByAuthUid == request.auth.uid
+        && (hasLegacyAuthSession() || request.resource.data.submittedByUserId == authAppUserId())
         && (
           authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId)
           || exactIssueLocationAllowed(request.resource.data.locationId)
@@ -1033,7 +1033,7 @@ service cloud.firestore {
 
       match /activity/{activityId} {
         allow read: if exactIssueLocationAllowed(get(/databases/$(database)/documents/eocIssues/$(docId)).data.locationId);
-        allow create: if signedIn()
+        allow create: if (hasLegacyAuthSession() || signedIn())
           && request.resource.data.issueId == docId
           && exactIssueLocationAllowed(request.resource.data.locationId)
           && request.resource.data.immutable == true
@@ -1044,7 +1044,8 @@ service cloud.firestore {
 
     // Supervisor Alerts
     match /alerts/{docId} {
-      allow read: if (
+      allow read: if hasLegacyAuthSession()
+        || (
           resource.data.audience == 'bht'
           && resource.data.targetUserId == authAppUserId()
         )
@@ -1121,7 +1122,7 @@ service cloud.firestore {
     match /userHomeState/{appUserId} {
       allow get: if authAppUserId() == appUserId || authRoleAllowed(['admin']);
       allow list: if false;
-      allow create, update: if authAppUserId() == appUserId
+      allow create, update: if (hasLegacyAuthSession() || authAppUserId() == appUserId)
         && request.resource.data.keys().hasOnly([
           'reviewedDebriefIds',
           'lastReviewedDebriefId',

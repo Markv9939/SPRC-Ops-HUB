@@ -41,6 +41,12 @@ async function seed(path, data) {
   })
 }
 
+test.before(async () => {
+  await seed('appSettings/authPolicy', {
+    authScopeEnforced: true
+  })
+})
+
 function authed(uid, email) {
   return testEnv.authenticatedContext(uid, {
     email,
@@ -638,7 +644,6 @@ test('Test House BHT can read own assignment and create EOC and debrief records'
     status: 'submitted',
     draftByUserId: 'bht_test_house_workflows',
     draftByName: 'Test House Workflow BHT',
-    draftByAuthUid: 'test_house_workflows_uid',
     submittedByUserId: 'bht_test_house_workflows',
     submittedByName: 'Test House Workflow BHT',
     items: [],
@@ -701,7 +706,6 @@ test('BHT with exact issue location scope can complete EOC task transaction', as
     shiftId: 'shift_1',
     eocType: 'house',
     draftByUserId: 'bht_eoc_issue_scope_only',
-    draftByAuthUid: 'eoc_issue_scope_uid',
     templateScope: 'otc_shared',
     answers: {},
     version: 1,
@@ -926,7 +930,6 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
     status: 'submitted',
     draftByUserId: 'test_1_rules',
     draftByName: 'Test One',
-    draftByAuthUid: 'test_1_rules_uid',
     submittedByUserId: 'test_1_rules',
     submittedByName: 'Test One',
     receivingShiftId: 'shift_2',
@@ -973,7 +976,6 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
     dateKey: '2026-06-16',
     draftByUserId: 'test_1_rules',
     draftByName: 'Test One',
-    draftByAuthUid: 'test_1_rules_uid',
     status: 'submitted',
     submittedDebriefId: 'test_1_rules_2026-06-16_test_house_shift_1',
     submittedAt: new Date(),
@@ -1447,4 +1449,159 @@ test('targeted BHT alert is readable only by the target user', async () => {
 
   await assertSucceeds(getDoc(doc(authed('target_uid', 'target@scottsdaleprovidence.com'), 'alerts/target_alert')))
   await assertFails(getDoc(doc(authed('other_uid', 'other@scottsdaleprovidence.com'), 'alerts/target_alert')))
+})
+
+test('PIN compatibility mode works after Firebase UID changes without orphaning drafts', async () => {
+  await seed('appSettings/authPolicy', {
+    authScopeEnforced: false
+  })
+  await seed('users/pin_test_bht', {
+    name: 'PIN Test BHT',
+    role: 'bht',
+    active: true,
+    pinHash: 'a'.repeat(64),
+    pinVersion: 'v1_sha256',
+    site: 'OTC',
+    location: 'OTC',
+    house: 'TEST_HOUSE',
+    authorizedLocations: ['OTC', 'TEST_HOUSE'],
+    issueLocationIds: ['test_house'],
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    vanId: 'van_test',
+    vanIds: ['van_test'],
+    version: 1
+  })
+
+  const firstBrowserDb = testEnv.unauthenticatedContext().firestore()
+  const replacementBrowserDb = authed('pin_browser_uid_2', 'replacement-browser@example.com')
+
+  const loginMatches = await assertSucceeds(getDocs(query(
+    collection(firstBrowserDb, 'users'),
+    where('pinHash', '==', 'a'.repeat(64)),
+    where('active', '==', true)
+  )))
+  assert.equal(loginMatches.size, 1)
+
+  const eocDraftPath = 'eocSubmissionDrafts/pin_task_pin_test_bht'
+  await assertSucceeds(setDoc(doc(firstBrowserDb, eocDraftPath), {
+    taskId: 'pin_task',
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    eocType: 'house',
+    draftByUserId: 'pin_test_bht',
+    draftByName: 'PIN Test BHT',
+    templateScope: 'otc_shared',
+    answers: {},
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  }))
+  await assertSucceeds(getDoc(doc(replacementBrowserDb, eocDraftPath)))
+  await assertSucceeds(updateDoc(doc(replacementBrowserDb, eocDraftPath), {
+    answers: { check_1: 'pass' },
+    updatedAt: new Date(),
+    version: 2
+  }))
+  await assertSucceeds(deleteDoc(doc(replacementBrowserDb, eocDraftPath)))
+
+  const debriefId = 'pin_test_bht_2026-08-06_test_house_shift_1'
+  await assertSucceeds(setDoc(doc(firstBrowserDb, `shiftDebriefDrafts/${debriefId}`), {
+    locationId: 'test_house',
+    locationLabel: 'Test House',
+    mainLocation: 'OTC',
+    shiftId: 'shift_1',
+    shiftLabel: '1st Shift',
+    dateKey: '2026-08-06',
+    draftByUserId: 'pin_test_bht',
+    draftByName: 'PIN Test BHT',
+    status: 'draft',
+    items: [],
+    itemCount: 0,
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  }))
+  await assertSucceeds(updateDoc(doc(replacementBrowserDb, `shiftDebriefDrafts/${debriefId}`), {
+    items: [{ id: 'note_1', type: 'general', note: 'UID-independent draft' }],
+    itemCount: 1,
+    updatedAt: new Date(),
+    version: 2
+  }))
+  const submissionBatch = writeBatch(replacementBrowserDb)
+  submissionBatch.set(doc(replacementBrowserDb, `shiftDebriefs/${debriefId}`), {
+    locationId: 'test_house',
+    locationLabel: 'Test House',
+    mainLocation: 'OTC',
+    shiftId: 'shift_1',
+    shiftLabel: '1st Shift',
+    dateKey: '2026-08-06',
+    status: 'submitted',
+    draftByUserId: 'pin_test_bht',
+    draftByName: 'PIN Test BHT',
+    submittedByUserId: 'pin_test_bht',
+    submittedByName: 'PIN Test BHT',
+    receivingUserIds: ['pin_receiving_bht'],
+    items: [],
+    itemCount: 0,
+    extraNotes: [],
+    confirmation: { acknowledgments: {} },
+    confirmed: false,
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  })
+  submissionBatch.set(doc(replacementBrowserDb, 'alerts/pin_mode_bht_alert'), {
+    audience: 'bht',
+    type: 'shift_debrief_submitted',
+    debriefId,
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    targetUserId: 'pin_receiving_bht',
+    message: 'PIN Test BHT submitted a Test House debrief.',
+    read: false,
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  })
+  submissionBatch.set(doc(replacementBrowserDb, 'alerts/pin_mode_supervisor_alert'), {
+    audience: 'supervisor',
+    type: 'shift_debrief_submitted',
+    debriefId,
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    message: 'PIN Test BHT submitted a Test House debrief.',
+    read: false,
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  })
+  await assertSucceeds(submissionBatch.commit())
+
+  const receivingBrowserDb = authed('pin_receiving_browser_uid', 'receiver@example.com')
+  await assertSucceeds(getDoc(doc(receivingBrowserDb, `shiftDebriefs/${debriefId}`)))
+  await assertSucceeds(updateDoc(doc(receivingBrowserDb, `shiftDebriefs/${debriefId}`), {
+    confirmation: {
+      confirmed: true,
+      confirmedByUserId: 'pin_receiving_bht',
+      confirmedByName: 'PIN Receiving BHT',
+      confirmedAt: new Date(),
+      acknowledgments: {
+        pin_receiving_bht: {
+          confirmed: true,
+          confirmedByUserId: 'pin_receiving_bht'
+        }
+      }
+    },
+    confirmed: true,
+    updatedAt: new Date(),
+    version: 2
+  }))
+  await assertSucceeds(updateDoc(doc(receivingBrowserDb, 'alerts/pin_mode_bht_alert'), {
+    read: true,
+    readAt: new Date(),
+    readByUserId: 'pin_receiving_bht',
+    updatedAt: new Date(),
+    version: 2
+  }))
 })

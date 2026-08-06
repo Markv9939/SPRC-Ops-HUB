@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { db, auth } from './firebase'
 import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, getDocs, doc } from 'firebase/firestore'
 import { signOut } from 'firebase/auth'
-import GoogleLogin from './components/GoogleLogin'
+import PinLogin from './components/PinLogin'
 import Header from './components/Header'
 import BhtHub from './components/BhtHub'
 import LocationIssuesBoard from './components/LocationIssuesBoard'
@@ -1013,7 +1013,7 @@ function App() {
   if (user === null) {
     return (
       <>
-        <GoogleLogin onLogin={handleLogin} />
+        <PinLogin onLogin={handleLogin} />
         <DialogHost />
         <ToastHost />
       </>
@@ -1021,6 +1021,7 @@ function App() {
   }
 
   const isManagementUser = isSupervisorRole(user.role) || isAdminRole(user.role)
+  const canChangeOwnPin = isBhtRole(user.role) || isSupervisorRole(user.role) || isAdminRole(user.role)
   const commonHeaderProps = {
     userName: user.name,
     userSubtitle: bhtHeaderSubtitle,
@@ -1030,8 +1031,8 @@ function App() {
     onNavigateHome: () => navigateHome(),
     onNavigateSection: navigateDashboardTab,
     onLogout: handleLogout,
-    onChangePin: null,
-    canChangeOwnPin: false,
+    onChangePin: () => setIsChangePinOpen(true),
+    canChangeOwnPin,
     alertCount,
     isOffline,
     pendingSyncCount,

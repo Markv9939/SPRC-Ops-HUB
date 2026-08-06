@@ -143,7 +143,6 @@ export async function submitEocSubmissionOnline(payload) {
   const task = payload?.task
   const user = payload?.user
   const normalizedUserId = String(payload?.normalizedUserId || user?.id || '').trim()
-  const normalizedAuthUid = String(payload?.normalizedAuthUid || user?.authUid || '').trim()
   const eocType = payload?.eocType || task?.taskType || task?.eocType || ''
   const activeTemplate = Array.isArray(payload?.activeTemplate) ? payload.activeTemplate : []
   const answers = payload?.answers || {}
@@ -169,10 +168,8 @@ export async function submitEocSubmissionOnline(payload) {
   await runTransaction(db, async (transaction) => {
     const taskRef = doc(db, 'eocTasks', task.id)
     const taskSnap = await transaction.get(taskRef)
-    const draftRef = normalizedAuthUid
-      ? doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
-      : null
-    const draftSnap = draftRef ? await transaction.get(draftRef) : null
+    const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
+    const draftSnap = await transaction.get(draftRef)
     if (!taskSnap.exists()) throw new Error('Task no longer exists.')
 
     const latestTask = taskSnap.data()
@@ -231,11 +228,8 @@ export async function submitEocSubmissionOnline(payload) {
       updatedAt: serverTimestamp()
     })
 
-    if (draftRef && draftSnap?.exists()) {
-      const draftData = draftSnap.data()
-      if (String(draftData?.draftByAuthUid || '').trim() === normalizedAuthUid) {
-        transaction.delete(draftRef)
-      }
+    if (draftSnap.exists() && String(draftSnap.data()?.draftByUserId || '').trim() === normalizedUserId) {
+      transaction.delete(draftRef)
     }
 
     for (const issue of issueItems) {

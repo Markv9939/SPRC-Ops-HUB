@@ -1,4 +1,4 @@
-import { auth, db } from '../firebase'
+import { db } from '../firebase'
 import {
   arrayUnion,
   collection,
@@ -172,8 +172,7 @@ export function getBhtDebriefContext(user, date = new Date(), assignment = null)
     outgoingDebriefDueAt: timing?.outgoingDebriefDueAt || null,
     incomingAcknowledgmentLateAt: timing?.incomingAcknowledgmentLateAt || null,
     draftByUserId: user.id,
-    draftByName: user.name || 'BHT',
-    draftByAuthUid: user.authUid || auth.currentUser?.uid || ''
+    draftByName: user.name || 'BHT'
   }
 }
 
