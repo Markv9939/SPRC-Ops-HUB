@@ -353,12 +353,20 @@ export async function syncEocTasksForUserScope(user) {
   const todayStr = toPhoenixDateStr()
   const now = new Date()
   const timingConfig = await getShiftTimingConfig()
+  const normalizedUserId = String(user.id || '').trim()
+  const assignmentDocs = []
 
-  const assignmentsSnap = await getDocs(
-    query(collection(db, 'shiftAssignments'), where('active', '==', true))
-  )
+  if (isBhtRole(user.role)) {
+    const assignmentSnap = await getDoc(doc(db, 'shiftAssignments', `asg_${normalizedUserId}`))
+    if (assignmentSnap.exists()) assignmentDocs.push(assignmentSnap)
+  } else {
+    const assignmentsSnap = await getDocs(
+      query(collection(db, 'shiftAssignments'), where('active', '==', true))
+    )
+    assignmentDocs.push(...assignmentsSnap.docs)
+  }
 
-  const normalizedAssignments = assignmentsSnap.docs
+  const normalizedAssignments = assignmentDocs
     .map(d => normalizeAssignment({ id: d.id, ...d.data() }))
     .filter(Boolean)
     .filter(assignment => assignment.active)

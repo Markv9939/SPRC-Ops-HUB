@@ -63,14 +63,14 @@ function normalizeVanIdList(values, fallbackVanId = '') {
 
 function buildIssueLocationIds({ role, locationId, mainLocation }) {
   const normalizedRole = normalizeRole(role)
-  if (normalizedRole === 'admin') return ['lone_mountain', 'mesquite', 'res']
+  if (normalizedRole === 'admin') return ['lone_mountain', 'mesquite', 'test_house', 'res']
   if (normalizedRole === 'supervisor') {
-    if (mainLocation === 'OTC') return ['lone_mountain', 'mesquite']
+    if (mainLocation === 'OTC') return ['lone_mountain', 'mesquite', 'test_house']
     if (mainLocation === 'RES') return ['res']
     return []
   }
   const exactLocation = String(locationId || '').trim().toLowerCase()
-  return ['lone_mountain', 'mesquite', 'res'].includes(exactLocation) ? [exactLocation] : []
+  return ['lone_mountain', 'mesquite', 'test_house', 'res'].includes(exactLocation) ? [exactLocation] : []
 }
 
 function buildEmailLinkPayload({ appUserId, email, actorUser }) {
@@ -523,7 +523,7 @@ function SupervisorDashboard({
 
         normalizedHouse = normalizeHouseId(userForm.house)
         if (requiresHouseSelection(normalizedLocation) && !normalizedHouse) {
-          alert('OTC BHTs must be assigned to Mesquite House or Lone Mountain.')
+          alert('OTC BHTs must be assigned to Mesquite House, Lone Mountain, or Test House.')
           return
         }
 
@@ -1702,7 +1702,7 @@ function SupervisorDashboard({
                             <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>House / Shift / Van</div>
                             <div style={{ fontSize: '14px' }}>
                               {managedUserLocation === MAIN_LOCATION_OTC
-                                ? `${managedUserHouse === 'MESQUITE' ? 'Mesquite House' : (managedUserHouse === 'LONE_MOUNTAIN' ? 'Lone Mountain' : '--')}`
+                                ? (getHouseOptionsForMainLocation(MAIN_LOCATION_OTC).find(option => option.id === managedUserHouse)?.label || '--')
                                 : 'N/A'}
                               {' '} - {' '}
                               {(getShiftLabel(managedUser.shiftId) || '--')}

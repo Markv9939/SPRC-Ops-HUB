@@ -44,11 +44,11 @@ service cloud.firestore {
     }
 
     function validHouseId(houseId) {
-      return houseId in ['MESQUITE', 'LONE_MOUNTAIN'];
+      return houseId in ['MESQUITE', 'LONE_MOUNTAIN', 'TEST_HOUSE'];
     }
 
     function validVanId(vanId) {
-      return vanId in ['van_1', 'van_2', 'van_3', 'van_4'];
+      return vanId in ['van_1', 'van_2', 'van_3', 'van_4', 'van_test'];
     }
 
     function validShiftId(shiftId) {
@@ -82,6 +82,8 @@ service cloud.firestore {
         || locationId == 'MESQUITE'
         || locationId == 'lone_mountain'
         || locationId == 'LONE_MOUNTAIN'
+        || locationId == 'test_house'
+        || locationId == 'TEST_HOUSE'
         || locationId == 'OTC'
         || locationId == 'PHP'
         || locationId == 'RTC'
@@ -121,8 +123,8 @@ service cloud.firestore {
                 ? (
                   data.house is string
                   && validHouseId(data.house)
-                  && data.locationId in ['mesquite', 'lone_mountain']
-                  && data.vanId in ['van_1', 'van_2', 'van_4']
+                  && data.locationId in ['mesquite', 'lone_mountain', 'test_house']
+                  && data.vanId in ['van_1', 'van_2', 'van_4', 'van_test']
                 )
                 : (
                   mainLocation == 'RES'
@@ -224,7 +226,7 @@ service cloud.firestore {
     }
 
     function authRoleAllowed(roles) {
-      return hasActiveAuthProfile() && authRole() in roles;
+      return hasActiveAuthProfile() && authProfile().role in roles;
     }
 
     // Map house location IDs to supervisor site scopes used in auth claims.
@@ -234,6 +236,8 @@ service cloud.firestore {
         || locationId == 'MESQUITE'
         || locationId == 'lone_mountain'
         || locationId == 'LONE_MOUNTAIN'
+        || locationId == 'test_house'
+        || locationId == 'TEST_HOUSE'
         || locationId == 'OTC'
         || locationId == 'PHP'
         || locationId == 'RTC'
@@ -264,7 +268,20 @@ service cloud.firestore {
     }
 
     function authRoleAndLocationAllowed(roles, locationId) {
-      return authRoleAllowed(roles) && authLocationAllowed(locationId);
+      let normalizedLocation = locationScopeAlias(locationId);
+      let locations = activeAuthProfileLocations();
+      let legacyLocationAllowed = (
+        (normalizedLocation == 'OTC' && ('PHP' in locations || 'RTC' in locations))
+        || (normalizedLocation == 'RES' && ('PHP' in locations))
+      );
+      return hasActiveAuthProfile()
+        && authProfile().role in roles
+        && (
+          authProfile().role == 'admin'
+          || locationId in locations
+          || normalizedLocation in locations
+          || legacyLocationAllowed
+        );
     }
 
     function authTransportLocationAllowed(locationId) {
@@ -280,6 +297,8 @@ service cloud.firestore {
           || 'mesquite' in locations
           || 'LONE_MOUNTAIN' in locations
           || 'lone_mountain' in locations
+          || 'TEST_HOUSE' in locations
+          || 'test_house' in locations
         );
       let resScopeAllowed = normalizedLocation == 'RES'
         && 'res' in locations;
@@ -320,6 +339,32 @@ service cloud.firestore {
         && (
           authRole() == 'admin'
           || locationId in authIssueLocations()
+          || (
+            exists(/databases/$(database)/documents/issueAccess/$(authAppUserId()))
+            && get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.active == true
+            && locationId in get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.locationIds
+          )
+        );
+    }
+
+    function eocRoleAndLocationAllowed(roles, locationId) {
+      let normalizedLocation = locationScopeAlias(locationId);
+      let locations = activeAuthProfileLocations();
+      let issueLocations = authProfile().issueLocationIds is list
+        ? authProfile().issueLocationIds
+        : [];
+      let legacyLocationAllowed = (
+        (normalizedLocation == 'OTC' && ('PHP' in locations || 'RTC' in locations))
+        || (normalizedLocation == 'RES' && ('PHP' in locations))
+      );
+      return hasActiveAuthProfile()
+        && authProfile().role in roles
+        && (
+          authProfile().role == 'admin'
+          || locationId in locations
+          || normalizedLocation in locations
+          || legacyLocationAllowed
+          || locationId in issueLocations
           || (
             exists(/databases/$(database)/documents/issueAccess/$(authAppUserId()))
             && get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.active == true
@@ -517,7 +562,7 @@ service cloud.firestore {
     }
 
     function validDebriefLocationId(locationId) {
-      return locationId in ['mesquite', 'lone_mountain'];
+      return locationId in ['mesquite', 'lone_mountain', 'test_house'];
     }
 
     function validShiftDebriefBase(data) {
@@ -689,11 +734,14 @@ service cloud.firestore {
           && resource.data.bhtUserId == authAppUserId()
         );
 
-      allow list: if authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId)
-        && (
-          authRoleAllowed(['supervisor', 'admin'])
-          || resource.data.bhtUserId == authAppUserId()
-          || exactIssueLocationAllowed(resource.data.locationId)
+      allow list: if authRoleAllowed(['admin'])
+        || (
+          authRoleAllowed(['supervisor'])
+          && authLocationAllowed(resource.data.locationId)
+        )
+        || (
+          authRoleAllowed(['bht', 'tech'])
+          && resource.data.locationId in authIssueLocations()
         );
 
       allow create: if request.resource.data.keys().hasAll([
@@ -744,7 +792,7 @@ service cloud.firestore {
         && validEocTaskStatus(request.resource.data.status)
         && validIgnoredTaskPayload(request.resource.data)
         && request.resource.data.eligibleUserIds is list
-        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
       allow update: if validEocTaskStatus(request.resource.data.status)
@@ -761,7 +809,7 @@ service cloud.firestore {
           ))
         && (!('eligibleUserIds' in request.resource.data) || request.resource.data.eligibleUserIds is list)
         && (!('eligibleUserNames' in request.resource.data) || request.resource.data.eligibleUserNames is list)
-        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
@@ -800,7 +848,7 @@ service cloud.firestore {
         && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
         && request.resource.data.templateScope is string
         && validTemplateScope(request.resource.data.templateScope)
-        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
       allow update: if createdAtUnchanged()
@@ -821,10 +869,16 @@ service cloud.firestore {
 
     // EOC Submission Drafts (autosave while checklist is in progress)
     match /eocSubmissionDrafts/{docId} {
-      allow read: if true
-        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId)
-        && request.auth != null
-        && resource.data.draftByAuthUid == request.auth.uid;
+      allow get: if request.auth != null
+        && authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
+        && (
+          !exists(/databases/$(database)/documents/eocSubmissionDrafts/$(docId))
+          || (
+            eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId)
+            && resource.data.draftByAuthUid == request.auth.uid
+          )
+        );
+      allow list: if false;
 
       allow create: if request.resource.data.keys().hasAll([
         'taskId', 'locationId', 'shiftId', 'eocType', 'draftByUserId', 'draftByAuthUid', 'templateScope'
@@ -835,7 +889,7 @@ service cloud.firestore {
         && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
         && request.resource.data.templateScope is string
         && validTemplateScope(request.resource.data.templateScope)
-        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
       allow update: if request.auth != null
@@ -852,13 +906,13 @@ service cloud.firestore {
             request.resource.data.templateScope is string
             && validTemplateScope(request.resource.data.templateScope)
           ))
-        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
       allow delete: if request.auth != null
         && resource.data.draftByAuthUid == request.auth.uid
-        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
+        && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
     }
 
     // Shift Debrief Drafts (BHT-owned autosave before handoff submit)
@@ -887,14 +941,34 @@ service cloud.firestore {
     // Shift Debriefs (submitted handoff records)
     match /shiftDebriefs/{docId} {
       allow get: if authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
-        && exactIssueLocationAllowed(resource.data.locationId);
+        && (
+          !exists(/databases/$(database)/documents/shiftDebriefs/$(docId))
+          || exactIssueLocationAllowed(resource.data.locationId)
+          || resource.data.submittedByUserId == authAppUserId()
+          || (
+            resource.data.receivingUserIds is list
+            && authAppUserId() in resource.data.receivingUserIds
+          )
+        );
       allow list: if authRoleAllowed(['supervisor', 'admin']);
 
       allow create: if validSubmittedShiftDebriefData(request.resource.data)
-        && authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId);
+        && request.resource.data.submittedByUserId == authAppUserId()
+        && request.resource.data.draftByAuthUid == request.auth.uid
+        && (
+          authRoleAndLocationAllowed(['bht', 'tech'], request.resource.data.locationId)
+          || exactIssueLocationAllowed(request.resource.data.locationId)
+        );
 
       allow update: if validSubmittedShiftDebriefData(request.resource.data)
-        && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
+        && (
+          authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
+          || exactIssueLocationAllowed(request.resource.data.locationId)
+          || (
+            resource.data.receivingUserIds is list
+            && authAppUserId() in resource.data.receivingUserIds
+          )
+        )
         && request.resource.data.status == resource.data.status
         && request.resource.data.items == resource.data.items
         && request.resource.data.submittedByUserId == resource.data.submittedByUserId

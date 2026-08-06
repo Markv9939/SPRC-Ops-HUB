@@ -9,16 +9,18 @@ export const GLOBAL_SCOPE = 'GLOBAL'
 
 export const HOUSE_MESQUITE = 'MESQUITE'
 export const HOUSE_LONE_MOUNTAIN = 'LONE_MOUNTAIN'
+export const HOUSE_TEST = 'TEST_HOUSE'
 
 export const MAIN_LOCATIONS = [MAIN_LOCATION_OTC, MAIN_LOCATION_RES]
 
 export const HOUSE_OPTIONS = [
   { id: HOUSE_MESQUITE, label: 'Mesquite House', locationId: 'mesquite' },
-  { id: HOUSE_LONE_MOUNTAIN, label: 'Lone Mountain', locationId: 'lone_mountain' }
+  { id: HOUSE_LONE_MOUNTAIN, label: 'Lone Mountain', locationId: 'lone_mountain' },
+  { id: HOUSE_TEST, label: 'Test House', locationId: 'test_house' }
 ]
 
 export const VAN_IDS_BY_MAIN_LOCATION = Object.freeze({
-  [MAIN_LOCATION_OTC]: ['van_1', 'van_2', 'van_4'],
+  [MAIN_LOCATION_OTC]: ['van_1', 'van_2', 'van_4', 'van_test'],
   [MAIN_LOCATION_RES]: ['van_3']
 })
 
@@ -27,6 +29,7 @@ const MAIN_LOCATION_ALIASES = Object.freeze({
   RTC: MAIN_LOCATION_OTC,
   MESQUITE: MAIN_LOCATION_OTC,
   LONE_MOUNTAIN: MAIN_LOCATION_OTC,
+  TEST_HOUSE: MAIN_LOCATION_OTC,
   RES: MAIN_LOCATION_RES,
   OTC: MAIN_LOCATION_OTC
 })
@@ -73,6 +76,7 @@ export function normalizeTransportSite(value) {
 export function normalizeHouseId(value) {
   const normalized = normalizeToken(value)
   if (!normalized) return ''
+  if (normalized === HOUSE_TEST) return HOUSE_TEST
   if (normalized.includes('MESQUITE')) return HOUSE_MESQUITE
   if (normalized === 'LONEMOUNTAIN' || normalized.includes('LONE_MOUNTAIN')) return HOUSE_LONE_MOUNTAIN
   return ''
@@ -82,6 +86,7 @@ export function houseIdToLocationId(houseId) {
   const normalized = normalizeHouseId(houseId)
   if (normalized === HOUSE_MESQUITE) return 'mesquite'
   if (normalized === HOUSE_LONE_MOUNTAIN) return 'lone_mountain'
+  if (normalized === HOUSE_TEST) return 'test_house'
   return ''
 }
 
@@ -89,13 +94,14 @@ export function locationIdToHouseId(locationId) {
   const normalized = normalizeToken(locationId)
   if (normalized === 'MESQUITE') return HOUSE_MESQUITE
   if (normalized === 'LONE_MOUNTAIN') return HOUSE_LONE_MOUNTAIN
+  if (normalized === 'TEST_HOUSE') return HOUSE_TEST
   return ''
 }
 
 export function locationIdToMainLocation(locationId) {
   const normalized = normalizeToken(locationId)
   if (normalized === 'RES') return MAIN_LOCATION_RES
-  if (normalized === 'MESQUITE' || normalized === 'LONE_MOUNTAIN') return MAIN_LOCATION_OTC
+  if (normalized === 'MESQUITE' || normalized === 'LONE_MOUNTAIN' || normalized === 'TEST_HOUSE') return MAIN_LOCATION_OTC
   return normalizeMainLocation(normalized)
 }
 
@@ -128,7 +134,7 @@ export function normalizeScopeValue(value) {
   const normalized = normalizeToken(value)
   if (!normalized) return ''
   if (normalized === GLOBAL_SCOPE) return GLOBAL_SCOPE
-  if (normalized === HOUSE_MESQUITE || normalized === HOUSE_LONE_MOUNTAIN) return normalized
+  if (normalized === HOUSE_MESQUITE || normalized === HOUSE_LONE_MOUNTAIN || normalized === HOUSE_TEST) return normalized
   return normalizeMainLocation(normalized)
 }
 
@@ -136,7 +142,7 @@ function expandScopeValue(value) {
   const normalized = normalizeScopeValue(value)
   if (!normalized) return []
   if (normalized === GLOBAL_SCOPE) return [GLOBAL_SCOPE, MAIN_LOCATION_OTC, MAIN_LOCATION_RES]
-  if (normalized === HOUSE_MESQUITE || normalized === HOUSE_LONE_MOUNTAIN) {
+  if (normalized === HOUSE_MESQUITE || normalized === HOUSE_LONE_MOUNTAIN || normalized === HOUSE_TEST) {
     return [normalized, MAIN_LOCATION_OTC]
   }
   return [normalized]

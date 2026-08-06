@@ -42,7 +42,7 @@ function normalizeMainLocationFromLocationId(locationId) {
   const normalized = String(locationId || '').trim().toLowerCase()
   if (!normalized) return ''
   if (normalized === 'res') return 'RES'
-  if (normalized === 'mesquite' || normalized === 'lone_mountain') return 'OTC'
+  if (normalized === 'mesquite' || normalized === 'lone_mountain' || normalized === 'test_house') return 'OTC'
   return ''
 }
 

@@ -14,9 +14,10 @@ const MAIN_LOCATION_RES = 'RES'
 const GLOBAL_SCOPE = 'GLOBAL'
 const HOUSE_MESQUITE = 'MESQUITE'
 const HOUSE_LONE_MOUNTAIN = 'LONE_MOUNTAIN'
+const HOUSE_TEST = 'TEST_HOUSE'
 
 const VAN_IDS_BY_MAIN_LOCATION = Object.freeze({
-  [MAIN_LOCATION_OTC]: ['van_1', 'van_2', 'van_4'],
+  [MAIN_LOCATION_OTC]: ['van_1', 'van_2', 'van_4', 'van_test'],
   [MAIN_LOCATION_RES]: ['van_3']
 })
 
@@ -61,7 +62,7 @@ function normalizeRole(value) {
 function normalizeMainLocation(value) {
   const normalized = toToken(value)
   if (!normalized) return ''
-  if (normalized === 'OTC' || normalized === 'PHP' || normalized === 'RTC' || normalized === 'MESQUITE' || normalized === 'LONE_MOUNTAIN') {
+  if (normalized === 'OTC' || normalized === 'PHP' || normalized === 'RTC' || normalized === 'MESQUITE' || normalized === 'LONE_MOUNTAIN' || normalized === 'TEST_HOUSE') {
     return MAIN_LOCATION_OTC
   }
   if (normalized === 'RES') return MAIN_LOCATION_RES
@@ -72,6 +73,7 @@ function normalizeMainLocation(value) {
 function normalizeHouseId(value) {
   const normalized = toToken(value)
   if (!normalized) return ''
+  if (normalized === HOUSE_TEST) return HOUSE_TEST
   if (normalized.includes('MESQUITE')) return HOUSE_MESQUITE
   if (normalized === 'LONEMOUNTAIN' || normalized.includes('LONE_MOUNTAIN') || normalized === 'RTC') return HOUSE_LONE_MOUNTAIN
   return ''
@@ -81,6 +83,7 @@ function houseToLocationId(houseId) {
   const normalizedHouse = normalizeHouseId(houseId)
   if (normalizedHouse === HOUSE_MESQUITE) return 'mesquite'
   if (normalizedHouse === HOUSE_LONE_MOUNTAIN) return 'lone_mountain'
+  if (normalizedHouse === HOUSE_TEST) return 'test_house'
   return ''
 }
 

@@ -18,7 +18,7 @@ function normalizeRole(role) {
 function normalizeLocation(value) {
   const normalized = String(value || '').trim().toUpperCase()
   if (!normalized) return ''
-  if (normalized === 'OTC' || normalized === 'PHP' || normalized === 'RTC' || normalized === 'MESQUITE' || normalized === 'LONE_MOUNTAIN') {
+  if (normalized === 'OTC' || normalized === 'PHP' || normalized === 'RTC' || normalized === 'MESQUITE' || normalized === 'LONE_MOUNTAIN' || normalized === 'TEST_HOUSE') {
     return 'OTC'
   }
   if (normalized === 'RES') return 'RES'

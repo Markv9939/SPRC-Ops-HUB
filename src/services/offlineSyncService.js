@@ -169,6 +169,10 @@ export async function submitEocSubmissionOnline(payload) {
   await runTransaction(db, async (transaction) => {
     const taskRef = doc(db, 'eocTasks', task.id)
     const taskSnap = await transaction.get(taskRef)
+    const draftRef = normalizedAuthUid
+      ? doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
+      : null
+    const draftSnap = draftRef ? await transaction.get(draftRef) : null
     if (!taskSnap.exists()) throw new Error('Task no longer exists.')
 
     const latestTask = taskSnap.data()
@@ -227,14 +231,10 @@ export async function submitEocSubmissionOnline(payload) {
       updatedAt: serverTimestamp()
     })
 
-    if (normalizedAuthUid) {
-      const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
-      const draftSnap = await transaction.get(draftRef)
-      if (draftSnap.exists()) {
-        const draftData = draftSnap.data()
-        if (String(draftData?.draftByAuthUid || '').trim() === normalizedAuthUid) {
-          transaction.delete(draftRef)
-        }
+    if (draftRef && draftSnap?.exists()) {
+      const draftData = draftSnap.data()
+      if (String(draftData?.draftByAuthUid || '').trim() === normalizedAuthUid) {
+        transaction.delete(draftRef)
       }
     }
 
@@ -361,6 +361,7 @@ function normalizeTransportCreateData(payload) {
 
   const data = {
     site: snapshot.site || user.site || user.location || '',
+    locationId: snapshot.locationId || user.locationId || '',
     createdByUserId: snapshot.createdByUserId || user.id || '',
     createdByName: snapshot.createdByName || user.name || '',
     status,
@@ -414,7 +415,7 @@ async function applyTransportCreateOnline(payload) {
   if (data.status === 'closed' || data.status === 'returned') {
     try {
       await createTransportCompletedAlert({
-        transport: { ...data, id: docRef.id, site: data.site },
+        transport: { ...data, id: docRef.id, site: data.site, locationId: data.locationId },
         userName: payload?.user?.name || data.createdByName
       })
       await writeAuditLog({
@@ -474,7 +475,11 @@ async function applyTransportCloseOnline(payload) {
 
   try {
     await createTransportCompletedAlert({
-      transport: { ...(payload.closedTransport || {}), site: payload.user?.site || payload.user?.location || '' },
+      transport: {
+        ...(payload.closedTransport || {}),
+        site: payload.closedTransport?.site || payload.user?.site || payload.user?.location || '',
+        locationId: payload.closedTransport?.locationId || payload.user?.locationId || ''
+      },
       userName: payload.user?.name
     })
     await writeAuditLog({

@@ -3,6 +3,7 @@
 export const LOCATIONS = [
   { id: 'mesquite', label: 'Mesquite House' },
   { id: 'lone_mountain', label: 'Lone Mountain' },
+  { id: 'test_house', label: 'Test House' },
   { id: 'res', label: 'RES' }
 ]
 
@@ -10,7 +11,8 @@ export const VANS = [
   { id: 'van_1', label: 'Van 1' },
   { id: 'van_2', label: 'Van 2' },
   { id: 'van_3', label: 'Van 3' },
-  { id: 'van_4', label: 'Van 4' }
+  { id: 'van_4', label: 'Van 4' },
+  { id: 'van_test', label: 'Test Van' }
 ]
 
 export const TEMPLATE_SCOPE_OTC_SHARED = 'otc_shared'
@@ -111,7 +113,8 @@ export function getTemplateScopeForShift(shiftId) {
 export const VAN_BY_LOCATION = {
   lone_mountain: 'van_1',
   res: 'van_3',
-  mesquite: 'van_2'
+  mesquite: 'van_2',
+  test_house: 'van_test'
 }
 
 export const EOC_VAN_TEMPLATE = [

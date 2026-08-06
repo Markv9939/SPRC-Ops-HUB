@@ -29,7 +29,7 @@ import {
 
 const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
 const COMPLIANCE_SITES = new Set(MAIN_LOCATIONS)
-const EXACT_ISSUE_LOCATIONS = new Set(['lone_mountain', 'mesquite', 'res'])
+const EXACT_ISSUE_LOCATIONS = new Set(['lone_mountain', 'mesquite', 'test_house', 'res'])
 
 function locationScopeAlias(locationId) {
   const normalizedMainLocation = locationIdToMainLocation(locationId)

@@ -513,11 +513,12 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           return
         }
         const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
+        const existingDraft = await getDoc(draftRef)
         await setDoc(draftRef, {
           ...payload,
           version: 1,
           lastTouchedAt: serverTimestamp(),
-          createdAt: serverTimestamp(),
+          ...(existingDraft.exists() ? {} : { createdAt: serverTimestamp() }),
           updatedAt: serverTimestamp()
         }, { merge: true })
         await deleteOfflineDraft(getEocDraftId(task.id, normalizedUserId))

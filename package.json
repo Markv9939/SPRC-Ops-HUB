@@ -15,6 +15,7 @@
     "reset:uat": "node scripts/seedUsers.js --confirm",
     "claims:provision": "node scripts/provisionAuthClaims.js",
     "claims:verify": "node scripts/verifyAuthClaims.js",
+    "simulate:debrief-timing": "node scripts/simulateShiftDebriefTiming.js",
     "migrate:org-model": "node scripts/migrateOrgModel.js",
     "migrate:derived-assignments": "node scripts/migrateDerivedAssignments.js",
     "migrate:res-shift-model": "node scripts/migrateResShiftModel.js",

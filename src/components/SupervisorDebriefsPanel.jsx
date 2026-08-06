@@ -33,6 +33,7 @@ function formatDateTime(value) {
 function locationLabel(locationId) {
   if (locationId === 'mesquite') return 'Mesquite House'
   if (locationId === 'lone_mountain') return 'Lone Mountain'
+  if (locationId === 'test_house') return 'Test House'
   return locationId || '--'
 }
 
@@ -210,6 +211,7 @@ export default function SupervisorDebriefsPanel({ inEocScope, focusedDebriefId =
               <option value="all">All Houses</option>
               <option value="mesquite">Mesquite House</option>
               <option value="lone_mountain">Lone Mountain</option>
+              <option value="test_house">Test House</option>
             </select>
           </label>
           <label style={styles.filterLabel}>

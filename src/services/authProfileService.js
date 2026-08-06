@@ -2,8 +2,9 @@ import { auth, db } from '../firebase'
 import {
   GoogleAuthProvider,
   browserSessionPersistence,
+  getRedirectResult,
   setPersistence,
-  signInWithPopup,
+  signInWithRedirect,
   signOut
 } from 'firebase/auth'
 import {
@@ -173,13 +174,13 @@ async function linkApprovedEmail(authUser, normalizedEmail) {
   })
 }
 
-export async function signInWithApprovedGoogle() {
-  await setPersistence(auth, browserSessionPersistence)
+function createGoogleProvider() {
   const provider = new GoogleAuthProvider()
   provider.setCustomParameters({ prompt: 'select_account' })
+  return provider
+}
 
-  const credential = await signInWithPopup(auth, provider)
-  const authUser = credential.user
+async function finishApprovedGoogleSignIn(authUser) {
   const normalizedEmail = normalizeEmail(authUser?.email)
 
   if (!authUser?.uid || !normalizedEmail) {
@@ -196,4 +197,16 @@ export async function signInWithApprovedGoogle() {
 
   const userId = await linkApprovedEmail(authUser, normalizedEmail)
   return buildSessionFromUserId(userId, authUser, normalizedEmail)
+}
+
+export async function completeApprovedGoogleRedirect() {
+  await setPersistence(auth, browserSessionPersistence)
+  const credential = await getRedirectResult(auth)
+  if (!credential?.user) return null
+  return finishApprovedGoogleSignIn(credential.user)
+}
+
+export async function signInWithApprovedGoogle() {
+  await setPersistence(auth, browserSessionPersistence)
+  await signInWithRedirect(auth, createGoogleProvider())
 }

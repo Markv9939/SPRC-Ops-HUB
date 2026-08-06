@@ -504,6 +504,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     const closedTransport = {
       id: transportId,
       site: transportMeta.site || user?.site || user?.location || '',
+      locationId: user?.locationId || '',
       createdByUserId: transportMeta.createdByUserId || user?.id || '',
       createdByName: transportMeta.createdByName || user?.name || '',
       status: 'closed',
@@ -580,7 +581,11 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
       onTransportClosed?.(closedTransport)
       try {
         await createTransportCompletedAlert({
-          transport: { ...closedTransport, site: user?.site || user?.location || '' },
+          transport: {
+            ...closedTransport,
+            site: closedTransport.site || user?.site || user?.location || '',
+            locationId: closedTransport.locationId || user?.locationId || ''
+          },
           userName: user?.name
         })
         await writeAuditLog({

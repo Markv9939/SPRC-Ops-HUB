@@ -17,7 +17,6 @@ import ToastHost from './components/ToastHost'
 import DialogHost from './components/DialogHost'
 import { syncEocTasksForUserScope } from './services/eocTaskEngine'
 import { syncFleetTasksForUserScope } from './services/fleetTaskEngine'
-import { syncDerivedAssignmentForUser } from './services/assignmentService'
 import { refreshScopedSessionUser } from './services/accessGrantService'
 import { changeOwnPin } from './services/userPinService'
 import { listAllOfflineActions, saveOfflineDraft } from './services/offlineStore'
@@ -623,21 +622,28 @@ function App() {
     )
 
     let cancelled = false
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const transportData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }))
-      ;(async () => {
-        const localTransports = await loadPendingLocalTransports()
-        if (!cancelled) {
-          setTransports(mergeTransportLists(transportData, localTransports))
-        }
-      })().catch(err => {
-        console.warn('Pending offline transports unavailable:', err)
-        if (!cancelled) setTransports(transportData)
-      })
-    })
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const transportData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }))
+        ;(async () => {
+          const localTransports = await loadPendingLocalTransports()
+          if (!cancelled) {
+            setTransports(mergeTransportLists(transportData, localTransports))
+          }
+        })().catch(err => {
+          console.warn('Pending offline transports unavailable:', err)
+          if (!cancelled) setTransports(transportData)
+        })
+      },
+      (err) => {
+        console.error('BHT transport listener failed:', err)
+        if (!cancelled) setTransports([])
+      }
+    )
 
     return () => {
       cancelled = true
@@ -680,14 +686,30 @@ function App() {
       setBhtDebriefSummary({ available: true, status: 'none', itemCount: 0, debriefId: bhtDebriefContext.id })
     }
 
-    const unsubDraft = onSnapshot(doc(db, DEBRIEF_DRAFTS_COLLECTION, bhtDebriefContext.id), (snap) => {
-      latestDraft = snap.exists() ? { id: snap.id, ...snap.data() } : null
-      updateSummary()
-    })
-    const unsubSubmitted = onSnapshot(doc(db, DEBRIEFS_COLLECTION, bhtDebriefContext.id), (snap) => {
-      latestSubmitted = snap.exists() ? { id: snap.id, ...snap.data() } : null
-      updateSummary()
-    })
+    const unsubDraft = onSnapshot(
+      doc(db, DEBRIEF_DRAFTS_COLLECTION, bhtDebriefContext.id),
+      (snap) => {
+        latestDraft = snap.exists() ? { id: snap.id, ...snap.data() } : null
+        updateSummary()
+      },
+      (err) => {
+        console.error('BHT debrief draft summary listener failed:', err)
+        latestDraft = null
+        updateSummary()
+      }
+    )
+    const unsubSubmitted = onSnapshot(
+      doc(db, DEBRIEFS_COLLECTION, bhtDebriefContext.id),
+      (snap) => {
+        latestSubmitted = snap.exists() ? { id: snap.id, ...snap.data() } : null
+        updateSummary()
+      },
+      (err) => {
+        console.error('BHT submitted debrief summary listener failed:', err)
+        latestSubmitted = null
+        updateSummary()
+      }
+    )
 
     return () => {
       window.clearTimeout(initialTimer)
@@ -699,24 +721,11 @@ function App() {
   // Sync EOC task generation + overdue status on session start and while online.
   useEffect(() => {
     if (!user || isOffline) return
+    if (isBhtRole(user.role)) return
 
     let cancelled = false
     const runEocSync = async () => {
       try {
-        if (isBhtRole(user.role)) {
-          await syncDerivedAssignmentForUser(user.id, {
-            name: user.name,
-            role: user.role,
-            locationId: user.locationId,
-            location: user.location || user.site || '',
-            site: user.site || user.location || '',
-            house: user.house || '',
-            shiftId: user.shiftId,
-            vanId: user.vanId,
-            vanIds: Array.isArray(user.vanIds) ? user.vanIds : [],
-            active: user.active !== false
-          })
-        }
         const result = await syncEocTasksForUserScope(user)
         if (!cancelled && (result.created > 0 || result.updated > 0)) {
           console.info('EOC task engine sync complete:', result)
@@ -834,6 +843,7 @@ function App() {
         const newTransport = {
           id: localTransportId,
           site: transportSite,
+          locationId: user.locationId || '',
           createdByUserId: user.id,
           createdByName: user.name,
           status: 'open',
@@ -885,6 +895,7 @@ function App() {
 
       const newTransport = {
         site: transportSite,
+        locationId: user.locationId || '',
         createdByUserId: user.id,
         createdByName: user.name,
         status: 'open',
@@ -1100,6 +1111,7 @@ function App() {
         debriefId={currentDebriefId}
         isOffline={isOffline}
         onBack={handleDebriefBack}
+        onQuickNoteSaved={navigateHome}
       />,
       {
         title: currentDebriefMode === 'quick' ? 'Add Debrief Note' : 'Shift Debrief',

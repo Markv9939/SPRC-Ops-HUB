@@ -187,6 +187,21 @@ async function seedUsers() {
       authorizedLocations: ['OTC', 'LONE_MOUNTAIN']
     },
     {
+      id: 'tech_test_house',
+      name: 'BHT Test House',
+      pin: '8888',
+      role: 'bht',
+      site: 'OTC',
+      location: 'OTC',
+      house: 'TEST_HOUSE',
+      locationId: 'test_house',
+      shiftId: 'shift_1',
+      vanId: 'van_test',
+      active: true,
+      authorizedLocations: ['OTC', 'TEST_HOUSE'],
+      issueLocationIds: ['test_house']
+    },
+    {
       id: 'tech_unassigned',
       name: 'BHT RES Day',
       pin: '6666',
@@ -263,6 +278,16 @@ async function seedAssignments() {
       locationId: 'lone_mountain',
       shiftId: 'shift_2',
       vanIds: ['van_4'],
+      source: 'user_profile',
+      active: true
+    },
+    {
+      id: 'asg_tech_test_house',
+      bhtUserId: 'tech_test_house',
+      bhtUserName: 'BHT Test House',
+      locationId: 'test_house',
+      shiftId: 'shift_1',
+      vanIds: ['van_test'],
       source: 'user_profile',
       active: true
     },
@@ -423,6 +448,31 @@ async function seedEocTasks() {
       assigneeUserName: 'BHT Lone Mountain',
       dueDate: yesterday,
       status: 'overdue',
+      active: true
+    },
+    {
+      taskType: 'house',
+      locationId: 'test_house',
+      shiftId: 'shift_1',
+      eligibleUserIds: ['tech_test_house'],
+      eligibleUserNames: ['BHT Test House'],
+      assigneeUserId: 'tech_test_house',
+      assigneeUserName: 'BHT Test House',
+      dueDate: today,
+      status: 'pending',
+      active: true
+    },
+    {
+      taskType: 'van',
+      locationId: 'test_house',
+      shiftId: 'shift_1',
+      vanId: 'van_test',
+      eligibleUserIds: ['tech_test_house'],
+      eligibleUserNames: ['BHT Test House'],
+      assigneeUserId: 'tech_test_house',
+      assigneeUserName: 'BHT Test House',
+      dueDate: today,
+      status: 'pending',
       active: true
     },
     {
@@ -645,6 +695,7 @@ async function main() {
   console.log('- BHT Lone Mountain (multi-van): PIN 5555')
   console.log('- BHT RES Day: PIN 6666')
   console.log('- BHT RES Night: PIN 7777')
+  console.log('- BHT Test House: PIN 8888')
 
   process.exit(0)
 }

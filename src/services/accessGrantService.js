@@ -65,6 +65,7 @@ function normalizeExactIssueLocation(value) {
   const normalized = String(value || '').trim().toLowerCase()
   if (normalized === 'lone_mountain') return 'lone_mountain'
   if (normalized === 'mesquite') return 'mesquite'
+  if (normalized === 'test_house') return 'test_house'
   if (normalized === 'res') return 'res'
   return ''
 }

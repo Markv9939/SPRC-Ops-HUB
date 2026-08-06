@@ -1022,7 +1022,8 @@ export default function ShiftDebriefPage({
   mode = 'full',
   debriefId = null,
   isOffline = false,
-  onBack
+  onBack,
+  onQuickNoteSaved
 }) {
   const context = useMemo(() => getBhtDebriefContext(user, new Date(), assignment), [assignment, user])
   const targetDebriefId = debriefId || context?.id || ''
@@ -1060,7 +1061,11 @@ export default function ShiftDebriefPage({
     if (!targetDebriefId) return undefined
     const unsubSubmitted = onSnapshot(
       doc(db, DEBRIEFS_COLLECTION, targetDebriefId),
-      (snap) => setSubmitted(snap.exists() ? { id: snap.id, ...snap.data() } : null)
+      (snap) => setSubmitted(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+      (err) => {
+        console.error('Shift debrief submitted listener failed:', err)
+        setSubmitted(null)
+      }
     )
     return () => unsubSubmitted()
   }, [targetDebriefId])
@@ -1104,6 +1109,11 @@ export default function ShiftDebriefPage({
           baseDraftRef.current = cloneRecord(remoteEditable)
           setCollaborationNotice('Debrief updated elsewhere. Safe changes were merged without replacing your typing.')
         }
+      },
+      (err) => {
+        console.error('Shift debrief draft listener failed:', err)
+        setDraft(null)
+        setCollaborationNotice('Debrief live updates are unavailable. You can keep typing, but save may need to be retried.')
       }
     )
     return () => unsubDraft()
@@ -1158,7 +1168,7 @@ export default function ShiftDebriefPage({
         <div style={styles.panel}>
           <h3 style={styles.panelTitle}>Not available for this assignment</h3>
           <p style={styles.bodyText}>
-            Shift Debrief V1 is only for Mesquite House and Lone Mountain PHP/OTC assignments.
+            Shift Debrief V1 is only for Mesquite House, Lone Mountain, and Test House PHP/OTC assignments.
           </p>
         </div>
       </DebriefShell>
@@ -1257,6 +1267,14 @@ export default function ShiftDebriefPage({
         notifySuccess('Shift debrief submitted')
       }
       setDirty(false)
+    } catch (err) {
+      console.error('Shift debrief submit failed:', err)
+      alert(formatVersionConflictMessage(
+        err,
+        err?.code === 'permission-denied'
+          ? 'Debrief submit was blocked by app permissions. Please tell a supervisor so this can be checked.'
+          : err?.message || 'Failed to submit shift debrief.'
+      ))
     } finally {
       setSubmitting(false)
     }
@@ -1264,28 +1282,41 @@ export default function ShiftDebriefPage({
 
   const handleQuickSave = async (item) => {
     if (!context) return
-    if (submitted && isDebriefClosedForCorrections(submitted)) {
-      setQuickStatus(CLOSED_DEBRIEF_MESSAGE)
-      alert(CLOSED_DEBRIEF_MESSAGE)
-      return
+    try {
+      if (submitted && isDebriefClosedForCorrections(submitted)) {
+        throw new Error(CLOSED_DEBRIEF_MESSAGE)
+      }
+      if (isOffline) {
+        const localDraft = await getOfflineDraft(getDebriefDraftId(context.id)).catch(() => null)
+        const existingItems = Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items : items
+        const nextItems = [...existingItems, item]
+        await saveOfflineDraft(getDebriefDraftId(context.id), 'debrief', { context, items: nextItems })
+        setItems(sortItems(nextItems))
+        setHasLocalDraft(true)
+        setLastSavedAt(new Date())
+        setQuickStatus('Saved on this device. It will sync when internet returns.')
+        notifySuccess('Debrief note saved on this device')
+        onQuickNoteSaved?.()
+        return
+      }
+      const result = await saveQuickDebriefNote(context, item, user)
+      setQuickStatus(result.mode === 'extra'
+        ? 'Saved as an extra note because today\'s debrief is already submitted.'
+        : 'Saved to today\'s draft debrief.')
+      notifySuccess(result.mode === 'extra' ? 'Extra note added' : 'Debrief note saved')
+      onQuickNoteSaved?.()
+    } catch (err) {
+      console.error('Quick debrief note save failed:', err)
+      const message = formatVersionConflictMessage(
+        err,
+        err?.code === 'permission-denied'
+          ? 'Debrief note was blocked by app permissions. Please tell a supervisor so this can be checked.'
+          : err?.message || 'Failed to save debrief note.'
+      )
+      setQuickStatus(message)
+      alert(message)
+      throw err
     }
-    if (isOffline) {
-      const localDraft = await getOfflineDraft(getDebriefDraftId(context.id)).catch(() => null)
-      const existingItems = Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items : items
-      const nextItems = [...existingItems, item]
-      await saveOfflineDraft(getDebriefDraftId(context.id), 'debrief', { context, items: nextItems })
-      setItems(sortItems(nextItems))
-      setHasLocalDraft(true)
-      setLastSavedAt(new Date())
-      setQuickStatus('Saved on this device. It will sync when internet returns.')
-      notifySuccess('Debrief note saved on this device')
-      return
-    }
-    const result = await saveQuickDebriefNote(context, item, user)
-    setQuickStatus(result.mode === 'extra'
-      ? 'Saved as an extra note because today\'s debrief is already submitted.'
-      : 'Saved to today\'s draft debrief.')
-    notifySuccess(result.mode === 'extra' ? 'Extra note added' : 'Debrief note saved')
   }
 
   const updateDraftItems = (updater) => {
