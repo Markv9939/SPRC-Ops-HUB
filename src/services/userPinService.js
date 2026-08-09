@@ -3,10 +3,7 @@ import { db } from '../firebase'
 import { hashPin } from '../utils/pinHash'
 import { normalizeRole } from '../utils/orgModel'
 import { findDuplicatePinUser } from './pinConflictService'
-
-function isFourDigitPin(value) {
-  return /^\d{4}$/.test(String(value || '').trim())
-}
+import { PIN_LENGTH, PIN_VERSION, isObviousPin, isValidPin } from '../utils/pinPolicy'
 
 function roleCanSelfRotate(role) {
   const normalizedRole = normalizeRole(role)
@@ -23,11 +20,12 @@ export async function changeOwnPin({ sessionUser, currentPin, newPin, confirmPin
 
   if (!userId) throw toError('Missing user session.')
   if (!roleCanSelfRotate(sessionUser?.role)) throw toError('You do not have permission to change PIN here.')
-  if (!isFourDigitPin(currentPin) || !isFourDigitPin(newPin) || !isFourDigitPin(confirmPin)) {
-    throw toError('PIN must be exactly 4 digits.')
+  if (!isValidPin(currentPin) || !isValidPin(newPin) || !isValidPin(confirmPin)) {
+    throw toError(`PIN must be exactly ${PIN_LENGTH} digits.`)
   }
   if (String(newPin) !== String(confirmPin)) throw toError('New PIN and confirm PIN must match.')
   if (String(currentPin) === String(newPin)) throw toError('New PIN must be different from current PIN.')
+  if (isObviousPin(newPin)) throw toError('Choose a less obvious PIN. Repeated or sequential digits are not allowed.')
 
   const userRef = doc(db, 'users', userId)
   const userSnap = await getDoc(userRef)
@@ -48,7 +46,7 @@ export async function changeOwnPin({ sessionUser, currentPin, newPin, confirmPin
 
   await updateDoc(userRef, {
     pinHash: newPinHash,
-    pinVersion: 'v1_sha256',
+    pinVersion: PIN_VERSION,
     pinUpdatedAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   })

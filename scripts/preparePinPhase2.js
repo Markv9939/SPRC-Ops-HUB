@@ -1,22 +1,24 @@
 /* global process */
-import { createHash } from 'crypto'
+import { createHash, randomInt } from 'crypto'
 import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import admin from 'firebase-admin'
 
 const PROJECT_ID = 'sprc-tx-l'
-const CONFIRM_PHRASE = 'PREPARE_PIN_PHASE_1'
+const CONFIRM_PHRASE = 'PREPARE_PIN_PHASE_2'
+const PIN_VERSION = 'v2_sha256_6digit'
+const GENERATED_PINS = new Set()
 const TEST_USER_ID = 'tech_test_house'
 const TEST_ASSIGNMENT_ID = `asg_${TEST_USER_ID}`
-const TEST_PIN = '8064'
+const TEST_PIN = generateUniquePin()
 const RECEIVING_USER_ID = 'tech_test_house_shift_2'
 const RECEIVING_ASSIGNMENT_ID = `asg_${RECEIVING_USER_ID}`
-const RECEIVING_PIN = '8065'
+const RECEIVING_PIN = generateUniquePin()
 const SUPERVISOR_USER_ID = 'test_supervisor'
-const SUPERVISOR_PIN = '8066'
+const SUPERVISOR_PIN = generateUniquePin()
 const ADMIN_USER_ID = 'phase1_test_admin'
-const ADMIN_PIN = '8067'
+const ADMIN_PIN = generateUniquePin()
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -46,8 +48,21 @@ function initAdmin() {
 
 function hashPin(pin) {
   return createHash('sha256')
-    .update(`sprc-pin-v1:${String(pin).trim()}`)
+    .update(`sprc-pin-v2-6digit:${String(pin).trim()}`)
     .digest('hex')
+}
+
+function isObviousPin(pin) {
+  return /^(\d)\1+$/.test(pin) || ['012345', '123456', '654321', '987654'].includes(pin)
+}
+
+function generateUniquePin() {
+  while (true) {
+    const pin = String(randomInt(100000, 1000000))
+    if (GENERATED_PINS.has(pin) || isObviousPin(pin)) continue
+    GENERATED_PINS.add(pin)
+    return pin
+  }
 }
 
 function summarize(snapshot) {
@@ -198,7 +213,7 @@ async function main() {
     authorizedLocations: ['OTC', 'TEST_HOUSE'],
     issueLocationIds: ['test_house'],
     pinHash,
-    pinVersion: 'v1_sha256',
+    pinVersion: PIN_VERSION,
     pinUpdatedAt: now,
     version: Number(userSnap.data()?.version || 0) + 1,
     createdAt: userSnap.data()?.createdAt || now,
@@ -231,7 +246,7 @@ async function main() {
     authorizedLocations: ['OTC', 'TEST_HOUSE'],
     issueLocationIds: ['test_house'],
     pinHash: receivingPinHash,
-    pinVersion: 'v1_sha256',
+    pinVersion: PIN_VERSION,
     pinUpdatedAt: now,
     version: Number(receivingUserSnap.data()?.version || 0) + 1,
     createdAt: receivingUserSnap.data()?.createdAt || now,
@@ -263,7 +278,7 @@ async function main() {
     authorizedLocations: ['OTC'],
     issueLocationIds: ['lone_mountain', 'mesquite', 'test_house'],
     pinHash: supervisorPinHash,
-    pinVersion: 'v1_sha256',
+    pinVersion: PIN_VERSION,
     pinUpdatedAt: now,
     version: Number(supervisorUserSnap.data()?.version || 0) + 1,
     createdAt: supervisorUserSnap.data()?.createdAt || now,
@@ -282,7 +297,7 @@ async function main() {
     authorizedLocations: [],
     issueLocationIds: ['lone_mountain', 'mesquite', 'test_house', 'res'],
     pinHash: adminPinHash,
-    pinVersion: 'v1_sha256',
+    pinVersion: PIN_VERSION,
     pinUpdatedAt: now,
     version: Number(adminUserSnap.data()?.version || 0) + 1,
     createdAt: adminUserSnap.data()?.createdAt || now,
@@ -290,7 +305,7 @@ async function main() {
   }, { merge: true })
 
   await batch.commit()
-  console.log('\nPIN Phase 1 preparation completed successfully.')
+  console.log('\nPIN Phase 2 preparation completed successfully.')
 }
 
 main().catch(error => {

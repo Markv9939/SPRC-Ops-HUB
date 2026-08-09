@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, getDoc, getDocs, getDocsFromServer, updateDoc, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Eye, EyeOff, RefreshCw } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import DashboardSummaryPanel from './DashboardSummaryPanel'
 import SupervisorEocPanel from './SupervisorEocPanel'
@@ -16,6 +16,7 @@ import TransportRecordPage from './TransportRecordPage'
 import { LOCATIONS, VANS, getShiftLabel, getShiftOptionsForMainLocation, isShiftAllowedForMainLocation } from '../data/eocConstants'
 import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../services/assignmentService'
 import { hashPin } from '../utils/pinHash'
+import { PIN_LENGTH, PIN_VERSION, generateSecurePin, isObviousPin, isValidPin, normalizePin } from '../utils/pinPolicy'
 import { findDuplicatePinUser } from '../services/pinConflictService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
@@ -190,6 +191,8 @@ function SupervisorDashboard({
     issueLocationIds: [],
     active: true
   })
+  const [showUserPin, setShowUserPin] = useState(false)
+  const [generatingPin, setGeneratingPin] = useState(false)
 
   // ── Scope derivation (extracted to shared hook) ──
   const {
@@ -396,6 +399,7 @@ function SupervisorDashboard({
 
     setEditingUser('new')
     setUserForm(buildDefaultUserForm())
+    setShowUserPin(false)
   }
 
   const handleEditUser = (managedUser) => {
@@ -422,6 +426,29 @@ function SupervisorDashboard({
       pin: ''
     })
     setEditingUser(managedUser.id)
+    setShowUserPin(false)
+  }
+
+  const handleGenerateUserPin = async () => {
+    if (blockIfOffline('generating a PIN')) return
+    setGeneratingPin(true)
+    try {
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        const candidate = generateSecurePin()
+        const duplicateUser = await findDuplicatePinUser(candidate, {
+          excludeUserId: editingUser === 'new' ? null : userForm.id
+        })
+        if (duplicateUser) continue
+        setUserForm(prev => ({ ...prev, pin: candidate }))
+        setShowUserPin(true)
+        return
+      }
+      alert('Unable to generate an unused PIN. Please try again.')
+    } catch (error) {
+      alert(error?.message || 'Unable to generate a PIN.')
+    } finally {
+      setGeneratingPin(false)
+    }
   }
 
   const handleSaveUser = async () => {
@@ -441,12 +468,17 @@ function SupervisorDashboard({
     }
 
     if (isNewUser && !hasPinInput) {
-      alert('Enter a 4-digit PIN for the new user.')
+      alert(`Enter or generate a ${PIN_LENGTH}-digit PIN for the new user.`)
       return
     }
 
-    if (hasPinInput && !/^\d{4}$/.test(String(userForm.pin))) {
-      alert('PIN must be exactly 4 digits.')
+    if (hasPinInput && !isValidPin(userForm.pin)) {
+      alert(`PIN must be exactly ${PIN_LENGTH} digits.`)
+      return
+    }
+
+    if (hasPinInput && isObviousPin(userForm.pin)) {
+      alert('Choose a less obvious PIN. Repeated or sequential digits are not allowed.')
       return
     }
 
@@ -567,7 +599,7 @@ function SupervisorDashboard({
       }
       if (pinHash) {
         payload.pinHash = pinHash
-        payload.pinVersion = 'v1_sha256'
+        payload.pinVersion = PIN_VERSION
         payload.pinUpdatedAt = serverTimestamp()
       }
 
@@ -626,6 +658,7 @@ function SupervisorDashboard({
           console.error('User saved but derived assignment sync failed:', persistError)
           alert('User profile saved, but the BHT assignment sync was denied by Firestore rules. Deploy the latest rules, then edit and save this user once more.')
           setEditingUser(null)
+          setShowUserPin(false)
           loadUsers()
           return
         }
@@ -638,6 +671,7 @@ function SupervisorDashboard({
 
       notifySuccess('User saved successfully')
       setEditingUser(null)
+      setShowUserPin(false)
       loadUsers()
     } catch (error) {
       console.error('Error saving user:', error)
@@ -739,6 +773,7 @@ function SupervisorDashboard({
   const handleCancelEdit = () => {
     setEditingUser(null)
     setUserForm(buildDefaultUserForm())
+    setShowUserPin(false)
   }
 
   const renderUserEditorFields = (isNewUser) => {
@@ -784,26 +819,49 @@ function SupervisorDashboard({
         </div>
         <div>
           <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-            PIN (4 digits) * {!isNewUser ? '(leave blank to keep current PIN)' : ''}
+            PIN ({PIN_LENGTH} digits) * {!isNewUser ? '(leave blank to keep current PIN)' : ''}
           </label>
-          <input
-            type="password"
-            inputMode="numeric"
-            value={userForm.pin || ''}
-            onChange={(e) => setUserForm({ ...userForm, pin: e.target.value.replace(/\D/g, '') })}
-            placeholder="1234"
-            maxLength={4}
-            style={{
-              width: '100%',
-              padding: '8px',
-              border: '2px solid rgba(17,47,82,0.20)',
-              borderRadius: '6px',
-              fontSize: '14px',
-              boxSizing: 'border-box',
-              backgroundColor: 'rgba(17,47,82,0.10)',
-              color: 'var(--text-primary)'
-            }}
-          />
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <input
+              type={showUserPin ? 'text' : 'password'}
+              inputMode="numeric"
+              value={userForm.pin || ''}
+              onChange={(e) => setUserForm({ ...userForm, pin: normalizePin(e.target.value) })}
+              placeholder="6 digits"
+              maxLength={PIN_LENGTH}
+              style={{
+                width: '100%',
+                minWidth: 0,
+                padding: '8px',
+                border: '2px solid rgba(17,47,82,0.20)',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+                backgroundColor: 'rgba(17,47,82,0.10)',
+                color: 'var(--text-primary)'
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowUserPin(value => !value)}
+              disabled={!userForm.pin}
+              title={showUserPin ? 'Hide PIN' : 'Show PIN'}
+              aria-label={showUserPin ? 'Hide PIN' : 'Show PIN'}
+              style={{ width: '36px', minWidth: '36px', border: '1px solid rgba(17,47,82,0.20)', borderRadius: '6px', background: 'rgba(17,47,82,0.08)', color: 'var(--text-primary)' }}
+            >
+              {showUserPin ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+            <button
+              type="button"
+              onClick={handleGenerateUserPin}
+              disabled={generatingPin || isOffline}
+              title="Generate secure PIN"
+              aria-label="Generate secure PIN"
+              style={{ width: '36px', minWidth: '36px', border: '1px solid rgba(17,47,82,0.20)', borderRadius: '6px', background: 'rgba(17,47,82,0.08)', color: 'var(--text-primary)' }}
+            >
+              <RefreshCw size={16} />
+            </button>
+          </div>
           <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
             {isNewUser
               ? `Internal ID will be generated automatically: ${buildInternalUserId(userForm.name, users.map(managedUser => managedUser.id))}`

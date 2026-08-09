@@ -11,6 +11,8 @@
     "smoke:phase9:full": "npm run build && npm run lint",
     "preview": "vite preview",
     "test:rules": "firebase emulators:exec --only firestore,auth \"node tests/firestore.rules.test.js\"",
+    "test:pin": "node --test tests/pinPolicy.test.js",
+    "prepare:pin-phase2": "node scripts/preparePinPhase2.js",
     "seed": "node scripts/seedUsers.js",
     "reset:uat": "node scripts/seedUsers.js --confirm",
     "claims:provision": "node scripts/provisionAuthClaims.js",

@@ -1460,7 +1460,7 @@ test('PIN compatibility mode works after Firebase UID changes without orphaning 
     role: 'bht',
     active: true,
     pinHash: 'a'.repeat(64),
-    pinVersion: 'v1_sha256',
+    pinVersion: 'v2_sha256_6digit',
     site: 'OTC',
     location: 'OTC',
     house: 'TEST_HOUSE',

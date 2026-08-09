@@ -336,8 +336,8 @@ function SupervisorDashboard({ user, isOffline = false }) {
       return
     }
 
-    if (hasPinInput && (userForm.pin.length !== 4 || !/^\d+$/.test(userForm.pin))) {
-      alert('PIN must be exactly 4 digits')
+    if (hasPinInput && (userForm.pin.length !== 6 || !/^\d+$/.test(userForm.pin))) {
+      alert('PIN must be exactly 6 digits')
       return
     }
 
@@ -435,7 +435,7 @@ function SupervisorDashboard({ user, isOffline = false }) {
       }
       if (pinHash) {
         payload.pinHash = pinHash
-        payload.pinVersion = 'v1_sha256'
+        payload.pinVersion = 'v2_sha256_6digit'
         payload.pinUpdatedAt = serverTimestamp()
       }
       const persistUserAndAssignment = async () => {
@@ -653,14 +653,14 @@ function SupervisorDashboard({ user, isOffline = false }) {
         </div>
         <div>
           <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-            PIN (4 digits) * {!isNewUser ? '(set new PIN to rotate)' : ''}
+            PIN (6 digits) * {!isNewUser ? '(set new PIN to rotate)' : ''}
           </label>
           <input
             type="text"
             value={userForm.pin}
             onChange={(e) => setUserForm({ ...userForm, pin: e.target.value.replace(/\D/g, '') })}
-            placeholder="1234"
-            maxLength="4"
+            placeholder="6 digits"
+            maxLength="6"
             style={{
               width: '100%',
               padding: '8px',

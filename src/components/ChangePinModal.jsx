@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
+import { PIN_LENGTH, normalizePin } from '../utils/pinPolicy'
 
 function PINInput({ value, onChange, placeholder, autoFocus = false }) {
   return (
     <input
       type="password"
-      maxLength={4}
+      maxLength={PIN_LENGTH}
       value={value}
       autoFocus={autoFocus}
       placeholder={placeholder}
-      onChange={(event) => onChange(event.target.value.replace(/\D/g, ''))}
+      onChange={(event) => onChange(normalizePin(event.target.value))}
       style={{
         width: '100%',
         padding: '10px 12px',
@@ -89,7 +90,7 @@ function ChangePinModal({ isOpen, onClose, onSubmit }) {
           Change PIN
         </div>
         <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
-          Enter your current PIN, then set a new 4-digit PIN.
+          Enter your current PIN, then set a new {PIN_LENGTH}-digit PIN.
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

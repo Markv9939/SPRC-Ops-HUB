@@ -7,6 +7,7 @@ import { isActiveNonDeletedUser } from '../services/pinConflictService'
 import { getScopedSessionUser } from '../services/accessGrantService'
 import { getAuthPolicy } from '../services/authPolicyService'
 import { isOfflineMode } from '../utils/networkGuard'
+import { PIN_LENGTH, isValidPin, normalizePin } from '../utils/pinPolicy'
 import {
   GLOBAL_SCOPE,
   isAdminRole,
@@ -133,8 +134,8 @@ function PinLogin({ onLogin }) {
       return
     }
 
-    if (currentPin.length !== 4) {
-      setError('PIN must be 4 digits')
+    if (!isValidPin(currentPin)) {
+      setError(`PIN must be ${PIN_LENGTH} digits`)
       return
     }
 
@@ -304,7 +305,7 @@ function PinLogin({ onLogin }) {
           gap: '14px',
           marginBottom: '16px'
         }}>
-          {[0, 1, 2, 3].map((i) => (
+          {Array.from({ length: PIN_LENGTH }, (_, i) => i).map((i) => (
             <div
               key={i}
               style={{
@@ -324,20 +325,20 @@ function PinLogin({ onLogin }) {
           inputMode="numeric"
           pattern="[0-9]*"
           autoComplete="one-time-code"
-          maxLength={4}
+          maxLength={PIN_LENGTH}
           value={pin}
           autoFocus
           onChange={(e) => {
-            const val = e.target.value.replace(/\D/g, '')
+            const val = normalizePin(e.target.value)
             setPin(val)
             setError('')
-            // Auto-submit when 4th digit is entered — standard PIN pad behaviour
-            if (val.length === 4) {
+            // Submit as soon as the complete PIN is entered.
+            if (val.length === PIN_LENGTH) {
               handleSubmit(val)
             }
           }}
           onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          placeholder="Enter 4-digit PIN"
+          placeholder={`Enter ${PIN_LENGTH}-digit PIN`}
           style={{
             width: '100%',
             padding: '16px',

@@ -439,7 +439,7 @@ service cloud.firestore {
         && data.active == true
         && data.pinHash is string
         && data.pinHash.size() >= 32
-        && (!('pinVersion' in data) || data.pinVersion == 'v1_sha256');
+        && (!('pinVersion' in data) || data.pinVersion == 'v2_sha256_6digit');
     }
 
     function requesterCanSelfRotatePin(data) {
