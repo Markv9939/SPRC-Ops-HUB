@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sprc-ops-shell-v7'
+const CACHE_NAME = 'sprc-ops-shell-v10'
 const APP_SHELL = [
   '/',
   '/index.html',

@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, getDoc, getDocs, getDocsFromServer, updateDoc, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
 import { ChevronRight, Eye, EyeOff, RefreshCw } from 'lucide-react'
-import * as XLSX from 'xlsx'
 import DashboardSummaryPanel from './DashboardSummaryPanel'
 import SupervisorEocPanel from './SupervisorEocPanel'
 import CompliancePanel from './CompliancePanel'
@@ -1345,7 +1344,8 @@ function SupervisorDashboard({
     onOpenTransportRecord?.(transportRecordId)
   }, [onOpenTransportRecord, transportRecordId])
 
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
+    const XLSX = await import('xlsx')
     const sanitizeForExcelCell = (value) => {
       const text = typeof value === 'string' ? value : String(value ?? '')
       return /^[=+\-@]/.test(text.trimStart()) ? `'${text}` : text

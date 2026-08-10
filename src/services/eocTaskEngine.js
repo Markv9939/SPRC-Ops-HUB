@@ -347,7 +347,9 @@ function taskInScope(task, scopedGroupKeys) {
   return scopedGroupKeys.has(buildGroupKey(String(task?.locationId || '').trim().toLowerCase(), String(task?.shiftId || '').trim()))
 }
 
-export async function syncEocTasksForUserScope(user) {
+const activeScopeSyncs = new Map()
+
+async function runEocTaskSyncForUserScope(user) {
   if (!user?.id) return { created: 0, updated: 0, scanned: 0, alerts: 0 }
 
   const todayStr = toPhoenixDateStr()
@@ -523,5 +525,21 @@ export async function syncEocTasksForUserScope(user) {
     alerts,
     scanned: desiredTasks.length
   }
+}
+
+export function syncEocTasksForUserScope(user) {
+  const syncKey = `${String(user?.id || '').trim()}::${String(user?.role || '').trim().toLowerCase()}`
+  const activeSync = activeScopeSyncs.get(syncKey)
+  if (activeSync) return activeSync
+
+  const syncPromise = runEocTaskSyncForUserScope(user)
+    .finally(() => {
+      if (activeScopeSyncs.get(syncKey) === syncPromise) {
+        activeScopeSyncs.delete(syncKey)
+      }
+    })
+
+  activeScopeSyncs.set(syncKey, syncPromise)
+  return syncPromise
 }
 

@@ -32,8 +32,11 @@ SPRC Ops Hub centralizes daily operations across three levels:
   - OTC `2nd Shift` remains Wednesday cadence
   - RES `2nd` day/night shifts use Thursday cadence
 
-## Recent Login Behavior (Current)
-- PIN login includes timeout guards on backend/auth lookups so degraded connectivity fails with a clear error instead of staying on `Checking...`.
+## Login Behavior (Current)
+- Staff select their Ops profile with a unique six-digit PIN.
+- The local session locks after 60 minutes of inactivity.
+- PIN login includes timeout guards so degraded connectivity fails clearly instead of staying on `Checking...`.
+- Firebase claim enforcement is off. A future Hub login can provide the outer Google access gate without changing the permanent Ops user IDs used inside this app.
 
 ## Recent Dashboard/Modal Behavior (Current)
 - BHT home is now a tighter action-hub experience:
@@ -78,16 +81,15 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Instruction alignment + approved exceptions: `docs/PROJECT_ALIGNMENT.md`
 - Session startup + operating rules: `PROJECT_INSTRUCTIONS.md`
 - Change history: `CHANGELOG.md`
-- Cutover: `docs/CUTOVER_RUNBOOK.md`
-- UAT walkthrough: `docs/UAT_WALKTHROUGH_PHASE9.md`
-- Regression matrix: `docs/REGRESSION_UAT_PHASE9.md`
+- Deployment and reset safety: `docs/CUTOVER_RUNBOOK.md`
 - Business context: `docs/SPRC_Master_Context.md`
 - SPRC Hub integration reference: `docs/CEO_Hub_Progress.md`
 
 ## Runtime
 - App entry: `src/App.jsx`
 - Active roles: `bht`, `supervisor`, `admin`
-- Data backend: Firestore + Auth claims
+- Data backend: Firestore with anonymous Firebase transport sessions
+- Profile selection: six-digit PIN mapped to permanent `users/{id}` records
 
 ## Commands
 - Install: `npm install`
@@ -95,11 +97,11 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Build: `npm run build`
 - Lint: `npm run lint`
 - Smoke: `npm run smoke:phase9:full`
-- Reset baseline (destructive): `npm run reset:uat`
+- Preview core reset (read-only): `npm run reset:core:preview`
+- Back up core reset data (read-only): `npm run reset:core:backup`
+- Verify fresh core state (read-only): `npm run reset:core:verify`
 - RES shift/template migration: `npm run migrate:res-shift-model`
 - Compliance employee bulk import: `npm run compliance:employees:add`
-- Claims provision: `npm run claims:provision`
-- Claims verify: `npm run claims:verify`
 
 ## Daily Delivery Workflow
 Use this sequence for each logical batch so owner testing can happen quickly on phone/tablet:
@@ -109,11 +111,10 @@ Use this sequence for each logical batch so owner testing can happen quickly on 
    - Hosting/UI changes: `firebase deploy --only hosting --project sprc-tx-l`
    - Firestore rules changes: `firebase deploy --only firestore:rules --project sprc-tx-l`
 4. Validate on iPhone and iPad critical paths.
-5. Record evidence/results in `docs/REGRESSION_UAT_PHASE9.md` and `CHANGELOG.md`.
+5. Record release-relevant results in `CHANGELOG.md`.
 
 ## Hosting Standard
-- Primary: Firebase Hosting (`sprc-tx-l`).
-- Secondary/fallback config exists in `netlify.toml` and is not the default path unless explicitly chosen.
+- Firebase Hosting (`sprc-tx-l`) is the only supported deployment target.
 
 ## Operating Rule
 If implementation and docs conflict, update code to match `plan.md` or revise `plan.md` first.
