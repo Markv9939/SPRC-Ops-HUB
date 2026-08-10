@@ -917,6 +917,7 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
 
   const batch = writeBatch(bhtDb)
   batch.set(doc(bhtDb, 'shiftDebriefs/test_1_rules_2026-06-16_test_house_shift_1'), {
+    schemaVersion: 2,
     locationId: 'test_house',
     locationLabel: 'Test House',
     mainLocation: 'OTC',
@@ -939,7 +940,7 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
     items: [{
       id: 'note_1',
       type: 'general',
-      section: 'notes_discrepancies',
+      section: 'pending_task',
       note: 'TEST-20260616A handoff note',
       createdByUserId: 'test_1_rules',
       createdByName: 'Test One',
@@ -968,6 +969,7 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
     updatedAt: new Date()
   })
   batch.set(doc(bhtDb, 'shiftDebriefDrafts/test_1_rules_2026-06-16_test_house_shift_1'), {
+    schemaVersion: 2,
     locationId: 'test_house',
     locationLabel: 'Test House',
     mainLocation: 'OTC',
@@ -1016,6 +1018,12 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
     updatedAt: new Date()
   })
   await assertSucceeds(batch.commit())
+  await assertFails(updateDoc(doc(bhtDb, 'shiftDebriefs/test_1_rules_2026-06-16_test_house_shift_1'), {
+    items: [{ id: 'replacement', type: 'general', section: 'pending_task', note: 'Rewritten after submit.' }],
+    itemCount: 1,
+    updatedAt: new Date(),
+    version: 2
+  }))
 
   const receivingBhtDb = authed('test_2_rules_uid', 'test2.rules@example.com')
   const submittedSnap = await assertSucceeds(getDoc(doc(receivingBhtDb, 'shiftDebriefs/test_1_rules_2026-06-16_test_house_shift_1')))

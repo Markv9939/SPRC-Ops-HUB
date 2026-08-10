@@ -1172,7 +1172,8 @@ function App() {
         isOffline={isOffline}
         pendingEocTaskIds={pendingEocTaskIds}
         onBack={handleDebriefBack}
-        onQuickNoteSaved={navigateHome}
+        onDone={navigateHome}
+        onViewFull={() => navigate('/debrief/full')}
       />,
       {
         title: currentDebriefMode === 'quick' ? 'Add Debrief Note' : 'Shift Debrief',

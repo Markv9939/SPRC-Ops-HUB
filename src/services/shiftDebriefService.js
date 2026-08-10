@@ -9,7 +9,6 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
-  updateDoc,
   where,
   writeBatch
 } from 'firebase/firestore'
@@ -19,33 +18,38 @@ import {
   getFallbackShiftTimingConfig,
   getNextShiftId,
   getShiftTimingConfig,
-  getShiftTimingDetails,
-  toDate
+  getShiftTimingDetails
 } from './shiftTimingService'
 import { assertExpectedVersion, getVersionNumber } from './versioning'
+import {
+  CLIENT_NOTE_SECTIONS,
+  DEBRIEF_SCHEMA_VERSION,
+  GENERAL_HANDOFF_SECTIONS,
+  cleanDebriefToken,
+  appendUniqueDebriefRecord,
+  getDebriefSectionLabel,
+  mergeDebriefConfirmation,
+  mergeUniqueDebriefItems,
+  removeDebriefRecordById,
+  sanitizeDebriefItems,
+  normalizeDebriefClientName
+} from './shiftDebriefModel'
+
+export {
+  CLIENT_NOTE_SECTIONS,
+  DEBRIEF_READ_SECTION_ORDER,
+  DEBRIEF_SCHEMA_VERSION,
+  GENERAL_HANDOFF_SECTIONS,
+  getDebriefSectionLabel,
+  getGeneralHandoffSection,
+  groupDebriefItemsForReadView
+} from './shiftDebriefModel'
 
 export const DEBRIEF_DRAFTS_COLLECTION = 'shiftDebriefDrafts'
 export const DEBRIEFS_COLLECTION = 'shiftDebriefs'
 export const CLOSED_DEBRIEF_MESSAGE = 'This debrief has already been reviewed and is now closed. No more corrections can be added.'
 
 export const DEBRIEF_LOCATION_IDS = new Set(['mesquite', 'lone_mountain', 'test_house'])
-
-export const CLIENT_NOTE_SECTIONS = [
-  { id: 'client_progress_concerns', label: 'Client Progress & Concerns' },
-  { id: 'medication_health_updates', label: 'Medication & Health Updates' }
-]
-
-export const GENERAL_HANDOFF_SECTIONS = [
-  { id: 'pending_task', label: 'Pending task', tone: 'pending' },
-  { id: 'urgent_time_sensitive_task', label: 'Urgent / Time-sensitive', tone: 'urgent' },
-  { id: 'maintenance_van_facility_operational', label: 'Maintenance / Van / Facility', tone: 'maintenance' },
-  { id: 'notes_discrepancies', label: 'General note', tone: 'general' }
-]
-
-export const DEBRIEF_READ_SECTION_ORDER = [
-  'medication_health_updates',
-  'client_progress_concerns'
-]
 
 export const CONFIRMATION_ITEMS = [
   { id: 'keysAccountedFor', label: 'Keys accounted for' },
@@ -55,13 +59,8 @@ export const CONFIRMATION_ITEMS = [
   { id: 'questionsClarificationsAddressed', label: 'Questions/clarifications addressed' }
 ]
 
-function cleanToken(value) {
-  return String(value || '').trim()
-}
-
-function normalizeClientLabel(value) {
-  return cleanToken(value).toLowerCase().replace(/\s+/g, ' ')
-}
+const cleanToken = cleanDebriefToken
+const normalizeClientLabel = normalizeDebriefClientName
 
 function makeId(prefix = 'item') {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -75,68 +74,6 @@ export function getLocalDateKey(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
-}
-
-export function getDebriefSectionLabel(sectionId) {
-  return [...CLIENT_NOTE_SECTIONS, ...GENERAL_HANDOFF_SECTIONS]
-    .find(section => section.id === sectionId)?.label || sectionId
-}
-
-export function getGeneralHandoffSection(sectionId) {
-  return GENERAL_HANDOFF_SECTIONS.find(section => section.id === sectionId) || {
-    id: sectionId,
-    label: getDebriefSectionLabel(sectionId),
-    tone: 'general'
-  }
-}
-
-export function groupDebriefItemsForReadView(items) {
-  const sortedItems = [...(Array.isArray(items) ? items : [])].sort((a, b) => (
-    String(a.createdAtIso || '').localeCompare(String(b.createdAtIso || ''))
-  ))
-  const clientItems = sortedItems.filter(item => item?.type === 'client')
-  const generalNotes = sortedItems.filter(item => item?.type === 'general')
-  const sectionMap = new Map()
-
-  clientItems.forEach(item => {
-    const sectionKey = cleanToken(item.section)
-    const nameKey = normalizeClientLabel(item.clientName || 'Client')
-    const displayName = cleanToken(item.clientName) || 'Client'
-
-    if (!sectionMap.has(sectionKey)) {
-      sectionMap.set(sectionKey, new Map())
-    }
-
-    const clientMap = sectionMap.get(sectionKey)
-    if (!clientMap.has(nameKey)) {
-      clientMap.set(nameKey, {
-        key: nameKey,
-        label: displayName,
-        firstCreatedAtIso: item.createdAtIso || '',
-        notes: []
-      })
-    }
-
-    clientMap.get(nameKey).notes.push(item)
-  })
-
-  const orderedSectionKeys = [
-    ...DEBRIEF_READ_SECTION_ORDER,
-    ...Array.from(sectionMap.keys())
-      .filter(key => !DEBRIEF_READ_SECTION_ORDER.includes(key))
-      .sort((a, b) => getDebriefSectionLabel(a).localeCompare(getDebriefSectionLabel(b)))
-  ]
-
-  const sections = orderedSectionKeys
-    .filter(key => sectionMap.has(key))
-    .map(key => ({
-      key,
-      label: getDebriefSectionLabel(key),
-      clients: Array.from(sectionMap.get(key).values())
-        .sort((a, b) => a.label.localeCompare(b.label))
-    }))
-
-  return { sections, generalNotes }
 }
 
 export function getDebriefLocationLabel(locationId) {
@@ -161,6 +98,7 @@ export function getBhtDebriefContext(user, date = new Date(), assignment = null)
 
   return {
     id: buildShiftDebriefId({ userId: user.id, locationId, shiftId, dateKey }),
+    schemaVersion: DEBRIEF_SCHEMA_VERSION,
     dateKey,
     locationId,
     locationLabel: getDebriefLocationLabel(locationId),
@@ -185,7 +123,7 @@ export function buildShiftDebriefId({ userId, locationId, shiftId, dateKey }) {
   ].join('_')
 }
 
-export function createDebriefItem({ type, section, clientName = '', note, user }) {
+export function createDebriefItem({ type, section, clientName = '', note, user, source = 'editor' }) {
   const nowIso = new Date().toISOString()
   return {
     id: makeId('debrief_item'),
@@ -193,6 +131,7 @@ export function createDebriefItem({ type, section, clientName = '', note, user }
     section,
     clientName: cleanToken(clientName),
     note: cleanToken(note),
+    source: source === 'quick_note' ? 'quick_note' : 'editor',
     createdAtIso: nowIso,
     updatedAtIso: nowIso,
     createdByUserId: user?.id || null,
@@ -232,17 +171,17 @@ export async function upsertSharedClientName(clientName) {
   const label = cleanToken(clientName)
   if (!label) return
   const normalizedLabel = normalizeClientLabel(label)
-  await setDoc(
-    doc(db, 'clients', normalizedLabel),
-    {
+  const clientRef = doc(db, 'clients', normalizedLabel)
+  await runTransaction(db, async transaction => {
+    const existing = await transaction.get(clientRef)
+    transaction.set(clientRef, {
       label,
       normalizedLabel,
       active: true,
       lastUsedAt: serverTimestamp(),
-      createdAt: serverTimestamp()
-    },
-    { merge: true }
-  )
+      ...(existing.exists() ? {} : { createdAt: serverTimestamp() })
+    }, { merge: true })
+  })
 }
 
 export async function getCurrentSubmittedDebrief(context) {
@@ -264,6 +203,7 @@ export async function saveDebriefDraft(context, items, options = {}) {
       draftRef,
       {
         ...context,
+        schemaVersion: DEBRIEF_SCHEMA_VERSION,
         status: 'draft',
         items,
         itemCount: items.length,
@@ -287,6 +227,7 @@ export async function saveDebriefDraft(context, items, options = {}) {
     })
     transaction.set(draftRef, {
       ...context,
+      schemaVersion: DEBRIEF_SCHEMA_VERSION,
       status: 'draft',
       items,
       itemCount: items.length,
@@ -298,18 +239,29 @@ export async function saveDebriefDraft(context, items, options = {}) {
 }
 
 export async function addDraftItem(context, item) {
-  const draft = await getCurrentDraftDebrief(context)
-  const items = Array.isArray(draft?.items) ? draft.items : []
-  if (items.some(existing => existing?.id === item?.id)) return
-  await saveDebriefDraft(context, [...items, item])
+  const draftRef = doc(db, DEBRIEF_DRAFTS_COLLECTION, context.id)
+  await runTransaction(db, async transaction => {
+    const draftSnap = await transaction.get(draftRef)
+    const draft = draftSnap.exists() ? draftSnap.data() : null
+    const items = Array.isArray(draft?.items) ? draft.items : []
+    if (items.some(existing => existing?.id === item?.id)) return
+
+    transaction.set(draftRef, {
+      ...context,
+      schemaVersion: DEBRIEF_SCHEMA_VERSION,
+      status: 'draft',
+      items: [...items, item],
+      itemCount: items.length + 1,
+      ...(draftSnap.exists() ? {} : { createdAt: serverTimestamp() }),
+      updatedAt: serverTimestamp(),
+      version: draftSnap.exists() ? getVersionNumber(draft) + 1 : 1
+    }, { merge: true })
+  })
 }
 
 export async function submitShiftDebrief(context, items, user) {
   const submittedRef = doc(db, DEBRIEFS_COLLECTION, context.id)
-  const existing = await getDoc(submittedRef)
-  if (existing.exists()) {
-    throw new Error('This debrief has already been submitted.')
-  }
+  const draftRef = doc(db, DEBRIEF_DRAFTS_COLLECTION, context.id)
 
   const timingConfig = await getShiftTimingConfig()
   const outgoingTiming = getShiftTimingDetails(context.shiftId, new Date(), timingConfig)
@@ -325,113 +277,102 @@ export async function submitShiftDebrief(context, items, user) {
     return acc
   }, {})
 
-  const payload = {
-    ...context,
-    status: 'submitted',
-    items,
-    itemCount: items.length,
-    extraNotes: [],
-    confirmation: createEmptyConfirmation(),
-    confirmed: false,
-    receivingShiftId,
-    receivingShiftLabel: receivingShiftId ? getShiftLabel(receivingShiftId) : '',
-    receivingUserIds: receivingUsers.map(row => row.id),
-    receivingUserNames,
-    shiftStartAt: outgoingTiming?.shiftStartAt || context.shiftStartAt || null,
-    shiftEndAt: outgoingTiming?.shiftEndAt || context.shiftEndAt || null,
-    outgoingDebriefDueAt: outgoingTiming?.outgoingDebriefDueAt || context.outgoingDebriefDueAt || null,
-    incomingAcknowledgmentLateAt: receivingTiming?.incomingAcknowledgmentLateAt || null,
-    submittedByUserId: user?.id || context.draftByUserId,
-    submittedByName: user?.name || context.draftByName,
-    submittedAt: serverTimestamp(),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    version: 1
-  }
+  await runTransaction(db, async transaction => {
+    const submittedSnap = await transaction.get(submittedRef)
+    const draftSnap = await transaction.get(draftRef)
+    if (submittedSnap.exists()) throw new Error('This debrief has already been submitted.')
 
-  const batch = writeBatch(db)
-  batch.set(submittedRef, payload)
-  batch.set(
-    doc(db, DEBRIEF_DRAFTS_COLLECTION, context.id),
-    {
+    const draft = draftSnap.exists() && draftSnap.data()?.schemaVersion === DEBRIEF_SCHEMA_VERSION
+      ? draftSnap.data()
+      : null
+    const submittedItems = sanitizeDebriefItems(mergeUniqueDebriefItems(draft?.items || [], items))
+    if (submittedItems.length === 0) throw new Error('Add at least one complete debrief note before submitting.')
+
+    const payload = {
       ...context,
+      schemaVersion: DEBRIEF_SCHEMA_VERSION,
       status: 'submitted',
+      items: submittedItems,
+      itemCount: submittedItems.length,
+      extraNotes: [],
+      confirmation: createEmptyConfirmation(),
+      confirmed: false,
+      receivingShiftId,
+      receivingShiftLabel: receivingShiftId ? getShiftLabel(receivingShiftId) : '',
+      receivingUserIds: receivingUsers.map(row => row.id),
+      receivingUserNames,
+      shiftStartAt: outgoingTiming?.shiftStartAt || context.shiftStartAt || null,
+      shiftEndAt: outgoingTiming?.shiftEndAt || context.shiftEndAt || null,
+      outgoingDebriefDueAt: outgoingTiming?.outgoingDebriefDueAt || context.outgoingDebriefDueAt || null,
+      incomingAcknowledgmentLateAt: receivingTiming?.incomingAcknowledgmentLateAt || null,
+      submittedByUserId: user?.id || context.draftByUserId,
+      submittedByName: user?.name || context.draftByName,
+      submittedAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      version: 1
+    }
+
+    transaction.set(submittedRef, payload)
+    transaction.set(draftRef, {
+      ...context,
+      schemaVersion: DEBRIEF_SCHEMA_VERSION,
+      status: 'submitted',
+      items: submittedItems,
+      itemCount: submittedItems.length,
       submittedDebriefId: context.id,
       submittedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      version: 1
-    },
-    { merge: true }
-  )
-  queueShiftDebriefSubmittedAlerts(batch, { debrief: { ...payload, id: context.id }, receivingUsers })
-  await batch.commit()
+      version: draftSnap.exists() ? getVersionNumber(draftSnap.data()) + 1 : 1
+    }, { merge: true })
+    queueShiftDebriefSubmittedAlerts(transaction, { debrief: { ...payload, id: context.id }, receivingUsers })
+  })
 }
 
 export async function appendExtraDebriefNote(debriefId, extraNote) {
-  const debriefSnap = await getDoc(doc(db, DEBRIEFS_COLLECTION, debriefId))
-  if (!debriefSnap.exists()) throw new Error('Submitted debrief was not found.')
-  const existing = debriefSnap.data()
-  if (isDebriefClosedForCorrections(existing)) {
-    throw new Error(CLOSED_DEBRIEF_MESSAGE)
-  }
-  const extraNotes = Array.isArray(existing.extraNotes) ? existing.extraNotes : []
-  if (extraNotes.some(note => note?.id === extraNote?.id)) return
-  await updateDoc(doc(db, DEBRIEFS_COLLECTION, debriefId), {
-    extraNotes: [...extraNotes, extraNote],
-    updatedAt: serverTimestamp()
+  const debriefRef = doc(db, DEBRIEFS_COLLECTION, debriefId)
+  await runTransaction(db, async transaction => {
+    const debriefSnap = await transaction.get(debriefRef)
+    if (!debriefSnap.exists()) throw new Error('Submitted debrief was not found.')
+    const existing = debriefSnap.data()
+    if (isDebriefClosedForCorrections(existing)) throw new Error(CLOSED_DEBRIEF_MESSAGE)
+
+    const extraNotes = Array.isArray(existing.extraNotes) ? existing.extraNotes : []
+    if (extraNotes.some(note => note?.id === extraNote?.id)) return
+    transaction.update(debriefRef, {
+      extraNotes: appendUniqueDebriefRecord(extraNotes, extraNote),
+      updatedAt: serverTimestamp(),
+      version: getVersionNumber(existing) + 1
+    })
   })
 }
 
 export async function saveDebriefConfirmation(debriefId, confirmation, user) {
   const debriefRef = doc(db, DEBRIEFS_COLLECTION, debriefId)
-  const debriefSnap = await getDoc(debriefRef)
-  if (!debriefSnap.exists()) throw new Error('Submitted debrief was not found.')
-
-  const debrief = { id: debriefSnap.id, ...debriefSnap.data() }
-  const receivingUserIds = Array.isArray(debrief.receivingUserIds) ? debrief.receivingUserIds.map(v => cleanToken(v)) : []
   const currentUserId = cleanToken(user?.id)
-  const currentAcknowledged = CONFIRMATION_ITEMS.every(item => confirmation?.[item.id] === true)
-    && cleanToken(confirmation?.incomingStaffInitials).length > 0
-  const existingConfirmation = debrief.confirmation || {}
-  const existingAcknowledgments = existingConfirmation.acknowledgments || {}
-  const nextAcknowledgments = {
-    ...existingAcknowledgments,
-    ...(currentUserId
-      ? {
-          [currentUserId]: {
-            keysAccountedFor: confirmation?.keysAccountedFor === true,
-            sharpsRestrictedVerified: confirmation?.sharpsRestrictedVerified === true,
-            clientRoundCompleted: confirmation?.clientRoundCompleted === true,
-            controlledMedicationLogReviewed: confirmation?.controlledMedicationLogReviewed === true,
-            questionsClarificationsAddressed: confirmation?.questionsClarificationsAddressed === true,
-            incomingStaffInitials: cleanToken(confirmation?.incomingStaffInitials),
-            confirmed: currentAcknowledged,
-            confirmedAt: currentAcknowledged ? new Date() : null,
-            confirmedByUserId: currentAcknowledged ? currentUserId : null,
-            confirmedByName: currentAcknowledged ? user?.name || null : null
-          }
-        }
-      : {})
-  }
+  let currentAcknowledged = false
+  await runTransaction(db, async transaction => {
+    const debriefSnap = await transaction.get(debriefRef)
+    if (!debriefSnap.exists()) throw new Error('Submitted debrief was not found.')
 
-  const allReceivingAcknowledged = receivingUserIds.length > 0
-    ? receivingUserIds.every(userId => nextAcknowledgments[userId]?.confirmed === true)
-    : currentAcknowledged
-  const latestUserAcknowledgment = currentUserId ? nextAcknowledgments[currentUserId] : null
+    const debrief = debriefSnap.data()
+    const receivingUserIds = Array.isArray(debrief.receivingUserIds)
+      ? debrief.receivingUserIds.map(value => cleanToken(value))
+      : []
+    const merged = mergeDebriefConfirmation(debrief.confirmation, confirmation, {
+      userId: currentUserId,
+      userName: user?.name,
+      receivingUserIds,
+      acknowledgedAt: new Date()
+    })
+    currentAcknowledged = merged.currentAcknowledged
 
-  await updateDoc(debriefRef, {
-    confirmation: {
-      ...existingConfirmation,
-      ...confirmation,
-      incomingStaffInitials: cleanToken(confirmation?.incomingStaffInitials),
-      confirmed: allReceivingAcknowledged,
-      confirmedAt: allReceivingAcknowledged ? (toDate(existingConfirmation.confirmedAt) || new Date()) : null,
-      confirmedByUserId: latestUserAcknowledgment?.confirmedByUserId || existingConfirmation.confirmedByUserId || null,
-      confirmedByName: latestUserAcknowledgment?.confirmedByName || existingConfirmation.confirmedByName || null,
-      acknowledgments: nextAcknowledgments
-    },
-    confirmed: allReceivingAcknowledged,
-    updatedAt: serverTimestamp()
+    transaction.update(debriefRef, {
+      confirmation: merged.confirmation,
+      confirmed: merged.confirmed,
+      updatedAt: serverTimestamp(),
+      version: getVersionNumber(debrief) + 1
+    })
   })
 
   if (currentAcknowledged && currentUserId) {
@@ -447,25 +388,93 @@ export async function saveDebriefConfirmation(debriefId, confirmation, user) {
 }
 
 export async function saveQuickDebriefNote(context, item, user) {
-  const submitted = await getCurrentSubmittedDebrief(context)
-  if (submitted) {
-    if (isDebriefClosedForCorrections(submitted)) {
-      throw new Error(CLOSED_DEBRIEF_MESSAGE)
+  const submittedRef = doc(db, DEBRIEFS_COLLECTION, context.id)
+  const draftRef = doc(db, DEBRIEF_DRAFTS_COLLECTION, context.id)
+  const extraNote = createExtraNote({
+    note: item.type === 'client'
+      ? `${item.clientName} - ${getDebriefSectionLabel(item.section)}: ${item.note}`
+      : `${getDebriefSectionLabel(item.section)}: ${item.note}`,
+    user,
+    source: 'post_submit_quick_note'
+  })
+  extraNote.id = `quick_${item.id}`
+  extraNote.createdAtIso = item.createdAtIso || extraNote.createdAtIso
+
+  return runTransaction(db, async transaction => {
+    const submittedSnap = await transaction.get(submittedRef)
+    const draftSnap = await transaction.get(draftRef)
+    if (submittedSnap.exists()) {
+      const submitted = submittedSnap.data()
+      if (isDebriefClosedForCorrections(submitted)) throw new Error(CLOSED_DEBRIEF_MESSAGE)
+      const extraNotes = Array.isArray(submitted.extraNotes) ? submitted.extraNotes : []
+      if (!extraNotes.some(note => note?.id === extraNote.id)) {
+        transaction.update(submittedRef, {
+          extraNotes: appendUniqueDebriefRecord(extraNotes, extraNote),
+          updatedAt: serverTimestamp(),
+          version: getVersionNumber(submitted) + 1
+        })
+      }
+      return { mode: 'extra', debriefId: context.id }
     }
-    const extraNote = createExtraNote({
-      note: item.type === 'client'
-        ? `${item.clientName} - ${getDebriefSectionLabel(item.section)}: ${item.note}`
-        : `${getDebriefSectionLabel(item.section)}: ${item.note}`,
-      user,
-      source: 'post_submit_quick_note'
+
+    const draft = draftSnap.exists() && draftSnap.data()?.schemaVersion === DEBRIEF_SCHEMA_VERSION
+      ? draftSnap.data()
+      : null
+    const draftItems = Array.isArray(draft?.items) ? draft.items : []
+    if (!draftItems.some(existing => existing?.id === item?.id)) {
+      const nextItems = [...draftItems, item]
+      transaction.set(draftRef, {
+        ...context,
+        schemaVersion: DEBRIEF_SCHEMA_VERSION,
+        status: 'draft',
+        items: nextItems,
+        itemCount: nextItems.length,
+        ...(draftSnap.exists() ? {} : { createdAt: serverTimestamp() }),
+        updatedAt: serverTimestamp(),
+        version: draftSnap.exists() ? getVersionNumber(draftSnap.data()) + 1 : 1
+      }, { merge: true })
+    }
+    return { mode: 'draft', debriefId: context.id }
+  })
+}
+
+export async function undoQuickDebriefNote(context, item, saveResult) {
+  const mode = saveResult?.mode === 'extra' ? 'extra' : 'draft'
+  const debriefRef = doc(
+    db,
+    mode === 'extra' ? DEBRIEFS_COLLECTION : DEBRIEF_DRAFTS_COLLECTION,
+    saveResult?.debriefId || context.id
+  )
+
+  return runTransaction(db, async transaction => {
+    const snapshot = await transaction.get(debriefRef)
+    if (!snapshot.exists()) return false
+    const existing = snapshot.data()
+
+    if (mode === 'extra') {
+      if (isDebriefClosedForCorrections(existing)) throw new Error(CLOSED_DEBRIEF_MESSAGE)
+      const extraNotes = Array.isArray(existing.extraNotes) ? existing.extraNotes : []
+      const nextExtraNotes = extraNotes.filter(note => note?.id !== `quick_${item.id}`)
+      if (nextExtraNotes.length === extraNotes.length) return false
+      transaction.update(debriefRef, {
+        extraNotes: nextExtraNotes,
+        updatedAt: serverTimestamp(),
+        version: getVersionNumber(existing) + 1
+      })
+      return true
+    }
+
+    const items = Array.isArray(existing.items) ? existing.items : []
+    const nextItems = removeDebriefRecordById(items, item?.id)
+    if (nextItems.length === items.length) return false
+    transaction.update(debriefRef, {
+      items: nextItems,
+      itemCount: nextItems.length,
+      updatedAt: serverTimestamp(),
+      version: getVersionNumber(existing) + 1
     })
-    extraNote.id = `quick_${item.id}`
-    extraNote.createdAtIso = item.createdAtIso || extraNote.createdAtIso
-    await appendExtraDebriefNote(submitted.id, extraNote)
-    return { mode: 'extra', debriefId: submitted.id }
-  }
-  await addDraftItem(context, item)
-  return { mode: 'draft', debriefId: context.id }
+    return true
+  })
 }
 
 export function isDebriefClosedForCorrections(debrief) {

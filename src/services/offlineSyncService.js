@@ -19,17 +19,18 @@ import { updateFleetRuntimeFromEocSubmission } from './fleetRuntimeService'
 import { syncFleetTasksForVehicle } from './fleetTaskEngine'
 import { createTransportCompletedAlert, fanOutIssueAlerts, writeAuditLog } from './notificationService'
 import { appendExtraDebriefNote, saveDebriefConfirmation, saveQuickDebriefNote, submitShiftDebrief } from './shiftDebriefService'
+import { DEBRIEF_SCHEMA_VERSION, isCurrentDebriefPayload } from './shiftDebriefModel'
 import { submitBhtIssueReportOnline } from './bhtIssueReportService'
 import { parseMileageValue } from '../utils/fleetStatus'
 import {
   deleteOfflineDraft,
-  getOfflineDraft,
+  deleteOfflineAction,
   listOfflineActions,
   markOfflineActionFailed,
   markOfflineActionNeedsReview,
   markOfflineActionSynced,
+  mutateOfflineDraft,
   queueOfflineAction,
-  saveOfflineDraft,
   updateOfflineAction
 } from './offlineStore'
 import { toTransportRecordDate } from '../utils/transportRecord'
@@ -51,11 +52,15 @@ export function getEocDraftId(taskId, userId) {
 }
 
 export function getDebriefDraftId(contextId) {
-  return `debrief:${String(contextId || '').trim()}`
+  return `debrief-v${DEBRIEF_SCHEMA_VERSION}:${String(contextId || '').trim()}`
 }
 
 export function getDebriefQuickDraftId(contextId) {
-  return `debrief-quick:${String(contextId || '').trim()}`
+  return `debrief-quick-v${DEBRIEF_SCHEMA_VERSION}:${String(contextId || '').trim()}`
+}
+
+export function getShiftDebriefQuickActionId(contextId, itemId) {
+  return `debrief-quick-v${DEBRIEF_SCHEMA_VERSION}:${String(contextId || '').trim()}:${String(itemId || '').trim()}`
 }
 
 export function getTransportDraftId(transportId) {
@@ -94,33 +99,25 @@ export function queueEocSubmission(payload) {
 
 export function queueShiftDebriefSubmission(payload) {
   return queueOfflineAction({
-    id: `debrief-submit:${payload?.context?.id || ''}`,
+    id: `debrief-submit-v${DEBRIEF_SCHEMA_VERSION}:${payload?.context?.id || ''}`,
     type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION,
-    payload
-  })
-}
-
-export function queueShiftDebriefQuickNote(payload) {
-  return queueOfflineAction({
-    id: `debrief-quick:${payload?.context?.id || ''}:${payload?.item?.id || ''}`,
-    type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_QUICK_NOTE,
-    payload
+    payload: { ...payload, schemaVersion: DEBRIEF_SCHEMA_VERSION }
   })
 }
 
 export function queueShiftDebriefExtraNote(payload) {
   return queueOfflineAction({
-    id: `debrief-extra:${payload?.debriefId || ''}:${payload?.extraNote?.id || ''}`,
+    id: `debrief-extra-v${DEBRIEF_SCHEMA_VERSION}:${payload?.debriefId || ''}:${payload?.extraNote?.id || ''}`,
     type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_EXTRA_NOTE,
-    payload
+    payload: { ...payload, schemaVersion: DEBRIEF_SCHEMA_VERSION }
   })
 }
 
 export function queueShiftDebriefConfirmation(payload) {
   return queueOfflineAction({
-    id: `debrief-confirmation:${payload?.debriefId || ''}:${payload?.user?.id || ''}`,
+    id: `debrief-confirmation-v${DEBRIEF_SCHEMA_VERSION}:${payload?.debriefId || ''}:${payload?.user?.id || ''}`,
     type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_CONFIRMATION,
-    payload
+    payload: { ...payload, schemaVersion: DEBRIEF_SCHEMA_VERSION }
   })
 }
 
@@ -368,18 +365,18 @@ async function syncShiftDebriefQuickNoteOnline(payload) {
 
   const result = await saveQuickDebriefNote(payload.context, payload.item, payload.user)
   const draftId = getDebriefQuickDraftId(contextId)
-  const localDraft = await getOfflineDraft(draftId).catch(() => null)
-  const remainingItems = (Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items : [])
-    .filter(item => String(item?.id || '').trim() !== itemId)
-
-  if (remainingItems.length > 0) {
-    await saveOfflineDraft(draftId, 'debriefQuick', {
-      context: localDraft?.payload?.context || payload.context,
-      items: remainingItems
-    })
-  } else {
-    await deleteOfflineDraft(draftId)
-  }
+  await mutateOfflineDraft(draftId, 'debriefQuick', localPayload => {
+    const remainingItems = (Array.isArray(localPayload?.items) ? localPayload.items : [])
+      .filter(item => String(item?.id || '').trim() !== itemId)
+    return remainingItems.length > 0
+      ? {
+          ...localPayload,
+          schemaVersion: DEBRIEF_SCHEMA_VERSION,
+          context: localPayload?.context || payload.context,
+          items: remainingItems
+        }
+      : null
+  })
 
   return result
 }
@@ -553,7 +550,19 @@ function needsReviewError(error) {
   return /already|no longer|not eligible|version|changed while offline|needs supervisor review/i.test(String(error?.message || ''))
 }
 
+const SHIFT_DEBRIEF_ACTIONS = new Set([
+  OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_QUICK_NOTE,
+  OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION,
+  OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_EXTRA_NOTE,
+  OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_CONFIRMATION
+])
+
 async function processAction(action) {
+  if (SHIFT_DEBRIEF_ACTIONS.has(action.type) && !isCurrentDebriefPayload(action.payload)) {
+    await deleteOfflineAction(action.id)
+    return { id: action.id, status: 'discarded' }
+  }
+
   await updateOfflineAction(action.id, { status: 'syncing', attempts: Number(action.attempts || 0) + 1 })
   try {
     let syncResult = null

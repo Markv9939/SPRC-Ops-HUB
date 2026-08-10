@@ -1,7 +1,4 @@
-import {
-  getGeneralHandoffSection,
-  groupDebriefItemsForReadView
-} from '../services/shiftDebriefService'
+import { groupDebriefItemsForReadView } from '../services/shiftDebriefService'
 
 function isFlaggedNote(item) {
   const note = String(item?.note || '')
@@ -52,33 +49,22 @@ function SectionBlock({ section }) {
   )
 }
 
-function GeneralBlock({ notes }) {
+function GeneralBlock({ section }) {
   return (
     <section style={styles.sectionBlock}>
-      <div style={{ ...styles.sectionHeader, ...styles.generalHeader }}>General Handoff Notes</div>
+      <div style={{ ...styles.sectionHeader, ...styles.generalHeader }}>{section.label}</div>
       <div style={styles.generalBody}>
-        {notes.map(note => {
-          const section = getGeneralHandoffSection(note.section)
-          return (
-            <div
-              key={note.id || note.createdAtIso}
-              className={`debrief-handoff-read-card debrief-handoff-card-${section.tone}`}
-            >
-              <span className={`debrief-handoff-tag debrief-handoff-tag-${section.tone}`}>
-                {section.label}
-              </span>
-              <div className="debrief-handoff-text">{note.note}</div>
-            </div>
-          )
-        })}
+        {section.notes.map(note => (
+          <NoteText key={note.id || note.createdAtIso} item={note} />
+        ))}
       </div>
     </section>
   )
 }
 
 export default function DebriefGroupedReadView({ items, emptyText = 'No notes submitted.' }) {
-  const { sections, generalNotes } = groupDebriefItemsForReadView(items)
-  const hasNotes = sections.length > 0 || generalNotes.length > 0
+  const { clientSections, generalSections } = groupDebriefItemsForReadView(items)
+  const hasNotes = clientSections.length > 0 || generalSections.length > 0
 
   if (!hasNotes) {
     return <div style={styles.emptyText}>{emptyText}</div>
@@ -86,10 +72,12 @@ export default function DebriefGroupedReadView({ items, emptyText = 'No notes su
 
   return (
     <div style={styles.readView}>
-      {sections.map(section => (
+      {clientSections.map(section => (
         <SectionBlock key={section.key} section={section} />
       ))}
-      {generalNotes.length > 0 && <GeneralBlock notes={generalNotes} />}
+      {generalSections.map(section => (
+        <GeneralBlock key={section.key} section={section} />
+      ))}
     </div>
   )
 }
@@ -116,8 +104,7 @@ const styles = {
     padding: '10px 16px',
     fontSize: '13px',
     fontWeight: 800,
-    textTransform: 'uppercase',
-    letterSpacing: '0.08em'
+    textTransform: 'uppercase'
   },
   generalHeader: {
     backgroundColor: '#3D5A80'

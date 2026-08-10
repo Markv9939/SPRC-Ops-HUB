@@ -65,6 +65,71 @@ export async function saveOfflineDraft(id, type, payload) {
   })
 }
 
+export async function mutateOfflineDraft(id, type, mutatePayload) {
+  if (!id) return null
+  let updated = null
+  await withStore(DRAFTS_STORE, 'readwrite', store => {
+    const request = store.get(id)
+    request.onsuccess = () => {
+      const payload = mutatePayload(request.result?.payload || null)
+      if (payload === null) {
+        store.delete(id)
+        return
+      }
+      updated = { id, type, payload, updatedAtIso: new Date().toISOString() }
+      store.put(updated)
+    }
+  })
+  return updated
+}
+
+export async function mutateOfflineDraftAndOutbox({
+  draftId,
+  draftType,
+  mutatePayload,
+  queueAction = null,
+  deleteActionId = ''
+}) {
+  if (!draftId) return null
+  const db = await openOfflineDb()
+  let updatedDraft = null
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction([DRAFTS_STORE, OUTBOX_STORE], 'readwrite')
+    const drafts = transaction.objectStore(DRAFTS_STORE)
+    const outbox = transaction.objectStore(OUTBOX_STORE)
+    const request = drafts.get(draftId)
+
+    request.onsuccess = () => {
+      const payload = mutatePayload(request.result?.payload || null)
+      if (payload === null) drafts.delete(draftId)
+      else {
+        updatedDraft = { id: draftId, type: draftType, payload, updatedAtIso: new Date().toISOString() }
+        drafts.put(updatedDraft)
+      }
+
+      if (queueAction) {
+        const nowIso = new Date().toISOString()
+        outbox.put({
+          id: queueAction.id || makeId(queueAction.type),
+          type: queueAction.type,
+          payload: queueAction.payload,
+          status: 'pending',
+          attempts: 0,
+          createdAtIso: nowIso,
+          updatedAtIso: nowIso,
+          lastError: ''
+        })
+      }
+      if (deleteActionId) outbox.delete(deleteActionId)
+    }
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error)
+  })
+  window.dispatchEvent(new CustomEvent('offline-outbox-changed'))
+  return updatedDraft
+}
+
 export async function getOfflineDraft(id) {
   if (!id) return null
   return withStore(DRAFTS_STORE, 'readonly', (store) => requestToPromise(store.get(id)))
