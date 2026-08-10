@@ -24,8 +24,17 @@ import {
   createExtraNote,
   upsertSharedClientName
 } from '../services/shiftDebriefService'
-import { deleteOfflineDraft, getOfflineDraft, saveOfflineDraft } from '../services/offlineStore'
-import { getDebriefDraftId, queueShiftDebriefSubmission } from '../services/offlineSyncService'
+import { deleteOfflineDraft, getOfflineDraft, listAllOfflineActions, saveOfflineDraft } from '../services/offlineStore'
+import {
+  OFFLINE_ACTION_TYPES,
+  getDebriefDraftId,
+  getDebriefQuickDraftId,
+  queueShiftDebriefConfirmation,
+  queueShiftDebriefExtraNote,
+  queueShiftDebriefQuickNote,
+  queueShiftDebriefSubmission,
+  syncOfflineOutbox
+} from '../services/offlineSyncService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
 import { cloneRecord, formatConflictFields, mergeRecordFields } from '../utils/collaboration'
@@ -59,6 +68,14 @@ function sortItems(items) {
   return [...(Array.isArray(items) ? items : [])].sort((a, b) => (
     String(a.createdAtIso || '').localeCompare(String(b.createdAtIso || ''))
   ))
+}
+
+function mergeUniqueItems(...groups) {
+  const byId = new Map()
+  groups.flat().forEach(item => {
+    if (item?.id) byId.set(item.id, item)
+  })
+  return sortItems(Array.from(byId.values()))
 }
 
 function editableDebriefDraft(data = {}) {
@@ -200,7 +217,7 @@ function SectionSelect({ type, value, onChange }) {
   )
 }
 
-function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = false }) {
+function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = false, isOffline = false }) {
   const [type, setType] = useState('client')
   const [clientName, setClientName] = useState('')
   const [section, setSection] = useState(CLIENT_NOTE_SECTIONS[0].id)
@@ -282,6 +299,7 @@ function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = fa
             <ClientAutocomplete
               onAddClient={(name) => setClientName(name)}
               existingClients={[]}
+              isOffline={isOffline}
             />
           )}
           <div style={styles.hintText}>Use first name and last initial when possible.</div>
@@ -322,16 +340,44 @@ function DebriefNoteForm({ user, onSave, buttonLabel = 'Save Note', compact = fa
   )
 }
 
-function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
+function SubmittedDebriefView({ debrief, user, onExtraNoteAdded, isOffline = false }) {
   const [extraNoteText, setExtraNoteText] = useState('')
   const [confirmation, setConfirmation] = useState(() => getCurrentUserConfirmation(debrief, user))
   const [savingExtra, setSavingExtra] = useState(false)
   const [savingConfirmation, setSavingConfirmation] = useState(false)
+  const [pendingExtraNotes, setPendingExtraNotes] = useState([])
+  const [confirmationPending, setConfirmationPending] = useState(false)
   const correctionsClosed = isDebriefClosedForCorrections(debrief)
 
   useEffect(() => {
     setConfirmation(getCurrentUserConfirmation(debrief, user))
   }, [debrief, user])
+
+  useEffect(() => {
+    let cancelled = false
+    const refreshPending = async () => {
+      const actions = await listAllOfflineActions().catch(() => [])
+      if (cancelled) return
+      const pendingStatuses = new Set(['pending', 'syncing', 'failed', 'needsReview'])
+      const matching = actions.filter(action => pendingStatuses.has(action.status) && action.payload?.debriefId === debrief.id)
+      setPendingExtraNotes(matching
+        .filter(action => action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_EXTRA_NOTE)
+        .map(action => action.payload?.extraNote)
+        .filter(Boolean))
+      const pendingConfirmation = matching.find(action => (
+        action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_CONFIRMATION
+        && String(action.payload?.user?.id || '') === String(user?.id || '')
+      ))
+      setConfirmationPending(Boolean(pendingConfirmation))
+      if (pendingConfirmation?.payload?.confirmation) setConfirmation(pendingConfirmation.payload.confirmation)
+    }
+    refreshPending()
+    window.addEventListener('offline-outbox-changed', refreshPending)
+    return () => {
+      cancelled = true
+      window.removeEventListener('offline-outbox-changed', refreshPending)
+    }
+  }, [debrief.id, user?.id])
 
   const addExtraNote = async () => {
     if (correctionsClosed) {
@@ -344,13 +390,18 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
     }
     setSavingExtra(true)
     try {
-      await appendExtraDebriefNote(debrief.id, createExtraNote({
+      const extraNote = createExtraNote({
         note: extraNoteText,
         user,
         source: 'submitted_view'
-      }))
+      })
+      if (isOffline) {
+        await queueShiftDebriefExtraNote({ debriefId: debrief.id, extraNote, user })
+      } else {
+        await appendExtraDebriefNote(debrief.id, extraNote)
+      }
       setExtraNoteText('')
-      notifySuccess('Extra note added')
+      notifySuccess(isOffline ? 'Extra note saved on this device' : 'Extra note added')
       onExtraNoteAdded?.()
     } finally {
       setSavingExtra(false)
@@ -360,8 +411,12 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
   const saveConfirmation = async () => {
     setSavingConfirmation(true)
     try {
-      await saveDebriefConfirmation(debrief.id, confirmation, user)
-      notifySuccess('Confirmation saved')
+      if (isOffline) {
+        await queueShiftDebriefConfirmation({ debriefId: debrief.id, confirmation, user })
+      } else {
+        await saveDebriefConfirmation(debrief.id, confirmation, user)
+      }
+      notifySuccess(isOffline ? 'Confirmation saved on this device' : 'Confirmation saved')
     } finally {
       setSavingConfirmation(false)
     }
@@ -400,6 +455,11 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
             ))}
           </div>
         )}
+        {pendingExtraNotes.map(note => (
+          <div key={note.id} style={styles.pendingOfflineItem}>
+            <strong>Pending sync: </strong>{note.note}
+          </div>
+        ))}
         {correctionsClosed ? (
           <div style={styles.closedText}>No more corrections can be added after review.</div>
         ) : (
@@ -453,6 +513,7 @@ function SubmittedDebriefView({ debrief, user, onExtraNoteAdded }) {
             Confirmed by {confirmation?.confirmedByName || 'incoming staff'} on {formatTimestamp(confirmation?.confirmedAt)}
           </div>
         )}
+        {confirmationPending && <div style={styles.savedText}>Confirmation pending sync</div>}
         <button
           className="btn btn-finish"
           onClick={saveConfirmation}
@@ -1022,7 +1083,8 @@ export default function ShiftDebriefPage({
   mode = 'full',
   debriefId = null,
   isOffline = false,
-  onBack
+  onBack,
+  onQuickNoteSaved
 }) {
   const context = useMemo(() => getBhtDebriefContext(user, new Date(), assignment), [assignment, user])
   const targetDebriefId = debriefId || context?.id || ''
@@ -1032,6 +1094,7 @@ export default function ShiftDebriefPage({
   const [dirty, setDirty] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState(null)
   const [hasLocalDraft, setHasLocalDraft] = useState(false)
+  const [pendingQuickItems, setPendingQuickItems] = useState([])
   const [manualSaving, setManualSaving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [showGuide, setShowGuide] = useState(() => !localStorage.getItem(GUIDE_KEY))
@@ -1060,7 +1123,11 @@ export default function ShiftDebriefPage({
     if (!targetDebriefId) return undefined
     const unsubSubmitted = onSnapshot(
       doc(db, DEBRIEFS_COLLECTION, targetDebriefId),
-      (snap) => setSubmitted(snap.exists() ? { id: snap.id, ...snap.data() } : null)
+      (snap) => setSubmitted(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+      (err) => {
+        console.error('Shift debrief submitted listener failed:', err)
+        setSubmitted(null)
+      }
     )
     return () => unsubSubmitted()
   }, [targetDebriefId])
@@ -1104,6 +1171,11 @@ export default function ShiftDebriefPage({
           baseDraftRef.current = cloneRecord(remoteEditable)
           setCollaborationNotice('Debrief updated elsewhere. Safe changes were merged without replacing your typing.')
         }
+      },
+      (err) => {
+        console.error('Shift debrief draft listener failed:', err)
+        setDraft(null)
+        setCollaborationNotice('Debrief live updates are unavailable. You can keep typing, but save may need to be retried.')
       }
     )
     return () => unsubDraft()
@@ -1121,6 +1193,60 @@ export default function ShiftDebriefPage({
       setDirty(false)
     })()
     return () => { cancelled = true }
+  }, [context?.id, debriefId])
+
+  useEffect(() => {
+    if (!context?.id || !submitted?.id || debriefId) return undefined
+    let cancelled = false
+    ;(async () => {
+      const legacyDraftId = getDebriefDraftId(context.id)
+      const legacyDraft = await getOfflineDraft(legacyDraftId).catch(() => null)
+      const legacyItems = Array.isArray(legacyDraft?.payload?.items) ? legacyDraft.payload.items : []
+      if (legacyItems.length === 0 || cancelled) return
+
+      const submittedItemIds = new Set((Array.isArray(submitted.items) ? submitted.items : []).map(item => item?.id))
+      const submittedExtraItemIds = new Set((Array.isArray(submitted.extraNotes) ? submitted.extraNotes : [])
+        .map(note => String(note?.id || '').replace(/^quick_/, '')))
+      const recoverableItems = legacyItems.filter(item => (
+        item?.id
+        && !submittedItemIds.has(item.id)
+        && !submittedExtraItemIds.has(item.id)
+      ))
+      if (recoverableItems.length === 0) return
+
+      const quickDraftId = getDebriefQuickDraftId(context.id)
+      const quickDraft = await getOfflineDraft(quickDraftId).catch(() => null)
+      const existingQuickItems = Array.isArray(quickDraft?.payload?.items) ? quickDraft.payload.items : []
+      const nextQuickItems = mergeUniqueItems(existingQuickItems, recoverableItems)
+      await saveOfflineDraft(quickDraftId, 'debriefQuick', { context, items: nextQuickItems })
+      for (const item of recoverableItems) {
+        await queueShiftDebriefQuickNote({ context, item, user })
+      }
+      await deleteOfflineDraft(legacyDraftId)
+      if (!isOffline) await syncOfflineOutbox()
+      if (!cancelled) {
+        const remainingDraft = await getOfflineDraft(quickDraftId).catch(() => null)
+        setPendingQuickItems(sortItems(remainingDraft?.payload?.items || []))
+      }
+    })().catch(err => console.warn('Legacy offline debrief note recovery failed:', err))
+    return () => { cancelled = true }
+  }, [context, debriefId, isOffline, submitted, user])
+
+  useEffect(() => {
+    if (!context?.id || debriefId) return undefined
+    let cancelled = false
+    const loadPendingQuickItems = async () => {
+      const localDraft = await getOfflineDraft(getDebriefQuickDraftId(context.id)).catch(() => null)
+      if (!cancelled) {
+        setPendingQuickItems(sortItems(localDraft?.payload?.items || []))
+      }
+    }
+    loadPendingQuickItems()
+    window.addEventListener('offline-outbox-changed', loadPendingQuickItems)
+    return () => {
+      cancelled = true
+      window.removeEventListener('offline-outbox-changed', loadPendingQuickItems)
+    }
   }, [context?.id, debriefId])
 
   useEffect(() => {
@@ -1158,7 +1284,7 @@ export default function ShiftDebriefPage({
         <div style={styles.panel}>
           <h3 style={styles.panelTitle}>Not available for this assignment</h3>
           <p style={styles.bodyText}>
-            Shift Debrief V1 is only for Mesquite House and Lone Mountain PHP/OTC assignments.
+            Shift Debrief V1 is only for Mesquite House, Lone Mountain, and Test House PHP/OTC assignments.
           </p>
         </div>
       </DebriefShell>
@@ -1229,7 +1355,8 @@ export default function ShiftDebriefPage({
       alert(`Debrief changed elsewhere: ${formatConflictFields(collaborationConflicts)}. Use latest or keep yours before submitting.`)
       return
     }
-    const validItems = items.filter(item => item.note?.trim() && (item.type !== 'client' || item.clientName?.trim()))
+    const validItems = mergeUniqueItems(items, pendingQuickItems)
+      .filter(item => item.note?.trim() && (item.type !== 'client' || item.clientName?.trim()))
     if (validItems.length === 0) {
       alert('Please add at least one complete debrief note before submitting.')
       return
@@ -1250,6 +1377,7 @@ export default function ShiftDebriefPage({
         await queueShiftDebriefSubmission({ context, items: validItems, user })
         setHasLocalDraft(true)
         notifySuccess('Shift debrief saved on this device. It will sync when internet returns.')
+        onBack()
       } else {
         await submitShiftDebrief(context, validItems, user)
         await deleteOfflineDraft(getDebriefDraftId(context.id))
@@ -1257,6 +1385,14 @@ export default function ShiftDebriefPage({
         notifySuccess('Shift debrief submitted')
       }
       setDirty(false)
+    } catch (err) {
+      console.error('Shift debrief submit failed:', err)
+      alert(formatVersionConflictMessage(
+        err,
+        err?.code === 'permission-denied'
+          ? 'Debrief submit was blocked by app permissions. Please tell a supervisor so this can be checked.'
+          : err?.message || 'Failed to submit shift debrief.'
+      ))
     } finally {
       setSubmitting(false)
     }
@@ -1264,28 +1400,42 @@ export default function ShiftDebriefPage({
 
   const handleQuickSave = async (item) => {
     if (!context) return
-    if (submitted && isDebriefClosedForCorrections(submitted)) {
-      setQuickStatus(CLOSED_DEBRIEF_MESSAGE)
-      alert(CLOSED_DEBRIEF_MESSAGE)
-      return
+    try {
+      if (submitted && isDebriefClosedForCorrections(submitted)) {
+        throw new Error(CLOSED_DEBRIEF_MESSAGE)
+      }
+      if (isOffline) {
+        const quickDraftId = getDebriefQuickDraftId(context.id)
+        const localDraft = await getOfflineDraft(quickDraftId).catch(() => null)
+        const existingItems = Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items : []
+        const nextItems = mergeUniqueItems(existingItems, [item])
+        await saveOfflineDraft(quickDraftId, 'debriefQuick', { context, items: nextItems })
+        await queueShiftDebriefQuickNote({ context, item, user })
+        setPendingQuickItems(nextItems)
+        setLastSavedAt(new Date())
+        setQuickStatus('Saved on this device. It will sync when internet returns.')
+        notifySuccess('Debrief note saved on this device')
+        onQuickNoteSaved?.()
+        return
+      }
+      const result = await saveQuickDebriefNote(context, item, user)
+      setQuickStatus(result.mode === 'extra'
+        ? 'Saved as an extra note because today\'s debrief is already submitted.'
+        : 'Saved to today\'s draft debrief.')
+      notifySuccess(result.mode === 'extra' ? 'Extra note added' : 'Debrief note saved')
+      onQuickNoteSaved?.()
+    } catch (err) {
+      console.error('Quick debrief note save failed:', err)
+      const message = formatVersionConflictMessage(
+        err,
+        err?.code === 'permission-denied'
+          ? 'Debrief note was blocked by app permissions. Please tell a supervisor so this can be checked.'
+          : err?.message || 'Failed to save debrief note.'
+      )
+      setQuickStatus(message)
+      alert(message)
+      throw err
     }
-    if (isOffline) {
-      const localDraft = await getOfflineDraft(getDebriefDraftId(context.id)).catch(() => null)
-      const existingItems = Array.isArray(localDraft?.payload?.items) ? localDraft.payload.items : items
-      const nextItems = [...existingItems, item]
-      await saveOfflineDraft(getDebriefDraftId(context.id), 'debrief', { context, items: nextItems })
-      setItems(sortItems(nextItems))
-      setHasLocalDraft(true)
-      setLastSavedAt(new Date())
-      setQuickStatus('Saved on this device. It will sync when internet returns.')
-      notifySuccess('Debrief note saved on this device')
-      return
-    }
-    const result = await saveQuickDebriefNote(context, item, user)
-    setQuickStatus(result.mode === 'extra'
-      ? 'Saved as an extra note because today\'s debrief is already submitted.'
-      : 'Saved to today\'s draft debrief.')
-    notifySuccess(result.mode === 'extra' ? 'Extra note added' : 'Debrief note saved')
   }
 
   const updateDraftItems = (updater) => {
@@ -1340,6 +1490,17 @@ export default function ShiftDebriefPage({
         </div>
       )}
 
+      {pendingQuickItems.length > 0 && (
+        <div style={styles.pendingOfflinePanel}>
+          <strong>{pendingQuickItems.length} offline debrief note{pendingQuickItems.length === 1 ? '' : 's'} pending sync</strong>
+          {pendingQuickItems.map(item => (
+            <div key={item.id} style={styles.pendingOfflineItem}>
+              {item.clientName ? `${item.clientName}: ` : ''}{item.note}
+            </div>
+          ))}
+        </div>
+      )}
+
       {mode === 'quick' ? (
         <div style={styles.panel}>
           <h3 style={styles.panelTitle}>Quick Note</h3>
@@ -1349,12 +1510,12 @@ export default function ShiftDebriefPage({
               : 'Save a client note or general handoff item. If the debrief is already submitted, this saves as an extra note.'}
           </p>
           {submitted && isDebriefClosedForCorrections(submitted) ? null : (
-            <DebriefNoteForm user={user} onSave={handleQuickSave} buttonLabel="Save Debrief Note" compact />
+            <DebriefNoteForm user={user} onSave={handleQuickSave} buttonLabel="Save Debrief Note" compact isOffline={isOffline} />
           )}
           {quickStatus && <div style={styles.savedText}>{quickStatus}</div>}
         </div>
       ) : submitted ? (
-        <SubmittedDebriefView debrief={submitted} user={user} />
+        <SubmittedDebriefView debrief={submitted} user={user} isOffline={isOffline} />
       ) : (
         <SectionTabsDraftEditor
           items={items}
@@ -1551,6 +1712,21 @@ const styles = {
     fontSize: '13px',
     color: '#2F7D57',
     fontWeight: 700
+  },
+  pendingOfflinePanel: {
+    padding: '12px 14px',
+    borderRadius: '8px',
+    backgroundColor: 'rgba(176,122,40,0.10)',
+    border: '1px solid rgba(176,122,40,0.28)',
+    color: '#765116',
+    fontSize: '13px'
+  },
+  pendingOfflineItem: {
+    marginTop: '7px',
+    paddingTop: '7px',
+    borderTop: '1px solid rgba(176,122,40,0.22)',
+    color: 'var(--text-primary)',
+    whiteSpace: 'pre-wrap'
   },
   lockedBanner: {
     padding: '12px 14px',

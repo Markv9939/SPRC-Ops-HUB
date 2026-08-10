@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { auth } from '../firebase'
-import { resolveCurrentAuthSession, signInWithApprovedGoogle } from '../services/authProfileService'
+import {
+  completeApprovedGoogleRedirect,
+  resolveCurrentAuthSession,
+  signInWithApprovedGoogle
+} from '../services/authProfileService'
 import { isOfflineMode } from '../utils/networkGuard'
 
 function GoogleLogin({ onLogin }) {
@@ -11,27 +15,53 @@ function GoogleLogin({ onLogin }) {
 
   useEffect(() => {
     let cancelled = false
-    const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
-      if (!authUser) {
-        if (!cancelled) setCheckingSession(false)
-        return
-      }
+    let unsubscribe = () => {}
+
+    const clearDeniedSession = async (message, err) => {
+      console.warn(message, err)
       try {
-        const sessionUser = await resolveCurrentAuthSession()
-        if (!cancelled && sessionUser) onLogin(sessionUser)
-      } catch (err) {
-        console.warn('Saved Google session could not be restored:', err)
-        try {
-          await signOut(auth)
-        } catch (signOutError) {
-          console.warn('Failed to clear unusable Google session:', signOutError)
+        await signOut(auth)
+      } catch (signOutError) {
+        console.warn('Failed to clear unusable Google session:', signOutError)
+      }
+    }
+
+    const restoreSavedSession = () => {
+      unsubscribe = onAuthStateChanged(auth, async (authUser) => {
+        if (!authUser) {
+          if (!cancelled) setCheckingSession(false)
+          return
         }
+        try {
+          const sessionUser = await resolveCurrentAuthSession()
+          if (!cancelled && sessionUser) onLogin(sessionUser)
+        } catch (err) {
+          await clearDeniedSession('Saved Google session could not be restored:', err)
+          if (!cancelled) {
+            setError(err?.message || 'Sign in again with an approved Google account.')
+            setCheckingSession(false)
+          }
+        }
+      })
+    }
+
+    completeApprovedGoogleRedirect()
+      .then((sessionUser) => {
+        if (cancelled) return
+        if (sessionUser) {
+          onLogin(sessionUser)
+          return
+        }
+        restoreSavedSession()
+      })
+      .catch(async (err) => {
+        await clearDeniedSession('Google redirect sign-in failed:', err)
         if (!cancelled) {
-          setError(err?.message || 'Sign in again with an approved Google account.')
+          setError(err?.message || 'Google sign-in failed. Contact an admin if this email should have access.')
           setCheckingSession(false)
         }
-      }
-    })
+      })
+
     return () => {
       cancelled = true
       unsubscribe()
@@ -48,8 +78,7 @@ function GoogleLogin({ onLogin }) {
     setIsLoading(true)
     setError('')
     try {
-      const sessionUser = await signInWithApprovedGoogle()
-      onLogin(sessionUser)
+      await signInWithApprovedGoogle()
     } catch (err) {
       console.error('Google sign-in failed:', err)
       setError(err?.message || 'Google sign-in failed. Contact an admin if this email should have access.')
@@ -84,7 +113,7 @@ function GoogleLogin({ onLogin }) {
           disabled={isLoading || checkingSession}
         >
           <span className="google-login-mark">G</span>
-          <span>{checkingSession ? 'Checking session...' : isLoading ? 'Signing in...' : 'Continue with Google'}</span>
+          <span>{checkingSession ? 'Checking session...' : isLoading ? 'Redirecting...' : 'Continue with Google'}</span>
         </button>
 
         <p className="google-login-note">

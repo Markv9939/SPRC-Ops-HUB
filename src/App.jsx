@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { db, auth } from './firebase'
 import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, getDocs, doc } from 'firebase/firestore'
 import { signOut } from 'firebase/auth'
-import GoogleLogin from './components/GoogleLogin'
+import PinLogin from './components/PinLogin'
 import Header from './components/Header'
 import BhtHub from './components/BhtHub'
 import LocationIssuesBoard from './components/LocationIssuesBoard'
@@ -17,12 +17,13 @@ import ToastHost from './components/ToastHost'
 import DialogHost from './components/DialogHost'
 import { syncEocTasksForUserScope } from './services/eocTaskEngine'
 import { syncFleetTasksForUserScope } from './services/fleetTaskEngine'
-import { syncDerivedAssignmentForUser } from './services/assignmentService'
 import { refreshScopedSessionUser } from './services/accessGrantService'
 import { changeOwnPin } from './services/userPinService'
-import { listAllOfflineActions, saveOfflineDraft } from './services/offlineStore'
+import { getOfflineDraft, listAllOfflineActions, listOfflineDrafts, saveOfflineDraft } from './services/offlineStore'
 import {
   OFFLINE_ACTION_TYPES,
+  getDebriefDraftId,
+  getDebriefQuickDraftId,
   getTransportDraftId,
   isLocalTransportId,
   makeLocalTransportId,
@@ -49,6 +50,7 @@ import {
   isSupervisorRole,
   normalizeTransportSite
 } from './utils/orgModel'
+import { toTransportRecordDate } from './utils/transportRecord'
 
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
 const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
@@ -123,11 +125,7 @@ function getScopedTransportSites(user) {
 }
 
 function toTransportDate(value) {
-  if (!value) return null
-  if (typeof value?.toDate === 'function') return value.toDate()
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date
+  return toTransportRecordDate(value)
 }
 
 function transportSortTime(transport) {
@@ -150,22 +148,17 @@ function mergeTransportLists(onlineTransports, localTransports) {
   return Array.from(byId.values()).sort((a, b) => transportSortTime(b) - transportSortTime(a))
 }
 
-function getPendingLocalTransports(actions, sessionUser) {
-  const allowedStatuses = new Set(['pending', 'failed', 'syncing', 'needsReview'])
-  return (Array.isArray(actions) ? actions : [])
-    .filter(action => action.type === OFFLINE_ACTION_TYPES.TRANSPORT_CREATE && allowedStatuses.has(action.status))
-    .map(action => {
-      const snapshot = action.payload?.snapshot || action.payload?.transport || null
-      const localTransportId = action.payload?.localTransportId || ''
-      if (!snapshot || !localTransportId) return null
-      if (String(snapshot.createdByUserId || action.payload?.user?.id || '') !== String(sessionUser?.id || '')) return null
-      return {
-        id: localTransportId,
-        ...snapshot,
-        localOnly: true,
-        pendingSync: true
-      }
-    })
+function getLocalTransportSnapshots(drafts, sessionUser) {
+  return (Array.isArray(drafts) ? drafts : [])
+    .map(draft => draft?.payload?.snapshot || null)
+    .filter(snapshot => String(snapshot?.createdByUserId || '') === String(sessionUser?.id || ''))
+    .map(snapshot => ({
+      ...snapshot,
+      id: snapshot.id,
+      localOnly: snapshot.localOnly === true || isLocalTransportId(snapshot.id),
+      pendingSync: true
+    }))
+    .filter(snapshot => snapshot.id)
     .filter(Boolean)
 }
 
@@ -287,7 +280,7 @@ function App() {
   const managementTransportId = activeRoute.managementTransportId || null
   const managementTransportMode = activeRoute.managementTransportMode || 'list'
   const [bhtDebriefAssignment, setBhtDebriefAssignment] = useState(null)
-  const [bhtDebriefSummary, setBhtDebriefSummary] = useState({ available: false, status: 'none', itemCount: 0 })
+  const [bhtDebriefSummary, setBhtDebriefSummary] = useState({ available: false, status: 'none', itemCount: 0, pendingQuickItemCount: 0 })
   // Alert count and issue updates from shared hooks
   const { inEocScope, inComplianceScope, exactIssueLocationIds, inIssueScope } = useUserScope(user)
   const { eocAlerts, fleetAlerts, debriefAlerts, unreadCount: alertCount, issueUpdates } = useScopedAlerts({
@@ -296,8 +289,12 @@ function App() {
     inComplianceScope,
     enabled: !!user
   })
-  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
+  const [isOffline, setIsOffline] = useState(() => (
+    (typeof navigator !== 'undefined' && navigator.onLine === false)
+    || (import.meta.env.DEV && new URLSearchParams(window.location.search).has('offline-test'))
+  ))
   const [offlineOutboxSummary, setOfflineOutboxSummary] = useState({ pending: 0, syncing: 0, failed: 0, needsReview: 0 })
+  const [pendingEocTaskIds, setPendingEocTaskIds] = useState([])
   const [isChangePinOpen, setIsChangePinOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [dashboardNavigationTarget, setDashboardNavigationTarget] = useState(null)
@@ -315,10 +312,11 @@ function App() {
         available: true,
         status: 'none',
         itemCount: 0,
+        pendingQuickItemCount: 0,
         debriefId: bhtDebriefContext.id,
         ...(bhtDebriefSummary.debriefId === bhtDebriefContext.id ? bhtDebriefSummary : {})
       }
-    : { available: false, status: 'none', itemCount: 0 }
+    : { available: false, status: 'none', itemCount: 0, pendingQuickItemCount: 0 }
 
   useEffect(() => {
     const restoreAlerts = installAlertDialogBridge()
@@ -454,22 +452,32 @@ function App() {
         if (action.status === 'needsReview') next.needsReview += 1
       }
       setOfflineOutboxSummary(next)
+      const pendingStatuses = new Set(['pending', 'syncing', 'failed', 'needsReview'])
+      setPendingEocTaskIds(Array.from(new Set(
+        actions
+          .filter(action => action.type === OFFLINE_ACTION_TYPES.EOC_SUBMISSION && pendingStatuses.has(action.status))
+          .map(action => action.payload?.task?.id || action.payload?.taskId || '')
+          .filter(Boolean)
+      )))
     } catch (err) {
       console.warn('Offline outbox summary unavailable:', err)
     }
   }, [])
 
-  const loadPendingLocalTransports = useCallback(async () => {
+  const loadLocalTransportDrafts = useCallback(async () => {
     if (!user || !isBhtRole(user.role)) return []
-    const actions = await listAllOfflineActions()
-    return getPendingLocalTransports(actions, user)
+    const drafts = await listOfflineDrafts('transport')
+    return getLocalTransportSnapshots(drafts, user)
   }, [user])
 
-  const refreshPendingLocalTransports = useCallback(async () => {
+  const refreshLocalTransportDrafts = useCallback(async () => {
     if (!user || !isBhtRole(user.role)) return
     try {
-      const actions = await listAllOfflineActions()
-      const localTransports = getPendingLocalTransports(actions, user)
+      const [actions, drafts] = await Promise.all([
+        listAllOfflineActions(),
+        listOfflineDrafts('transport')
+      ])
+      const localTransports = getLocalTransportSnapshots(drafts, user)
       const syncedTransportId = getSyncedTransportIdForLocal(actions, currentTransportId)
       if (syncedTransportId) {
         navigate(`/transport/${encodeURIComponent(syncedTransportId)}`, { replace: true })
@@ -496,14 +504,14 @@ function App() {
 
   useEffect(() => {
     if (!user || !isBhtRole(user.role)) return undefined
-    const refreshTimer = window.setTimeout(() => refreshPendingLocalTransports(), 0)
-    const handleOutboxChange = () => refreshPendingLocalTransports()
+    const refreshTimer = window.setTimeout(() => refreshLocalTransportDrafts(), 0)
+    const handleOutboxChange = () => refreshLocalTransportDrafts()
     window.addEventListener('offline-outbox-changed', handleOutboxChange)
     return () => {
       window.clearTimeout(refreshTimer)
       window.removeEventListener('offline-outbox-changed', handleOutboxChange)
     }
-  }, [refreshPendingLocalTransports, user])
+  }, [refreshLocalTransportDrafts, user])
 
   useEffect(() => {
     if (!user || isOffline) return undefined
@@ -623,48 +631,69 @@ function App() {
     )
 
     let cancelled = false
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const transportData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }))
-      ;(async () => {
-        const localTransports = await loadPendingLocalTransports()
-        if (!cancelled) {
-          setTransports(mergeTransportLists(transportData, localTransports))
-        }
-      })().catch(err => {
-        console.warn('Pending offline transports unavailable:', err)
-        if (!cancelled) setTransports(transportData)
-      })
-    })
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const transportData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }))
+        ;(async () => {
+          const localTransports = await loadLocalTransportDrafts()
+          if (!cancelled) {
+            setTransports(mergeTransportLists(transportData, localTransports))
+          }
+        })().catch(err => {
+          console.warn('Pending offline transports unavailable:', err)
+          if (!cancelled) setTransports(transportData)
+        })
+      },
+      (err) => {
+        console.error('BHT transport listener failed:', err)
+        if (!cancelled) setTransports([])
+      }
+    )
 
     return () => {
       cancelled = true
       unsubscribe()
     }
-  }, [loadPendingLocalTransports, user])
+  }, [loadLocalTransportDrafts, user])
 
   useEffect(() => {
     if (!bhtDebriefContext?.id) {
       const resetTimer = window.setTimeout(() => {
-        setBhtDebriefSummary({ available: false, status: 'none', itemCount: 0 })
+        setBhtDebriefSummary({ available: false, status: 'none', itemCount: 0, pendingQuickItemCount: 0 })
       }, 0)
       return () => window.clearTimeout(resetTimer)
     }
 
     const initialTimer = window.setTimeout(() => {
-      setBhtDebriefSummary({ available: true, status: 'none', itemCount: 0, debriefId: bhtDebriefContext.id })
+      setBhtDebriefSummary({ available: true, status: 'none', itemCount: 0, pendingQuickItemCount: 0, debriefId: bhtDebriefContext.id })
     }, 0)
     let latestDraft = null
     let latestSubmitted = null
+    let pendingQuickItemCount = 0
+    let localDraftItemCount = 0
+    let pendingSubmission = false
     const updateSummary = () => {
       if (latestSubmitted) {
         setBhtDebriefSummary({
           available: true,
           status: 'submitted',
           itemCount: Array.isArray(latestSubmitted.items) ? latestSubmitted.items.length : 0,
+          pendingQuickItemCount,
           debriefId: latestSubmitted.id
+        })
+        return
+      }
+      if (pendingSubmission) {
+        setBhtDebriefSummary({
+          available: true,
+          status: 'pendingSubmission',
+          itemCount: localDraftItemCount,
+          pendingQuickItemCount,
+          debriefId: bhtDebriefContext.id
         })
         return
       }
@@ -672,25 +701,78 @@ function App() {
         setBhtDebriefSummary({
           available: true,
           status: 'draft',
-          itemCount: Array.isArray(latestDraft.items) ? latestDraft.items.length : 0,
+          itemCount: (Array.isArray(latestDraft.items) ? latestDraft.items.length : 0) + pendingQuickItemCount,
+          pendingQuickItemCount,
           debriefId: latestDraft.id
         })
         return
       }
-      setBhtDebriefSummary({ available: true, status: 'none', itemCount: 0, debriefId: bhtDebriefContext.id })
+      if (localDraftItemCount > 0) {
+        setBhtDebriefSummary({
+          available: true,
+          status: 'draft',
+          itemCount: localDraftItemCount + pendingQuickItemCount,
+          pendingQuickItemCount,
+          debriefId: bhtDebriefContext.id
+        })
+        return
+      }
+      setBhtDebriefSummary({
+        available: true,
+        status: pendingQuickItemCount > 0 ? 'draft' : 'none',
+        itemCount: pendingQuickItemCount,
+        pendingQuickItemCount,
+        debriefId: bhtDebriefContext.id
+      })
     }
 
-    const unsubDraft = onSnapshot(doc(db, DEBRIEF_DRAFTS_COLLECTION, bhtDebriefContext.id), (snap) => {
-      latestDraft = snap.exists() ? { id: snap.id, ...snap.data() } : null
+    const refreshPendingQuickSummary = async () => {
+      const [quickDraft, fullDraft, actions] = await Promise.all([
+        getOfflineDraft(getDebriefQuickDraftId(bhtDebriefContext.id)).catch(() => null),
+        getOfflineDraft(getDebriefDraftId(bhtDebriefContext.id)).catch(() => null),
+        listAllOfflineActions().catch(() => [])
+      ])
+      pendingQuickItemCount = Array.isArray(quickDraft?.payload?.items) ? quickDraft.payload.items.length : 0
+      localDraftItemCount = Array.isArray(fullDraft?.payload?.items) ? fullDraft.payload.items.length : 0
+      const pendingStatuses = new Set(['pending', 'syncing', 'failed', 'needsReview'])
+      pendingSubmission = actions.some(action => (
+        action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION
+        && pendingStatuses.has(action.status)
+        && String(action.payload?.context?.id || '') === String(bhtDebriefContext.id)
+      ))
       updateSummary()
-    })
-    const unsubSubmitted = onSnapshot(doc(db, DEBRIEFS_COLLECTION, bhtDebriefContext.id), (snap) => {
-      latestSubmitted = snap.exists() ? { id: snap.id, ...snap.data() } : null
-      updateSummary()
-    })
+    }
+    refreshPendingQuickSummary()
+    window.addEventListener('offline-outbox-changed', refreshPendingQuickSummary)
+
+    const unsubDraft = onSnapshot(
+      doc(db, DEBRIEF_DRAFTS_COLLECTION, bhtDebriefContext.id),
+      (snap) => {
+        latestDraft = snap.exists() ? { id: snap.id, ...snap.data() } : null
+        updateSummary()
+      },
+      (err) => {
+        console.error('BHT debrief draft summary listener failed:', err)
+        latestDraft = null
+        updateSummary()
+      }
+    )
+    const unsubSubmitted = onSnapshot(
+      doc(db, DEBRIEFS_COLLECTION, bhtDebriefContext.id),
+      (snap) => {
+        latestSubmitted = snap.exists() ? { id: snap.id, ...snap.data() } : null
+        updateSummary()
+      },
+      (err) => {
+        console.error('BHT submitted debrief summary listener failed:', err)
+        latestSubmitted = null
+        updateSummary()
+      }
+    )
 
     return () => {
       window.clearTimeout(initialTimer)
+      window.removeEventListener('offline-outbox-changed', refreshPendingQuickSummary)
       unsubDraft()
       unsubSubmitted()
     }
@@ -699,24 +781,11 @@ function App() {
   // Sync EOC task generation + overdue status on session start and while online.
   useEffect(() => {
     if (!user || isOffline) return
+    if (isBhtRole(user.role)) return
 
     let cancelled = false
     const runEocSync = async () => {
       try {
-        if (isBhtRole(user.role)) {
-          await syncDerivedAssignmentForUser(user.id, {
-            name: user.name,
-            role: user.role,
-            locationId: user.locationId,
-            location: user.location || user.site || '',
-            site: user.site || user.location || '',
-            house: user.house || '',
-            shiftId: user.shiftId,
-            vanId: user.vanId,
-            vanIds: Array.isArray(user.vanIds) ? user.vanIds : [],
-            active: user.active !== false
-          })
-        }
         const result = await syncEocTasksForUserScope(user)
         if (!cancelled && (result.created > 0 || result.updated > 0)) {
           console.info('EOC task engine sync complete:', result)
@@ -834,6 +903,7 @@ function App() {
         const newTransport = {
           id: localTransportId,
           site: transportSite,
+          locationId: user.locationId || '',
           createdByUserId: user.id,
           createdByName: user.name,
           status: 'open',
@@ -885,6 +955,7 @@ function App() {
 
       const newTransport = {
         site: transportSite,
+        locationId: user.locationId || '',
         createdByUserId: user.id,
         createdByName: user.name,
         status: 'open',
@@ -1002,7 +1073,7 @@ function App() {
   if (user === null) {
     return (
       <>
-        <GoogleLogin onLogin={handleLogin} />
+        <PinLogin onLogin={handleLogin} />
         <DialogHost />
         <ToastHost />
       </>
@@ -1010,6 +1081,7 @@ function App() {
   }
 
   const isManagementUser = isSupervisorRole(user.role) || isAdminRole(user.role)
+  const canChangeOwnPin = isBhtRole(user.role) || isSupervisorRole(user.role) || isAdminRole(user.role)
   const commonHeaderProps = {
     userName: user.name,
     userSubtitle: bhtHeaderSubtitle,
@@ -1019,8 +1091,8 @@ function App() {
     onNavigateHome: () => navigateHome(),
     onNavigateSection: navigateDashboardTab,
     onLogout: handleLogout,
-    onChangePin: null,
-    canChangeOwnPin: false,
+    onChangePin: () => setIsChangePinOpen(true),
+    canChangeOwnPin,
     alertCount,
     isOffline,
     pendingSyncCount,
@@ -1042,6 +1114,7 @@ function App() {
         fleetAlerts={fleetAlerts}
         debriefAlerts={debriefAlerts}
         issueUpdates={issueUpdates}
+        isOffline={isOffline}
         onNavigateToIssue={handleNavigateToIssue}
         onNavigateToFleet={handleNavigateToFleet}
         onNavigateToDebrief={handleNavigateToDebrief}
@@ -1099,7 +1172,9 @@ function App() {
         mode={currentDebriefMode}
         debriefId={currentDebriefId}
         isOffline={isOffline}
+        pendingEocTaskIds={pendingEocTaskIds}
         onBack={handleDebriefBack}
+        onQuickNoteSaved={navigateHome}
       />,
       {
         title: currentDebriefMode === 'quick' ? 'Add Debrief Note' : 'Shift Debrief',

@@ -10,7 +10,10 @@ import {
   serverTimestamp,
   Timestamp
 } from 'firebase/firestore'
-import { createHash } from 'crypto'
+import { createHash, randomInt } from 'crypto'
+
+const PIN_VERSION = 'v2_sha256_6digit'
+const GENERATED_PINS = new Set()
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDkeTilCGBAxaR9Vz4uiIHsxLENvvRsy7U',
@@ -46,8 +49,21 @@ const db = getFirestore(app)
 
 function hashPin(pin) {
   return createHash('sha256')
-    .update(`sprc-pin-v1:${String(pin || '').trim()}`)
+    .update(`sprc-pin-v2-6digit:${String(pin || '').trim()}`)
     .digest('hex')
+}
+
+function isObviousPin(pin) {
+  return /^(\d)\1+$/.test(pin) || ['012345', '123456', '654321', '987654'].includes(pin)
+}
+
+function generateUniquePin() {
+  while (true) {
+    const pin = String(randomInt(100000, 1000000))
+    if (GENERATED_PINS.has(pin) || isObviousPin(pin)) continue
+    GENERATED_PINS.add(pin)
+    return pin
+  }
 }
 
 function toPhoenixDateStr(dayOffset = 0) {
@@ -127,7 +143,7 @@ async function seedUsers() {
     {
       id: 'admin_owner',
       name: 'Admin Owner',
-      pin: '1111',
+      pin: generateUniquePin(),
       role: 'admin',
       site: 'GLOBAL',
       location: 'GLOBAL',
@@ -137,7 +153,7 @@ async function seedUsers() {
     {
       id: 'supervisor_php',
       name: 'Supervisor OTC',
-      pin: '2222',
+      pin: generateUniquePin(),
       role: 'supervisor',
       site: 'OTC',
       location: 'OTC',
@@ -147,7 +163,7 @@ async function seedUsers() {
     {
       id: 'tech_mesquite_a',
       name: 'BHT Mesquite A',
-      pin: '3333',
+      pin: generateUniquePin(),
       role: 'bht',
       site: 'OTC',
       location: 'OTC',
@@ -161,7 +177,7 @@ async function seedUsers() {
     {
       id: 'tech_mesquite_b',
       name: 'BHT Mesquite B',
-      pin: '4444',
+      pin: generateUniquePin(),
       role: 'bht',
       site: 'OTC',
       location: 'OTC',
@@ -175,7 +191,7 @@ async function seedUsers() {
     {
       id: 'tech_lm_multi',
       name: 'BHT Lone Mountain',
-      pin: '5555',
+      pin: generateUniquePin(),
       role: 'bht',
       site: 'OTC',
       location: 'OTC',
@@ -187,9 +203,24 @@ async function seedUsers() {
       authorizedLocations: ['OTC', 'LONE_MOUNTAIN']
     },
     {
+      id: 'tech_test_house',
+      name: 'BHT Test House',
+      pin: generateUniquePin(),
+      role: 'bht',
+      site: 'OTC',
+      location: 'OTC',
+      house: 'TEST_HOUSE',
+      locationId: 'test_house',
+      shiftId: 'shift_1',
+      vanId: 'van_test',
+      active: true,
+      authorizedLocations: ['OTC', 'TEST_HOUSE'],
+      issueLocationIds: ['test_house']
+    },
+    {
       id: 'tech_unassigned',
       name: 'BHT RES Day',
-      pin: '6666',
+      pin: generateUniquePin(),
       role: 'bht',
       site: 'RES',
       location: 'RES',
@@ -203,7 +234,7 @@ async function seedUsers() {
     {
       id: 'tech_res_night',
       name: 'BHT RES Night',
-      pin: '7777',
+      pin: generateUniquePin(),
       role: 'bht',
       site: 'RES',
       location: 'RES',
@@ -222,7 +253,7 @@ async function seedUsers() {
     await setDoc(doc(db, 'users', user.id), {
       ...rest,
       pinHash: hashPin(pin),
-      pinVersion: 'v1_sha256',
+      pinVersion: PIN_VERSION,
       version: 1,
       pinUpdatedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
@@ -263,6 +294,16 @@ async function seedAssignments() {
       locationId: 'lone_mountain',
       shiftId: 'shift_2',
       vanIds: ['van_4'],
+      source: 'user_profile',
+      active: true
+    },
+    {
+      id: 'asg_tech_test_house',
+      bhtUserId: 'tech_test_house',
+      bhtUserName: 'BHT Test House',
+      locationId: 'test_house',
+      shiftId: 'shift_1',
+      vanIds: ['van_test'],
       source: 'user_profile',
       active: true
     },
@@ -423,6 +464,31 @@ async function seedEocTasks() {
       assigneeUserName: 'BHT Lone Mountain',
       dueDate: yesterday,
       status: 'overdue',
+      active: true
+    },
+    {
+      taskType: 'house',
+      locationId: 'test_house',
+      shiftId: 'shift_1',
+      eligibleUserIds: ['tech_test_house'],
+      eligibleUserNames: ['BHT Test House'],
+      assigneeUserId: 'tech_test_house',
+      assigneeUserName: 'BHT Test House',
+      dueDate: today,
+      status: 'pending',
+      active: true
+    },
+    {
+      taskType: 'van',
+      locationId: 'test_house',
+      shiftId: 'shift_1',
+      vanId: 'van_test',
+      eligibleUserIds: ['tech_test_house'],
+      eligibleUserNames: ['BHT Test House'],
+      assigneeUserId: 'tech_test_house',
+      assigneeUserName: 'BHT Test House',
+      dueDate: today,
+      status: 'pending',
       active: true
     },
     {
@@ -638,13 +704,9 @@ async function main() {
   console.log('')
   console.log('UAT reset complete.')
   console.log('Test logins:')
-  console.log('- Admin: PIN 1111')
-  console.log('- Supervisor (OTC scope): PIN 2222')
-  console.log('- BHT Mesquite A: PIN 3333')
-  console.log('- BHT Mesquite B: PIN 4444')
-  console.log('- BHT Lone Mountain (multi-van): PIN 5555')
-  console.log('- BHT RES Day: PIN 6666')
-  console.log('- BHT RES Night: PIN 7777')
+  userResult.users.forEach(seededUser => {
+    console.log(`- ${seededUser.name}: PIN ${seededUser.pin}`)
+  })
 
   process.exit(0)
 }

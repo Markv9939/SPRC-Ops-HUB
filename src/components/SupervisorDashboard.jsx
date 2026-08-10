@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, getDoc, getDocs, getDocsFromServer, updateDoc, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Eye, EyeOff, RefreshCw } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import DashboardSummaryPanel from './DashboardSummaryPanel'
 import SupervisorEocPanel from './SupervisorEocPanel'
@@ -15,11 +15,13 @@ import TransportDetailsDrawer from './TransportDetailsDrawer'
 import TransportRecordPage from './TransportRecordPage'
 import { LOCATIONS, VANS, getShiftLabel, getShiftOptionsForMainLocation, isShiftAllowedForMainLocation } from '../data/eocConstants'
 import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../services/assignmentService'
+import { hashPin } from '../utils/pinHash'
+import { PIN_LENGTH, PIN_VERSION, generateSecurePin, isObviousPin, isValidPin, normalizePin } from '../utils/pinPolicy'
+import { findDuplicatePinUser } from '../services/pinConflictService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
 import { writeAuditLog as writeAuditEntry } from '../services/notificationService'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
-import { COMPANY_EMAIL_DOMAIN, getEmailDomain, isCompanyEmail, normalizeEmail } from '../services/authProfileService'
 import useUserScope from '../hooks/useUserScope'
 import useScopedIssues from '../hooks/useScopedIssues'
 import useScopedFleet from '../hooks/useScopedFleet'
@@ -63,33 +65,14 @@ function normalizeVanIdList(values, fallbackVanId = '') {
 
 function buildIssueLocationIds({ role, locationId, mainLocation }) {
   const normalizedRole = normalizeRole(role)
-  if (normalizedRole === 'admin') return ['lone_mountain', 'mesquite', 'res']
+  if (normalizedRole === 'admin') return ['lone_mountain', 'mesquite', 'test_house', 'res']
   if (normalizedRole === 'supervisor') {
-    if (mainLocation === 'OTC') return ['lone_mountain', 'mesquite']
+    if (mainLocation === 'OTC') return ['lone_mountain', 'mesquite', 'test_house']
     if (mainLocation === 'RES') return ['res']
     return []
   }
   const exactLocation = String(locationId || '').trim().toLowerCase()
-  return ['lone_mountain', 'mesquite', 'res'].includes(exactLocation) ? [exactLocation] : []
-}
-
-function buildEmailLinkPayload({ appUserId, email, actorUser }) {
-  const normalizedEmail = normalizeEmail(email)
-  const domain = getEmailDomain(normalizedEmail)
-  const company = isCompanyEmail(normalizedEmail)
-  return {
-    userId: appUserId,
-    email: normalizedEmail,
-    emailDomain: domain,
-    emailType: company ? 'company' : 'external',
-    externalGoogleAllowed: !company,
-    externalReason: company ? null : `Approved by ${actorUser?.name || 'admin'} for Ops Hub access`,
-    externalApprovedByUserId: company ? null : actorUser?.id || null,
-    externalApprovedByName: company ? null : actorUser?.name || null,
-    externalApprovedAt: company ? null : serverTimestamp(),
-    active: true,
-    updatedAt: serverTimestamp()
-  }
+  return ['lone_mountain', 'mesquite', 'test_house', 'res'].includes(exactLocation) ? [exactLocation] : []
 }
 
 function buildInternalUserId(name, existingIds = []) {
@@ -198,16 +181,18 @@ function SupervisorDashboard({
   const [userForm, setUserForm] = useState({
     id: '',
     name: '',
+    pin: '',
     role: '',
     location: '',
     house: '',
     shiftId: '',
     vanId: '',
     vanIds: [],
-    email: '',
     issueLocationIds: [],
     active: true
   })
+  const [showUserPin, setShowUserPin] = useState(false)
+  const [generatingPin, setGeneratingPin] = useState(false)
 
   // ── Scope derivation (extracted to shared hook) ──
   const {
@@ -398,7 +383,6 @@ function SupervisorDashboard({
     shiftId: '',
     vanId: '',
     vanIds: [],
-    email: '',
     issueLocationIds: [],
     active: true
   }), [])
@@ -415,6 +399,7 @@ function SupervisorDashboard({
 
     setEditingUser('new')
     setUserForm(buildDefaultUserForm())
+    setShowUserPin(false)
   }
 
   const handleEditUser = (managedUser) => {
@@ -437,15 +422,40 @@ function SupervisorDashboard({
       house: normalizeHouseId(managedUser?.house || managedUser?.locationId),
       shiftId: String(managedUser?.shiftId || '').trim(),
       vanIds: normalizeVanIdList(managedUser?.vanIds, managedUser?.vanId),
-      vanId: normalizeVanIdList(managedUser?.vanIds, managedUser?.vanId)[0] || ''
+      vanId: normalizeVanIdList(managedUser?.vanIds, managedUser?.vanId)[0] || '',
+      pin: ''
     })
     setEditingUser(managedUser.id)
+    setShowUserPin(false)
+  }
+
+  const handleGenerateUserPin = async () => {
+    if (blockIfOffline('generating a PIN')) return
+    setGeneratingPin(true)
+    try {
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        const candidate = generateSecurePin()
+        const duplicateUser = await findDuplicatePinUser(candidate, {
+          excludeUserId: editingUser === 'new' ? null : userForm.id
+        })
+        if (duplicateUser) continue
+        setUserForm(prev => ({ ...prev, pin: candidate }))
+        setShowUserPin(true)
+        return
+      }
+      alert('Unable to generate an unused PIN. Please try again.')
+    } catch (error) {
+      alert(error?.message || 'Unable to generate a PIN.')
+    } finally {
+      setGeneratingPin(false)
+    }
   }
 
   const handleSaveUser = async () => {
     if (blockIfOffline('saving users')) return
 
     const isNewUser = editingUser === 'new'
+    const hasPinInput = String(userForm.pin || '').trim().length > 0
 
     if (isNewUser && !isAdminRole(user?.role)) {
       alert('Only admins can create login-capable accounts.')
@@ -457,18 +467,26 @@ function SupervisorDashboard({
       return
     }
 
+    if (isNewUser && !hasPinInput) {
+      alert(`Enter or generate a ${PIN_LENGTH}-digit PIN for the new user.`)
+      return
+    }
+
+    if (hasPinInput && !isValidPin(userForm.pin)) {
+      alert(`PIN must be exactly ${PIN_LENGTH} digits.`)
+      return
+    }
+
+    if (hasPinInput && isObviousPin(userForm.pin)) {
+      alert('Choose a less obvious PIN. Repeated or sequential digits are not allowed.')
+      return
+    }
+
     try {
       const normalizedRole = normalizeRole(userForm.role || '')
       const appUserId = isNewUser
         ? buildInternalUserId(userForm.name, users.map(managedUser => managedUser.id))
         : String(userForm.id || '').trim()
-      const normalizedEmail = normalizeEmail(userForm.email)
-      const adminFallbackEmail = (
-        normalizedRole === 'admin' && appUserId === user?.id
-          ? normalizeEmail(user?.authEmail || user?.email)
-          : ''
-      )
-      const resolvedEmail = normalizedEmail || adminFallbackEmail
 
       if (!normalizedRole) {
         alert('Please select a role.')
@@ -477,16 +495,6 @@ function SupervisorDashboard({
 
       if (!appUserId) {
         alert('Unable to generate an internal user ID from that name. Use at least one letter or number.')
-        return
-      }
-
-      if (isAdminRole(user?.role) && userForm.active === true && !resolvedEmail) {
-        alert(`Enter the user's approved Google email. Company email normally ends in @${COMPANY_EMAIL_DOMAIN}.`)
-        return
-      }
-
-      if (resolvedEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(resolvedEmail)) {
-        alert('Enter a valid Google email address.')
         return
       }
 
@@ -523,7 +531,7 @@ function SupervisorDashboard({
 
         normalizedHouse = normalizeHouseId(userForm.house)
         if (requiresHouseSelection(normalizedLocation) && !normalizedHouse) {
-          alert('OTC BHTs must be assigned to Mesquite House or Lone Mountain.')
+          alert('OTC BHTs must be assigned to Mesquite House, Lone Mountain, or Test House.')
           return
         }
 
@@ -563,19 +571,19 @@ function SupervisorDashboard({
         mainLocation: normalizedLocation,
         locationId: normalizedLocationId
       })
+      const pinHash = hasPinInput ? await hashPin(userForm.pin) : null
+      if (hasPinInput) {
+        const duplicateUser = await findDuplicatePinUser(userForm.pin, {
+          excludeUserId: isNewUser ? null : appUserId
+        })
+        if (duplicateUser) {
+          alert(`That PIN is already assigned to ${duplicateUser.name || duplicateUser.id}. Choose a different PIN.`)
+          return
+        }
+      }
 
       const payload = {
         name: userForm.name,
-        email: resolvedEmail || null,
-        emailDomain: resolvedEmail ? getEmailDomain(resolvedEmail) : null,
-        emailType: resolvedEmail ? (isCompanyEmail(resolvedEmail) ? 'company' : 'external') : null,
-        externalGoogleAllowed: resolvedEmail ? !isCompanyEmail(resolvedEmail) : false,
-        externalReason: resolvedEmail && !isCompanyEmail(resolvedEmail)
-          ? `Approved by ${user?.name || 'admin'} for Ops Hub access`
-          : null,
-        externalApprovedByUserId: resolvedEmail && !isCompanyEmail(resolvedEmail) ? user?.id || null : null,
-        externalApprovedByName: resolvedEmail && !isCompanyEmail(resolvedEmail) ? user?.name || null : null,
-        externalApprovedAt: resolvedEmail && !isCompanyEmail(resolvedEmail) ? serverTimestamp() : null,
         role: normalizedRole,
         site: normalizedRole === 'admin' ? GLOBAL_SCOPE : normalizedLocation,
         location: normalizedRole === 'admin' ? GLOBAL_SCOPE : normalizedLocation,
@@ -589,43 +597,24 @@ function SupervisorDashboard({
         issueLocationIds,
         updatedAt: serverTimestamp()
       }
-      if (!isNewUser && isAdminRole(user?.role)) {
-        const latestBeforeSave = await getDoc(doc(db, 'users', appUserId))
-        const previousEmail = normalizeEmail(latestBeforeSave.data()?.email)
-        if (previousEmail && resolvedEmail && previousEmail !== resolvedEmail) {
-          const oldLinkSnap = await getDoc(doc(db, 'userEmailLinks', previousEmail))
-          if (oldLinkSnap.exists() && oldLinkSnap.data()?.linkedAuthUid) {
-            const confirmed = await showConfirmDialog(
-              'This email is already linked to a Google sign-in. Changing it will deactivate the old email link and require the user to sign in with the new approved email.',
-              {
-                title: 'Change linked email?',
-                tone: 'warning',
-                confirmText: 'Change email',
-                cancelText: 'Cancel'
-              }
-            )
-            if (!confirmed) return
-          }
-        }
+      if (pinHash) {
+        payload.pinHash = pinHash
+        payload.pinVersion = PIN_VERSION
+        payload.pinUpdatedAt = serverTimestamp()
       }
 
       let userProfileSaved = false
       const persistUserAndAssignment = async () => {
         await runTransaction(db, async (transaction) => {
           const userRef = doc(db, 'users', appUserId)
-          const emailLinkRef = resolvedEmail ? doc(db, 'userEmailLinks', resolvedEmail) : null
           const latestSnap = await transaction.get(userRef)
-          const emailLinkSnap = emailLinkRef ? await transaction.get(emailLinkRef) : null
           let nextVersion = 1
-          let previousEmail = ''
-          const existingEmailLink = emailLinkSnap?.exists() ? emailLinkSnap.data() : null
 
           if (editingUser === 'new') {
             if (latestSnap.exists()) throw new Error('A user with this ID already exists.')
           } else {
             if (!latestSnap.exists()) throw new Error('User record no longer exists.')
             const latest = latestSnap.data()
-            previousEmail = normalizeEmail(latest.email)
             const versionCheck = assertExpectedVersion({
               expectedVersion: userForm._version,
               currentVersion: getVersionNumber(latest),
@@ -648,32 +637,6 @@ function SupervisorDashboard({
             })
           }
 
-          if (isAdminRole(user?.role) && resolvedEmail) {
-            if (existingEmailLink?.userId && existingEmailLink.userId !== appUserId) {
-              throw new Error('That email is already approved for another user.')
-            }
-            const emailLinkPayload = buildEmailLinkPayload({
-              appUserId,
-              email: resolvedEmail,
-              actorUser: user
-            })
-            transaction.set(emailLinkRef, {
-              ...emailLinkPayload,
-              linkedAuthUid: existingEmailLink?.linkedAuthUid || null,
-              linkedAt: existingEmailLink?.linkedAt || null,
-              version: getVersionNumber(existingEmailLink) + 1,
-              createdAt: existingEmailLink?.createdAt || serverTimestamp()
-            }, { merge: true })
-
-            if (previousEmail && previousEmail !== resolvedEmail) {
-              transaction.set(doc(db, 'userEmailLinks', previousEmail), {
-                active: false,
-                linkedAuthUid: null,
-                linkedAt: null,
-                updatedAt: serverTimestamp()
-              }, { merge: true })
-            }
-          }
         })
         userProfileSaved = true
 
@@ -695,11 +658,12 @@ function SupervisorDashboard({
           console.error('User saved but derived assignment sync failed:', persistError)
           alert('User profile saved, but the BHT assignment sync was denied by Firestore rules. Deploy the latest rules, then edit and save this user once more.')
           setEditingUser(null)
+          setShowUserPin(false)
           loadUsers()
           return
         }
         if (persistError?.code === 'permission-denied' && isAdminRole(user?.role)) {
-          alert('Admin save was denied by Firestore rules. Sign out, sign in with the approved admin Google email, and confirm the strict rules match this app version.')
+          alert('Admin save was denied by Firestore rules. Confirm the PIN-compatible rules are deployed.')
           return
         }
         throw persistError
@@ -707,6 +671,7 @@ function SupervisorDashboard({
 
       notifySuccess('User saved successfully')
       setEditingUser(null)
+      setShowUserPin(false)
       loadUsers()
     } catch (error) {
       console.error('Error saving user:', error)
@@ -808,6 +773,7 @@ function SupervisorDashboard({
   const handleCancelEdit = () => {
     setEditingUser(null)
     setUserForm(buildDefaultUserForm())
+    setShowUserPin(false)
   }
 
   const renderUserEditorFields = (isNewUser) => {
@@ -853,25 +819,49 @@ function SupervisorDashboard({
         </div>
         <div>
           <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-            Approved Google Email *
+            PIN ({PIN_LENGTH} digits) * {!isNewUser ? '(leave blank to keep current PIN)' : ''}
           </label>
-          <input
-            type="email"
-            value={userForm.email || ''}
-            onChange={(e) => setUserForm({ ...userForm, email: normalizeEmail(e.target.value) })}
-            placeholder={`name@${COMPANY_EMAIL_DOMAIN}`}
-            disabled={!isAdmin}
-            style={{
-              width: '100%',
-              padding: '8px',
-              border: '2px solid rgba(17,47,82,0.20)',
-              borderRadius: '6px',
-              fontSize: '14px',
-              boxSizing: 'border-box',
-              backgroundColor: isAdmin ? 'rgba(17,47,82,0.10)' : 'rgba(17,47,82,0.04)',
-              color: 'var(--text-primary)'
-            }}
-          />
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <input
+              type={showUserPin ? 'text' : 'password'}
+              inputMode="numeric"
+              value={userForm.pin || ''}
+              onChange={(e) => setUserForm({ ...userForm, pin: normalizePin(e.target.value) })}
+              placeholder="6 digits"
+              maxLength={PIN_LENGTH}
+              style={{
+                width: '100%',
+                minWidth: 0,
+                padding: '8px',
+                border: '2px solid rgba(17,47,82,0.20)',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+                backgroundColor: 'rgba(17,47,82,0.10)',
+                color: 'var(--text-primary)'
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowUserPin(value => !value)}
+              disabled={!userForm.pin}
+              title={showUserPin ? 'Hide PIN' : 'Show PIN'}
+              aria-label={showUserPin ? 'Hide PIN' : 'Show PIN'}
+              style={{ width: '36px', minWidth: '36px', border: '1px solid rgba(17,47,82,0.20)', borderRadius: '6px', background: 'rgba(17,47,82,0.08)', color: 'var(--text-primary)' }}
+            >
+              {showUserPin ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+            <button
+              type="button"
+              onClick={handleGenerateUserPin}
+              disabled={generatingPin || isOffline}
+              title="Generate secure PIN"
+              aria-label="Generate secure PIN"
+              style={{ width: '36px', minWidth: '36px', border: '1px solid rgba(17,47,82,0.20)', borderRadius: '6px', background: 'rgba(17,47,82,0.08)', color: 'var(--text-primary)' }}
+            >
+              <RefreshCw size={16} />
+            </button>
+          </div>
           <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
             {isNewUser
               ? `Internal ID will be generated automatically: ${buildInternalUserId(userForm.name, users.map(managedUser => managedUser.id))}`
@@ -1682,10 +1672,8 @@ function SupervisorDashboard({
                           </div>
                         </div>
                         <div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Approved Google Email</div>
-                          <div style={{ fontSize: '14px' }}>
-                            {managedUser.email || '--'}
-                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>PIN Storage</div>
+                          <div style={{ fontSize: '14px' }}>{managedUser.pinHash ? 'Configured' : 'Not configured'}</div>
                         </div>
                         <div>
                           <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Role</div>
@@ -1702,7 +1690,7 @@ function SupervisorDashboard({
                             <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>House / Shift / Van</div>
                             <div style={{ fontSize: '14px' }}>
                               {managedUserLocation === MAIN_LOCATION_OTC
-                                ? `${managedUserHouse === 'MESQUITE' ? 'Mesquite House' : (managedUserHouse === 'LONE_MOUNTAIN' ? 'Lone Mountain' : '--')}`
+                                ? (getHouseOptionsForMainLocation(MAIN_LOCATION_OTC).find(option => option.id === managedUserHouse)?.label || '--')
                                 : 'N/A'}
                               {' '} - {' '}
                               {(getShiftLabel(managedUser.shiftId) || '--')}

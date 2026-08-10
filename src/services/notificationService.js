@@ -274,6 +274,7 @@ export async function createTransportCompletedAlert({ transport, userName }) {
 
   const clientCount = Array.isArray(transport.clients) ? transport.clients.length : 0
   const site = transport.site || ''
+  const locationId = transport.locationId || transport.houseLocationId || site
   const clientLabel = `${clientCount} client${clientCount !== 1 ? 's' : ''}`
 
   await addDoc(collection(db, 'alerts'), {
@@ -281,7 +282,7 @@ export async function createTransportCompletedAlert({ transport, userName }) {
     type: 'transport_completed',
     transportId: transport.id,
     site,
-    locationId: site,
+    locationId,
     severity: 'low',
     message: `${userName || 'BHT'} completed transport - ${clientLabel}, ${site}.`,
     bhtName: userName || null,

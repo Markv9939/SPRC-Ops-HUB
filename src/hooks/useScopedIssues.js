@@ -72,6 +72,15 @@ export default function useScopedIssues({
               if (!inIssueScope || inIssueScope(issue.locationId)) merged.set(issue.id, issue)
             })
             setIssues(Array.from(merged.values()).sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt)))
+          },
+          (err) => {
+            console.error('Scoped issue listener failed:', err)
+            updateBuckets[index] = []
+            const merged = new Map()
+            updateBuckets.flat().filter(Boolean).forEach(issue => {
+              if (!inIssueScope || inIssueScope(issue.locationId)) merged.set(issue.id, issue)
+            })
+            setIssues(Array.from(merged.values()).sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt)))
           }
         )
         issueUnsubs.push(unsub)
@@ -88,6 +97,10 @@ export default function useScopedIssues({
             .map(d => ({ id: d.id, ...d.data() }))
             .filter(issue => inIssueScope ? inIssueScope(issue.locationId) : inEocScope(issue.locationId))
           setIssues(rows)
+        },
+        (err) => {
+          console.error('Scoped issue listener failed:', err)
+          setIssues([])
         }
       ))
     }
@@ -111,6 +124,15 @@ export default function useScopedIssues({
               if (!inIssueScope || inIssueScope(issue.locationId)) merged.set(issue.id, issue)
             })
             setResolvedIssues(Array.from(merged.values()).sort((a, b) => tsMs(b.closedAt || b.updatedAt) - tsMs(a.closedAt || a.updatedAt)))
+          },
+          (err) => {
+            console.error('Scoped resolved issue listener failed:', err)
+            resolvedBuckets[index] = []
+            const merged = new Map()
+            resolvedBuckets.flat().filter(Boolean).forEach(issue => {
+              if (!inIssueScope || inIssueScope(issue.locationId)) merged.set(issue.id, issue)
+            })
+            setResolvedIssues(Array.from(merged.values()).sort((a, b) => tsMs(b.closedAt || b.updatedAt) - tsMs(a.closedAt || a.updatedAt)))
           }
         )
         resolvedUnsubs.push(unsub)
@@ -125,6 +147,10 @@ export default function useScopedIssues({
           .filter(task => inEocScope(task.locationId))
         rows.sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''))
         setOverdueTasks(rows)
+      },
+      (err) => {
+        console.error('Scoped overdue EOC task listener failed:', err)
+        setOverdueTasks([])
       }
     )
 

@@ -1,4 +1,4 @@
-import { auth, db } from '../firebase'
+import { db } from '../firebase'
 import {
   arrayUnion,
   collection,
@@ -28,7 +28,7 @@ export const DEBRIEF_DRAFTS_COLLECTION = 'shiftDebriefDrafts'
 export const DEBRIEFS_COLLECTION = 'shiftDebriefs'
 export const CLOSED_DEBRIEF_MESSAGE = 'This debrief has already been reviewed and is now closed. No more corrections can be added.'
 
-export const DEBRIEF_LOCATION_IDS = new Set(['mesquite', 'lone_mountain'])
+export const DEBRIEF_LOCATION_IDS = new Set(['mesquite', 'lone_mountain', 'test_house'])
 
 export const CLIENT_NOTE_SECTIONS = [
   { id: 'client_progress_concerns', label: 'Client Progress & Concerns' },
@@ -142,6 +142,7 @@ export function groupDebriefItemsForReadView(items) {
 export function getDebriefLocationLabel(locationId) {
   if (locationId === 'mesquite') return 'Mesquite House'
   if (locationId === 'lone_mountain') return 'Lone Mountain'
+  if (locationId === 'test_house') return 'Test House'
   return cleanToken(locationId)
 }
 
@@ -171,8 +172,7 @@ export function getBhtDebriefContext(user, date = new Date(), assignment = null)
     outgoingDebriefDueAt: timing?.outgoingDebriefDueAt || null,
     incomingAcknowledgmentLateAt: timing?.incomingAcknowledgmentLateAt || null,
     draftByUserId: user.id,
-    draftByName: user.name || 'BHT',
-    draftByAuthUid: user.authUid || auth.currentUser?.uid || ''
+    draftByName: user.name || 'BHT'
   }
 }
 
@@ -300,6 +300,7 @@ export async function saveDebriefDraft(context, items, options = {}) {
 export async function addDraftItem(context, item) {
   const draft = await getCurrentDraftDebrief(context)
   const items = Array.isArray(draft?.items) ? draft.items : []
+  if (items.some(existing => existing?.id === item?.id)) return
   await saveDebriefDraft(context, [...items, item])
 }
 
@@ -348,8 +349,9 @@ export async function submitShiftDebrief(context, items, user) {
     version: 1
   }
 
-  await setDoc(submittedRef, payload)
-  await setDoc(
+  const batch = writeBatch(db)
+  batch.set(submittedRef, payload)
+  batch.set(
     doc(db, DEBRIEF_DRAFTS_COLLECTION, context.id),
     {
       ...context,
@@ -361,7 +363,8 @@ export async function submitShiftDebrief(context, items, user) {
     },
     { merge: true }
   )
-  await createShiftDebriefSubmittedAlerts({ debrief: { ...payload, id: context.id }, receivingUsers })
+  queueShiftDebriefSubmittedAlerts(batch, { debrief: { ...payload, id: context.id }, receivingUsers })
+  await batch.commit()
 }
 
 export async function appendExtraDebriefNote(debriefId, extraNote) {
@@ -372,6 +375,7 @@ export async function appendExtraDebriefNote(debriefId, extraNote) {
     throw new Error(CLOSED_DEBRIEF_MESSAGE)
   }
   const extraNotes = Array.isArray(existing.extraNotes) ? existing.extraNotes : []
+  if (extraNotes.some(note => note?.id === extraNote?.id)) return
   await updateDoc(doc(db, DEBRIEFS_COLLECTION, debriefId), {
     extraNotes: [...extraNotes, extraNote],
     updatedAt: serverTimestamp()
@@ -448,13 +452,16 @@ export async function saveQuickDebriefNote(context, item, user) {
     if (isDebriefClosedForCorrections(submitted)) {
       throw new Error(CLOSED_DEBRIEF_MESSAGE)
     }
-    await appendExtraDebriefNote(submitted.id, createExtraNote({
+    const extraNote = createExtraNote({
       note: item.type === 'client'
         ? `${item.clientName} - ${getDebriefSectionLabel(item.section)}: ${item.note}`
         : `${getDebriefSectionLabel(item.section)}: ${item.note}`,
       user,
       source: 'post_submit_quick_note'
-    }))
+    })
+    extraNote.id = `quick_${item.id}`
+    extraNote.createdAtIso = item.createdAtIso || extraNote.createdAtIso
+    await appendExtraDebriefNote(submitted.id, extraNote)
     return { mode: 'extra', debriefId: submitted.id }
   }
   await addDraftItem(context, item)
@@ -481,36 +488,20 @@ async function getReceivingBhtUsers({ locationId, shiftId, submittedByUserId }) 
     .filter(row => row.id && row.id !== submittedByUserId)
 }
 
-function cleanAlertIdPart(value) {
-  return cleanToken(value).toLowerCase().replace(/[^a-z0-9_-]+/g, '_')
-}
-
-async function queueUniqueAlert(batch, alertId, payload) {
-  const alertRef = doc(db, 'alerts', alertId)
-  const existingSnap = await getDoc(alertRef)
-  if (existingSnap.exists()) return false
+function queueAlert(batch, payload) {
+  const alertRef = doc(collection(db, 'alerts'))
   batch.set(alertRef, {
     ...payload,
-    alertKey: alertId,
     read: false,
     version: 1,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   })
-  return true
 }
 
-async function createShiftDebriefSubmittedAlerts({ debrief, receivingUsers = [] }) {
-  const batch = writeBatch(db)
-  let batchWrites = 0
-
+function queueShiftDebriefSubmittedAlerts(batch, { debrief, receivingUsers = [] }) {
   for (const row of receivingUsers) {
-    const alertId = [
-      'shift_debrief_submitted',
-      cleanAlertIdPart(debrief.id),
-      cleanAlertIdPart(row.id)
-    ].join('__')
-    const queued = await queueUniqueAlert(batch, alertId, {
+    queueAlert(batch, {
       type: 'shift_debrief_submitted',
       debriefId: debrief.id,
       locationId: debrief.locationId,
@@ -524,14 +515,9 @@ async function createShiftDebriefSubmittedAlerts({ debrief, receivingUsers = [] 
       message: `${debrief.submittedByName || 'BHT'} submitted ${debrief.locationLabel} shift debrief.`,
       bhtName: debrief.submittedByName || null
     })
-    if (queued) batchWrites += 1
   }
 
-  const supervisorAlertId = [
-    'shift_debrief_submitted_supervisor',
-    cleanAlertIdPart(debrief.id)
-  ].join('__')
-  if (await queueUniqueAlert(batch, supervisorAlertId, {
+  queueAlert(batch, {
     type: 'shift_debrief_submitted',
     debriefId: debrief.id,
     locationId: debrief.locationId,
@@ -540,16 +526,10 @@ async function createShiftDebriefSubmittedAlerts({ debrief, receivingUsers = [] 
     severity: 'medium',
     message: `${debrief.submittedByName || 'BHT'} submitted ${debrief.locationLabel} shift debrief.`,
     bhtName: debrief.submittedByName || null
-  })) {
-    batchWrites += 1
-  }
+  })
 
   if (receivingUsers.length === 0) {
-    const noReceiversAlertId = [
-      'shift_debrief_no_receivers',
-      cleanAlertIdPart(debrief.id)
-    ].join('__')
-    if (await queueUniqueAlert(batch, noReceiversAlertId, {
+    queueAlert(batch, {
       type: 'shift_debrief_no_receivers',
       debriefId: debrief.id,
       locationId: debrief.locationId,
@@ -558,13 +538,7 @@ async function createShiftDebriefSubmittedAlerts({ debrief, receivingUsers = [] 
       severity: 'high',
       message: `No receiving BHT is assigned for ${debrief.locationLabel || debrief.locationId} ${debrief.receivingShiftLabel || 'incoming shift'} handoff.`,
       bhtName: debrief.submittedByName || null
-    })) {
-      batchWrites += 1
-    }
-  }
-
-  if (batchWrites > 0) {
-    await batch.commit()
+    })
   }
 }
 

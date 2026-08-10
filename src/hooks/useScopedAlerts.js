@@ -51,55 +51,65 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
       where('read', '==', false)
     )
 
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => {
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
 
-      // EOC issue alerts
-      const scopedEoc = rows
-        .filter(a => a.type === 'eoc_issue')
-        .filter(a => inEocScope(a.locationId))
-      scopedEoc.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
-      setEocAlerts(scopedEoc)
+        // EOC issue alerts
+        const scopedEoc = rows
+          .filter(a => a.type === 'eoc_issue')
+          .filter(a => inEocScope(a.locationId))
+        scopedEoc.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
+        setEocAlerts(scopedEoc)
 
-      // Fleet alerts
-      const scopedFleet = rows
-        .filter(a => isFleetAlertType(a.type))
-        .filter(a => inComplianceScope(a.mainLocation || a.locationId || ''))
-      scopedFleet.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
-      setFleetAlerts(scopedFleet)
+        // Fleet alerts
+        const scopedFleet = rows
+          .filter(a => isFleetAlertType(a.type))
+          .filter(a => inComplianceScope(a.mainLocation || a.locationId || ''))
+        scopedFleet.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
+        setFleetAlerts(scopedFleet)
 
-      // Shift debrief alerts
-      const scopedDebriefs = rows
-        .filter(a => DEBRIEF_ALERT_TYPES.has(a.type))
-        .filter(a => (
-          inEocScope(a.locationId)
-          && (
-            isBhtRole(user.role)
-              ? a.targetUserId === user.id
-              : !a.targetUserId
-          )
-        ))
-      scopedDebriefs.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
-      setDebriefAlerts(scopedDebriefs)
+        // Shift debrief alerts
+        const scopedDebriefs = rows
+          .filter(a => DEBRIEF_ALERT_TYPES.has(a.type))
+          .filter(a => (
+            inEocScope(a.locationId)
+            && (
+              isBhtRole(user.role)
+                ? a.targetUserId === user.id
+                : !a.targetUserId
+            )
+          ))
+        scopedDebriefs.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
+        setDebriefAlerts(scopedDebriefs)
 
-      // Total badge count (eoc issues + fleet)
-      const count = rows.reduce((acc, alertDoc) => {
-        const type = String(alertDoc.type || '')
-        if (type === 'eoc_issue' && inEocScope(alertDoc.locationId)) return acc + 1
-        if (isFleetAlertType(type) && inComplianceScope(alertDoc.mainLocation || alertDoc.locationId || '')) return acc + 1
-        if (
-          DEBRIEF_ALERT_TYPES.has(type)
-          && inEocScope(alertDoc.locationId)
-          && (
-            isBhtRole(user.role)
-              ? alertDoc.targetUserId === user.id
-              : !alertDoc.targetUserId
-          )
-        ) return acc + 1
-        return acc
-      }, 0)
-      setUnreadCount(count)
-    })
+        // Total badge count (eoc issues + fleet)
+        const count = rows.reduce((acc, alertDoc) => {
+          const type = String(alertDoc.type || '')
+          if (type === 'eoc_issue' && inEocScope(alertDoc.locationId)) return acc + 1
+          if (isFleetAlertType(type) && inComplianceScope(alertDoc.mainLocation || alertDoc.locationId || '')) return acc + 1
+          if (
+            DEBRIEF_ALERT_TYPES.has(type)
+            && inEocScope(alertDoc.locationId)
+            && (
+              isBhtRole(user.role)
+                ? alertDoc.targetUserId === user.id
+                : !alertDoc.targetUserId
+            )
+          ) return acc + 1
+          return acc
+        }, 0)
+        setUnreadCount(count)
+      },
+      (err) => {
+        console.error('Scoped supervisor alert listener failed:', err)
+        setEocAlerts([])
+        setFleetAlerts([])
+        setDebriefAlerts([])
+        setUnreadCount(0)
+      }
+    )
 
     return () => unsubscribe()
   }, [enabled, user, inEocScope, inComplianceScope])
@@ -116,15 +126,24 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
       where('read', '==', false)
     )
 
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const rows = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .filter(item => item.type === 'eoc_issue_update' || item.type === 'shift_debrief_submitted')
-      rows.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
-      setIssueUpdates(rows.filter(item => item.type === 'eoc_issue_update').slice(0, 8))
-      setDebriefAlerts(rows.filter(item => item.type === 'shift_debrief_submitted'))
-      setUnreadCount(rows.length)
-    })
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => {
+        const rows = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(item => item.type === 'eoc_issue_update' || item.type === 'shift_debrief_submitted')
+        rows.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
+        setIssueUpdates(rows.filter(item => item.type === 'eoc_issue_update').slice(0, 8))
+        setDebriefAlerts(rows.filter(item => item.type === 'shift_debrief_submitted'))
+        setUnreadCount(rows.length)
+      },
+      (err) => {
+        console.error('BHT alert listener failed:', err)
+        setIssueUpdates([])
+        setDebriefAlerts([])
+        setUnreadCount(0)
+      }
+    )
 
     return () => unsubscribe()
   }, [enabled, user?.id, user?.role])

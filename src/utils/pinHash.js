@@ -1,4 +1,4 @@
-const PIN_HASH_PEPPER = 'sprc-pin-v1'
+const PIN_HASH_PEPPER = 'sprc-pin-v2-6digit'
 
 function toHex(buffer) {
   return Array.from(new Uint8Array(buffer))

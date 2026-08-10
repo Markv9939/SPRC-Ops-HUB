@@ -58,7 +58,6 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   const [focusedItemId, setFocusedItemId] = useState('')
 
   const normalizedUserId = String(user?.id || '').trim()
-  const normalizedAuthUid = String(user?.authUid || '').trim()
   const orderedItemsRef = useRef([])
   const draftTimerRef = useRef(null)
   const lastSavedPayloadRef = useRef('')
@@ -481,7 +480,6 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       vanId: task.vanId || null,
       eocType,
       draftByUserId: normalizedUserId,
-      draftByAuthUid: normalizedAuthUid || null,
       draftByName: user?.name || '',
       vehicleId: vehicleId || null,
       vehicleName: vehicleName || '',
@@ -513,11 +511,12 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           return
         }
         const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
+        const existingDraft = await getDoc(draftRef)
         await setDoc(draftRef, {
           ...payload,
           version: 1,
           lastTouchedAt: serverTimestamp(),
-          createdAt: serverTimestamp(),
+          ...(existingDraft.exists() ? {} : { createdAt: serverTimestamp() }),
           updatedAt: serverTimestamp()
         }, { merge: true })
         await deleteOfflineDraft(getEocDraftId(task.id, normalizedUserId))
@@ -532,7 +531,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     return () => {
       if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current)
     }
-  }, [answers, draftReady, eocType, isOffline, normalizedAuthUid, normalizedUserId, odometerReading, repairDetails, submitting, task?.id, task?.locationId, task?.shiftId, task?.templateScope, task?.templateId, task?.templateName, task?.vanId, user?.name, vehicleId, vehicleName, vinNumber])
+  }, [answers, draftReady, eocType, isOffline, normalizedUserId, odometerReading, repairDetails, submitting, task?.id, task?.locationId, task?.shiftId, task?.templateScope, task?.templateId, task?.templateName, task?.vanId, user?.name, vehicleId, vehicleName, vinNumber])
 
   const setAnswer = (itemId, value) => {
     setError('')
@@ -579,7 +578,6 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     task,
     user,
     normalizedUserId,
-    normalizedAuthUid,
     eocType,
     vehicleId,
     vehicleName,

@@ -69,7 +69,7 @@ function formatComplianceCategory(category) {
 function formatComplianceSiteLabel(siteId) {
   const normalized = normalizeComplianceSite(siteId)
   if (!normalized) return 'Unknown Location'
-  if (normalized === 'OTC') return 'OTC (Mesquite / Lone Mountain)'
+  if (normalized === 'OTC') return 'OTC (Mesquite / Lone Mountain / Test House)'
   return normalized
 }
 
