@@ -1,6 +1,6 @@
 # SPRC Ops Hub Blueprint (V2 Core)
 
-Last updated: 2026-05-18
+Last updated: 2026-08-09
 Status: Active
 Primary owner: Product + Engineering
 
@@ -20,7 +20,7 @@ This file is the running blueprint for what is live now, what is required behavi
 
 ## 3. Runtime and Architecture
 - Frontend: React + Vite (`src/`)
-- Backend: Firebase Firestore + Firebase Auth claims
+- Backend: Firebase Firestore with anonymous Firebase transport sessions
 - App entry: `src/App.jsx`
 - Main role surfaces:
   - BHT: `src/components/BhtHub.jsx`, `src/components/TransportCard.jsx`, `src/components/EocChecklist.jsx`
@@ -51,7 +51,7 @@ Each logical batch should follow this operational order:
    - Hosting changes: `firebase deploy --only hosting --project sprc-tx-l`
    - Rules changes: `firebase deploy --only firestore:rules --project sprc-tx-l`
 4. Validate key paths on iPhone/iPad.
-5. Record evidence in `docs/REGRESSION_UAT_PHASE9.md` and shipped behavior in `CHANGELOG.md`.
+5. Record shipped behavior in `CHANGELOG.md`.
 
 ## 4. Canonical Role and Scope Model
 Roles in runtime:
@@ -68,16 +68,17 @@ Scope semantics:
 - BHT is scoped to assignment/user profile + active grants.
 - Location aliases must resolve consistently (example: house-level IDs map to `OTC`/`RES` main scope).
 
-Auth claim contract (enforced by rules/policy):
-- `role` claim required for scoped access.
-- `locations` claim required for location-scoped reads/writes.
+Current authentication contract:
+- Six-digit PIN selects the permanent Ops profile used by workflows and ownership fields.
+- Firebase claim enforcement remains off while the app operates in standalone PIN mode.
+- A future Hub Google session is the planned outer access gate; Hub integration is not part of the current runtime.
 
 ## 5. Current Operational Contract
 ### 5.1 PIN Login
-- PIN is 4 digits.
+- PIN is exactly 6 digits.
 - PIN storage is hashed (`pinHash`), no plaintext authority.
 - Lockout after repeated failed attempts.
-- Login session validates claim/role/scope compatibility.
+- Login loads role, location, shift, and van scope from the selected Ops profile.
 - Login network/auth steps use explicit timeout guards so degraded backend calls fail with actionable error text instead of indefinite `Checking...` state.
 
 ### 5.2 BHT
@@ -108,7 +109,7 @@ Auth claim contract (enforced by rules/policy):
   - House EOC remains shared per location+shift.
 - Self-service PIN rotation is available from Header (`Change PIN`) for eligible roles.
   - Requires current PIN + new PIN + confirm PIN.
-  - New PIN must be exactly 4 digits and different from current PIN.
+  - New PIN must be exactly 6 digits, meet the PIN policy, and differ from the current PIN.
 
 ### 5.3 Supervisor
 - Queue-first operations for issues, overdue tasks, and alerts.
@@ -171,10 +172,10 @@ Auth claim contract (enforced by rules/policy):
 
 ## 7. Guardrails (Must Hold)
 ### Auth/Policy
-- Claim-enabled role/scope enforcement for protected writes.
-- Unauthorized scope writes must fail server-side.
-- Self-service PIN writes require strict identity match to target user (`users.authUid` vs `request.auth.uid`).
-- Self-service PIN writes are restricted to PIN/version/timestamp fields; profile/role/scope fields are immutable via this path.
+- `appSettings/authPolicy.authScopeEnforced` remains `false` in standalone PIN mode.
+- Unauthorized role/location writes must still fail through the active compatibility rules where the operation supplies scope.
+- PIN hashes remain the only stored PIN authority; plaintext PINs are never stored.
+- The future Hub handoff is the planned outer identity/security boundary.
 
 ### Transports
 - BHT cannot start second active transport.
@@ -199,9 +200,9 @@ Required pre-release commands:
 - `npm run smoke:phase9:full`
 
 Operational commands:
-- `npm run reset:uat`
-- `npm run claims:provision`
-- `npm run claims:verify`
+- `npm run reset:core:preview`
+- `npm run reset:core:backup`
+- `npm run reset:core:verify`
 
 Latest local verification (2026-02-14):
 - `npm run build`: PASS

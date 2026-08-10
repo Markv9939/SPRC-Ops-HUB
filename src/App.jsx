@@ -591,9 +591,7 @@ function App() {
           const mergedUser = {
             ...refreshedUser,
             authUid: prev.authUid || null,
-            authEmail: prev.authEmail || prev.email || null,
-            authProvider: 'google',
-            authScopeEnforced: true
+            authScopeEnforced: prev.authScopeEnforced === true
           }
 
           if (toScopeSignature(prev) === toScopeSignature(mergedUser)) return prev

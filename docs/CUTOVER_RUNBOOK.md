@@ -1,133 +1,46 @@
-# SPRC Cutover Runbook (Free-Tier v1)
+# SPRC Ops Hub Deployment and Reset Runbook
 
-Last updated: 2026-05-18
-Owner: Admin/Owner + Supervisor
+Last updated: 2026-08-09
 
-## Goal
+## Normal Release
 
-Execute a clean cutover into the current assignment/task model without Cloud Functions.
+1. Run `npm run build`, `npm run lint`, `npm run test:pin`, and `npm run test:rules`.
+2. Deploy UI changes with `firebase deploy --only hosting --project sprc-tx-l`.
+3. Deploy rule changes with `firebase deploy --only firestore:rules --project sprc-tx-l`.
+4. Verify admin, supervisor, and both BHT shift paths on the production URL.
+5. Verify offline draft, transport, and replay behavior before broad staff use.
 
-## Preconditions
+## Core Reset Safety
 
-1. Local changes are built successfully:
-   - `npm run smoke:phase9`
-2. Firestore rules are deployed:
-   - `firebase deploy --only firestore:rules --project sprc-tx-l`
-3. Firebase Auth custom-claims provisioning:
-   - Provision/update claims for active users: `npm run claims:provision`
-   - Verify claims alignment: `npm run claims:verify`
-   - Optional dry run: `npm run claims:provision -- --dry-run`
-4. Admin confirms destructive reset window.
-5. Strict auth baseline validation:
-   - Confirm `npm run claims:verify` passes before cutover login testing.
+The only configured Firebase project is production project `sprc-tx-l`. A reset is destructive and requires owner approval.
 
-## Cutover Steps
+1. Run `npm run reset:core:preview` to inventory every collection without writing.
+2. Run `npm run reset:core:backup` to create and validate a JSON backup outside the repository.
+3. Review the exact Auth user count, delete count, preserve count, and unclassified collections.
+4. Do not continue if any collection is unclassified or any preserved catalog appears in the delete set.
+5. Run the confirmed reset only with the exact project ID, typed confirmation phrase, and approved expected counts.
+6. Immediately run `npm run reset:core:verify` before browser login.
 
-1. Run clean reset + seed:
-   - `npm run reset:uat`
-2. Verify seeded logins work:
-   - Admin `1111`
-   - Supervisor `2222`
-   - Tech `3333`, `4444`, `5555`, `6666`
-3. Confirm data baseline:
-   - `users` seeded
-   - `shiftAssignments` seeded
-   - `accessGrants` seeded (active + upcoming lifecycle examples)
-   - `eocTasks` seeded
-   - `eocIssues` + `alerts` seeded
-   - fleet collections seeded/available: `eocVehicles`, `fleetMaintenanceTemplates`, `fleetVehicleRuntime`, `fleetTasks`, `vehicleServiceRecords`
-   - property collection available: `eocProperties`
-4. Execute UAT walkthrough:
-   - `docs/UAT_WALKTHROUGH_PHASE9.md`
-5. Record UAT evidence + signoff:
-   - `docs/REGRESSION_UAT_PHASE9.md`
+The confirmed command is intentionally not stored as an npm shortcut. Obtain the required flags from `node scripts/resetProductionCore.js --help` and compare them with the approved preview.
 
-## Smoke Verification
+## Preserved Core
 
-1. App build:
-   - `npm run smoke:phase9`
-2. Optional lint baseline report:
-   - `npm run smoke:phase9:full`
+- Properties and houses
+- Vans and vehicles
+- EOC checklist templates, template library, and template assignments
+- Fleet maintenance templates
+- App settings, shift timing, and other non-user operational configuration
 
-## Logical Batch Deploy Workflow (Daily)
+## Reset Activity
 
-Use this sequence after each meaningful change batch, not only final cutover:
+- Firebase Authentication users and Ops users
+- Clients and destinations
+- Transports, debriefs, drafts, acknowledgments, and assignments
+- EOC tasks, submissions, issues, and runtime history
+- Alerts, notifications, audits, compliance activity, Cintas activity, and fleet runtime/history
 
-1. Run local verification for the batch:
-   - `npm run build`
-   - `npm run lint`
-   - `npm run smoke:phase9:full` (release readiness)
-2. Deploy the relevant target:
-   - Hosting/UI changes: `firebase deploy --only hosting --project sprc-tx-l`
-   - Rules changes: `firebase deploy --only firestore:rules --project sprc-tx-l`
-3. Validate on iPhone/iPad critical paths:
-   - Login and role landing page
-   - Primary action buttons and card readability
-   - Sticky action areas (EOC forms)
-   - Input behavior (keyboard overlap, tap-target comfort)
-   - Top-level IA pathing:
-     - `EOC` tab shows template/issues workflows only
-     - `Properties` tab handles house/property workflows
-     - `Fleet` tab owns vehicle maintenance workflows
-4. Record verification evidence:
-   - `docs/REGRESSION_UAT_PHASE9.md`
-   - `CHANGELOG.md`
+The reset then creates one admin, one supervisor, and two opposing-shift Test House BHT profiles using unique six-digit PINs.
 
-## Recent Session Updates
+## Rollback
 
-### 2026-05-18 - Notification + BHT Mobile Flow Release Prep
-
-Batch summary:
-- Added one-time BHT onboarding overlay and compact action-first BHT hub layout.
-- Added header notification entry flow plus shared notification/scoping hooks.
-- Extracted supervisor dashboard summary logic into a dedicated `DashboardSummaryPanel`.
-- Cleaned publish blockers found in release prep, including null-byte corruption in `SupervisorDashboard.jsx`.
-
-Verification evidence:
-- `npm.cmd run lint`: PASS
-- `npm.cmd run build`: PASS
-
-Owner validation focus (mobile/tablet):
-1. BHT onboarding overlay only appears on first qualifying login and dismisses cleanly.
-2. Header bell/menu interactions are easy to tap on iPhone and iPad.
-3. BHT transport and EOC action rows remain readable and obvious on smaller screens.
-
-### 2026-02-19 - UI Visibility + Direct Warning Resolution
-
-Batch summary:
-- Standardized modal contrast styling across transport reminder and shared dialogs.
-- Fixed low-contrast `Open Compliance Tab` button styling on compliance warning cards.
-- Added `Quick Update` action directly on compliance warning cards (overdue + due soon) so updates can be done without leaving dashboard warning queue.
-
-Direct warning-card update behavior:
-- Open `Quick Update` from warning card.
-- Edit inline fields:
-  - `Last Completed` (optional)
-  - `Next Due Date` (required)
-  - `Notes` (optional)
-- Save writes directly to `complianceItems` and records audit entry (`compliance_item_quick_update`).
-
-Verification/deploy evidence:
-- `npm run build`: PASS
-- `firebase deploy --only hosting --project sprc-tx-l`: PASS
-- Hosting URL: `https://sprc-tx-l.web.app`
-
-Owner validation focus (mobile/tablet):
-1. Transport ARRIVE reminder modal readability (`Cancel` and `OK` clearly visible).
-2. Compliance warning card button readability (`Quick Update`, `Open Compliance Tab`).
-3. Compliance quick update workflow updates warning status directly from dashboard queue.
-
-## Rollback Approach
-
-1. If cutover data is invalid, run reset again to restore known-good seed baseline:
-   - `npm run reset:uat`
-2. If rule behavior regresses, redeploy last known good `firestore.rules`.
-3. Re-run smoke + UAT checks after rollback.
-
-## Signoff
-
-| Role | Name | Date | Result | Notes |
-|---|---|---|---|---|
-| Admin/Owner |  |  | PENDING | |
-| Supervisor |  |  | PENDING | |
-
+If validation fails, stop new use. Preserve the failed-state evidence, restore from the validated pre-reset JSON backup with reviewed tooling, redeploy the last known-good hosting/rules version, and rerun role plus offline acceptance checks.

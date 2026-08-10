@@ -2,15 +2,27 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import './index.css'
-import App from './App.jsx'
+import { applyCoreResetCutover } from './utils/coreResetCutover'
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
-)
+async function startApp() {
+  await applyCoreResetCutover()
+  const { default: App } = await import('./App.jsx')
+
+  createRoot(document.getElementById('root')).render(
+    <StrictMode>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </StrictMode>,
+  )
+}
+
+startApp().catch((error) => {
+  console.error('Unable to complete the app reset:', error)
+  const root = document.getElementById('root')
+  if (!root) return
+  root.textContent = error?.message || 'Unable to complete the app reset. Close other tabs and reload.'
+})
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
