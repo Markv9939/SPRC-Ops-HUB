@@ -1,7 +1,6 @@
 import { db } from '../firebase'
 import {
   collection,
-  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -13,9 +12,13 @@ import {
   writeBatch
 } from 'firebase/firestore'
 import { getVersionNumber } from './versioning'
+import {
+  EOC_TEMPLATE_ITEM_SCHEMA_VERSION,
+  findDuplicateEocTrackingIds,
+  normalizeEocTemplateItems
+} from '../utils/eocTemplateModel'
 
 const ACTIONABLE_STATUSES = ['pending', 'overdue']
-const BATCH_LIMIT = 400
 
 function normalizeToken(value) {
   return String(value || '').trim().toLowerCase()
@@ -75,46 +78,106 @@ export function resolveTemplateForScope(assignmentsByScope, { locationId, shiftI
   }
   return {
     templateId: String(assignment.defaultTemplateId || '').trim() || null,
-    templateName: String(assignment.defaultTemplateName || '').trim()
+    templateName: String(assignment.defaultTemplateName || '').trim(),
+    templateVersion: Number(assignment.defaultTemplateVersion || 0) || null,
+    templateVersionId: String(assignment.defaultTemplateVersionId || '').trim() || null
   }
 }
 
-async function updateIncompleteTasksForScope({ locationId, shiftId, eocType, templateId, templateName }) {
-  const taskQueries = buildTaskScopeQueries(locationId, shiftId, eocType)
+export function buildTemplateVersionDocId(templateId, versionNumber) {
+  return `${String(templateId || '').trim()}__v${Number(versionNumber || 0)}`
+}
 
-  const taskSnaps = await Promise.all(taskQueries.map(taskQuery => getDocs(taskQuery)))
-  const taskDocs = taskSnaps.flatMap(snap => snap.docs)
-
-  const docsNeedingUpdate = taskDocs.filter((taskDoc) => {
-    const data = taskDoc.data() || {}
-    return String(data.templateId || '').trim() !== String(templateId || '').trim()
-      || String(data.templateName || '').trim() !== String(templateName || '').trim()
-  })
-
-  if (docsNeedingUpdate.length === 0) {
-    return 0
+export async function savePublishedTemplateVersion({
+  actor,
+  templateId = '',
+  existingTemplate = null,
+  payload,
+  cloneMeta = null
+}) {
+  const normalizedItems = normalizeEocTemplateItems(payload?.items)
+  if (!String(payload?.name || '').trim()) throw new Error('Template name is required.')
+  if (normalizedItems.length === 0) throw new Error('Add at least one valid template item.')
+  if (findDuplicateEocTrackingIds(normalizedItems).length > 0) {
+    throw new Error('Template item tracking IDs must be unique.')
   }
 
-  let updatedCount = 0
-  for (let index = 0; index < docsNeedingUpdate.length; index += BATCH_LIMIT) {
-    const chunk = docsNeedingUpdate.slice(index, index + BATCH_LIMIT)
-    const batch = writeBatch(db)
+  const templateRef = String(templateId || '').trim()
+    ? doc(db, 'eocTemplateLibrary', String(templateId || '').trim())
+    : doc(collection(db, 'eocTemplateLibrary'))
+  const versionNumber = existingTemplate ? getVersionNumber(existingTemplate) + 1 : 1
+  const versionId = buildTemplateVersionDocId(templateRef.id, versionNumber)
+  const versionRef = doc(db, 'eocTemplateVersions', versionId)
+  const ownerUserId = existingTemplate?.ownerUserId ?? actor?.id ?? null
+  const ownerName = existingTemplate?.ownerName ?? actor?.name ?? null
+  const ownerAuthUid = existingTemplate?.ownerAuthUid ?? actor?.authUid ?? null
+  const ownerRole = existingTemplate?.ownerRole ?? actor?.role ?? null
+  const normalizedType = String(payload?.eocType || 'house').trim() === 'van' ? 'van' : 'house'
+  const normalizedStatus = String(payload?.status || 'active').trim() === 'archived' ? 'archived' : 'active'
 
-    chunk.forEach((taskDoc) => {
-      const data = taskDoc.data() || {}
-      batch.update(taskDoc.ref, {
-        templateId: String(templateId || '').trim() || null,
-        templateName: String(templateName || '').trim(),
-        version: getVersionNumber(data) + 1,
-        updatedAt: serverTimestamp()
-      })
-      updatedCount += 1
+  const libraryData = {
+    name: String(payload.name || '').trim(),
+    eocType: normalizedType,
+    status: normalizedStatus,
+    items: normalizedItems,
+    itemSchemaVersion: EOC_TEMPLATE_ITEM_SCHEMA_VERSION,
+    publishedVersion: versionNumber,
+    publishedVersionId: versionId,
+    ownerUserId,
+    ownerName,
+    ownerAuthUid,
+    ownerRole,
+    updatedByUserId: actor?.id || null,
+    updatedByName: actor?.name || null,
+    updatedByAuthUid: actor?.authUid || null,
+    updatedAt: serverTimestamp(),
+    version: versionNumber
+  }
+
+  const versionData = {
+    templateId: templateRef.id,
+    templateName: libraryData.name,
+    eocType: normalizedType,
+    status: normalizedStatus,
+    items: normalizedItems,
+    itemSchemaVersion: EOC_TEMPLATE_ITEM_SCHEMA_VERSION,
+    versionNumber,
+    ownerUserId,
+    ownerName,
+    ownerAuthUid,
+    publishedByUserId: actor?.id || null,
+    publishedByName: actor?.name || null,
+    publishedByAuthUid: actor?.authUid || null,
+    publishedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+    version: 1,
+    ...(cloneMeta ? cloneMeta : {})
+  }
+
+  const batch = writeBatch(db)
+  if (existingTemplate) {
+    batch.update(templateRef, libraryData)
+  } else {
+    batch.set(templateRef, {
+      ...libraryData,
+      createdByUserId: actor?.id || null,
+      createdByName: actor?.name || null,
+      createdByAuthUid: actor?.authUid || null,
+      createdAt: serverTimestamp(),
+      ...(cloneMeta ? cloneMeta : {})
     })
-
-    await batch.commit()
   }
+  batch.set(versionRef, versionData)
+  await batch.commit()
 
-  return updatedCount
+  return {
+    templateId: templateRef.id,
+    templateName: libraryData.name,
+    eocType: normalizedType,
+    versionNumber,
+    versionId,
+    items: normalizedItems
+  }
 }
 
 export async function previewDefaultAssignmentImpact({
@@ -166,7 +229,9 @@ export async function assignDefaultTemplateForScope({
   shiftId,
   eocType,
   templateId,
-  templateName
+  templateName,
+  templateVersion = null,
+  templateVersionId = null
 }) {
   const normalizedLocationId = normalizeToken(locationId)
   const normalizedShiftId = String(shiftId || '').trim()
@@ -187,6 +252,8 @@ export async function assignDefaultTemplateForScope({
     eocType: normalizedType,
     defaultTemplateId: normalizedTemplateId,
     defaultTemplateName: String(templateName || '').trim(),
+    defaultTemplateVersion: Number(templateVersion || 0) || null,
+    defaultTemplateVersionId: String(templateVersionId || '').trim() || null,
     updatedByUserId: actor?.id || null,
     updatedByName: actor?.name || null,
     updatedByAuthUid: actor?.authUid || null,
@@ -206,17 +273,9 @@ export async function assignDefaultTemplateForScope({
     })
   }
 
-  const updatedTasks = await updateIncompleteTasksForScope({
-    locationId: normalizedLocationId,
-    shiftId: normalizedShiftId,
-    eocType: normalizedType,
-    templateId: normalizedTemplateId,
-    templateName
-  })
-
   return {
     assignmentId,
-    updatedTasks
+    updatedTasks: 0
   }
 }
 
@@ -228,7 +287,7 @@ export async function deleteTemplateAndReassignScopes({ actor, templateId, repla
     throw new Error('Replacement template is required.')
   }
   if (normalizedTemplateId === normalizedReplacementId) {
-    throw new Error('Replacement template must be different from the template being deleted.')
+    throw new Error('Replacement template must be different from the template being archived.')
   }
 
   const assignmentsSnap = await getDocs(query(
@@ -244,11 +303,24 @@ export async function deleteTemplateAndReassignScopes({ actor, templateId, repla
       shiftId: assignmentData.shiftId,
       eocType: assignmentData.eocType,
       templateId: normalizedReplacementId,
-      templateName: replacementTemplate?.name || ''
+      templateName: replacementTemplate?.name || '',
+      templateVersion: replacementTemplate?.publishedVersion || replacementTemplate?.version || null,
+      templateVersionId: replacementTemplate?.publishedVersionId || null
     })
   }
 
-  await deleteDoc(doc(db, 'eocTemplateLibrary', normalizedTemplateId))
+  const templateRef = doc(db, 'eocTemplateLibrary', normalizedTemplateId)
+  const templateSnap = await getDoc(templateRef)
+  if (templateSnap.exists()) {
+    await updateDoc(templateRef, {
+      status: 'archived',
+      archivedByUserId: actor?.id || null,
+      archivedByName: actor?.name || null,
+      archivedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      version: getVersionNumber(templateSnap.data()) + 1
+    })
+  }
 
   return {
     reassignedScopeCount: assignmentsSnap.size

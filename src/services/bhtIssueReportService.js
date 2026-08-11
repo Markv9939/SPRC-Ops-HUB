@@ -1,13 +1,9 @@
-import { collection, doc, serverTimestamp } from 'firebase/firestore'
+import { collection, doc } from 'firebase/firestore'
 import { db } from '../firebase'
+import { buildIssueRecord, getIssueTypeMeta, ISSUE_TYPES } from '../utils/issueModel'
 import { createIssueWithActivity } from './issueStatusService'
 
-export const BHT_HOME_ISSUE_TYPES = [
-  { value: 'house_property', label: 'House/property', eocType: 'house', severity: 'medium' },
-  { value: 'van_vehicle', label: 'Van/vehicle', eocType: 'van', severity: 'medium' },
-  { value: 'safety_concern', label: 'Safety concern', eocType: 'house', severity: 'high' },
-  { value: 'other', label: 'Other', eocType: 'house', severity: 'medium' }
-]
+export const BHT_HOME_ISSUE_TYPES = ISSUE_TYPES
 
 function trimText(value) {
   return String(value || '').trim()
@@ -15,10 +11,6 @@ function trimText(value) {
 
 function safeIdPart(value) {
   return String(value || '').trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80)
-}
-
-function getIssueTypeMeta(issueType) {
-  return BHT_HOME_ISSUE_TYPES.find(item => item.value === issueType) || BHT_HOME_ISSUE_TYPES[0]
 }
 
 function buildBhtHomeIssueData({ user, assignment, issueType, description, vanId }) {
@@ -36,27 +28,19 @@ function buildBhtHomeIssueData({ user, assignment, issueType, description, vanId
   if (!trimmedDescription) throw new Error('Describe the issue before submitting.')
   if (meta.eocType === 'van' && !normalizedVanId) throw new Error('Select the van for this issue.')
 
-  return {
-    taskId: null,
-    submissionId: null,
+  return buildIssueRecord({
+    source: 'quick_report',
+    issueType: meta.value,
     locationId,
     shiftId,
-    vanId: normalizedVanId || null,
+    vanId: normalizedVanId,
     eocType: meta.eocType,
-    itemId: `bht_home_${meta.value}`,
     label: meta.label,
-    category: 'BHT home report',
+    category: 'Staff report',
     description: trimmedDescription,
-    severity: meta.severity,
-    status: 'open',
-    source: 'bht_home',
-    issueType: meta.value,
     reportedByUserId: trimText(user.id),
-    reportedByName: trimText(user.name),
-    version: 1,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  }
+    reportedByName: trimText(user.name)
+  })
 }
 
 export async function submitBhtIssueReportOnline(payload) {

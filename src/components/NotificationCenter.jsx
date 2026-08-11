@@ -63,7 +63,7 @@ function alertTypeLabel(type) {
   if (type === 'shift_debrief_missing') return 'Missing Debrief'
   if (type === 'shift_debrief_no_receivers') return 'No Receiver'
   if (type === 'shift_debrief_incoming_ack_late') return 'Late Handoff Ack'
-  if (type === 'eoc_issue') return 'EOC Issue'
+  if (type === 'eoc_issue') return 'Issue'
   if (type === 'eoc_issue_update') return 'Issue Update'
   if (type === 'fleet_overdue') return 'Fleet Overdue'
   if (type === 'fleet_upcoming') return 'Fleet Upcoming'
@@ -77,7 +77,7 @@ function alertTypeLabel(type) {
 
 const FILTER_TABS = [
   { key: 'all', label: 'All' },
-  { key: 'eoc', label: 'EOC' },
+  { key: 'eoc', label: 'Issues' },
   { key: 'debriefs', label: 'Debriefs' },
   { key: 'fleet', label: 'Fleet' },
   { key: 'updates', label: 'Updates' }
@@ -286,14 +286,16 @@ export default function NotificationCenter({
                   <span style={styles.alertIcon}>{alertTypeIcon(alert.type)}</span>
                   <div style={styles.alertMeta}>
                     <span style={styles.alertTypeTag}>{alertTypeLabel(alert.type)}</span>
-                    <span style={{
-                      ...styles.severityBadge,
-                      backgroundColor: `${severityColor(alert.severity)}18`,
-                      color: severityColor(alert.severity),
-                      borderColor: `${severityColor(alert.severity)}40`
-                    }}>
-                      {severityLabel(alert.severity)}
-                    </span>
+                    {!['eoc_issue', 'eoc_issue_update'].includes(alert.type) && (
+                      <span style={{
+                        ...styles.severityBadge,
+                        backgroundColor: `${severityColor(alert.severity)}18`,
+                        color: severityColor(alert.severity),
+                        borderColor: `${severityColor(alert.severity)}40`
+                      }}>
+                        {severityLabel(alert.severity)}
+                      </span>
+                    )}
                   </div>
                   <span style={styles.alertTime}>{timeAgo(alert.createdAt)}</span>
                 </div>

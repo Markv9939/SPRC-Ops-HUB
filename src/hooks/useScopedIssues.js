@@ -111,8 +111,7 @@ export default function useScopedIssues({
       const resolvedBuckets = []
       resolvedQueryLocations.forEach((locations, index) => {
         const constraints = [
-          where('status', 'in', RESOLVED_STATUSES),
-          orderBy('closedAt', 'desc')
+          where('status', 'in', RESOLVED_STATUSES)
         ]
         if (locations) constraints.unshift(where('locationId', 'in', locations))
         const unsub = onSnapshot(

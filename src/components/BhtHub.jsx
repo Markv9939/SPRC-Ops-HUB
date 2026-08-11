@@ -54,6 +54,7 @@ function BhtHub({
     enabled: !!user && exactIssueLocationIds.length > 0
   })
   const [issueModalOpen, setIssueModalOpen] = useState(false)
+  const [issueReportStage, setIssueReportStage] = useState('form')
   const [issueForm, setIssueForm] = useState({
     issueType: BHT_HOME_ISSUE_TYPES[0].value,
     description: '',
@@ -211,12 +212,14 @@ function BhtHub({
 
   const openIssueReport = () => {
     resetIssueForm()
+    setIssueReportStage(locationIssues.length > 0 ? 'existing' : 'form')
     setIssueModalOpen(true)
   }
 
   const closeIssueReport = () => {
     if (issueSubmitting) return
     setIssueModalOpen(false)
+    setIssueReportStage('form')
     setIssueError('')
   }
 
@@ -454,13 +457,13 @@ function BhtHub({
             icon: AlertTriangle,
             iconClassName: 'hub-action-icon-issue',
             rowClassName: locationIssues.length > 0 ? 'hub-action-row-warning' : 'hub-action-row-ready',
-            title: 'Location issues',
+            title: 'Issues',
             titleBadge: locationIssues.length > 0
               ? <span className="badge badge-urgent hub-title-badge">{locationIssues.length}</span>
               : null,
             subtitle: locationIssues.length > 0
               ? `${openIssueCount} open - ${inProgressIssueCount} in progress - tap to view updates`
-              : 'No active location issues',
+              : 'No active issues',
             onClick: onNavigateToIssues,
             disabled: !onNavigateToIssues
           })}
@@ -586,13 +589,13 @@ function BhtHub({
           </div>
           <div className="hub-action-info">
             <div className="hub-action-title">
-              Location issues
+              Issues
               {locationIssues.length > 0 && <span className="badge badge-urgent" style={{ marginLeft: '8px' }}>{locationIssues.length}</span>}
             </div>
             <div className="hub-action-subtitle">
               {locationIssues.length > 0
                 ? `${openIssueCount} open - ${inProgressIssueCount} in progress - tap to view updates`
-                : 'No active location issues'}
+                : 'No active issues'}
             </div>
           </div>
           <div className="hub-action-chevron">&gt;</div>
@@ -757,10 +760,29 @@ function BhtHub({
 
       <AppModal
         isOpen={issueModalOpen}
-        title="Report Issue"
+        title={issueReportStage === 'existing' ? 'Check Active Issues' : 'Report Issue'}
         tone="warning"
         maxWidth="520px"
-        footer={(
+        footer={issueReportStage === 'existing' ? (
+          <>
+            <button
+              type="button"
+              className="btn"
+              onClick={closeIssueReport}
+              style={{ flex: 1, background: '#F1EFEA', color: 'var(--text-secondary)', border: '1px solid #D8D1C6' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-finish"
+              onClick={() => setIssueReportStage('form')}
+              style={{ flex: 1 }}
+            >
+              Report new issue
+            </button>
+          </>
+        ) : (
           <>
             <button
               type="button"
@@ -783,6 +805,31 @@ function BhtHub({
           </>
         )}
       >
+        {issueReportStage === 'existing' ? (
+          <div className="quick-issue-existing">
+            <p>Review the active issues for this house before creating another report.</p>
+            <div className="quick-issue-existing-list">
+              {locationIssues.slice(0, 4).map(issue => (
+                <div className="quick-issue-existing-row" key={issue.id}>
+                  <strong>{issue.label || 'Issue'}</strong>
+                  <span>{issue.description || 'No details provided.'}</span>
+                </div>
+              ))}
+            </div>
+            {onNavigateToIssues && (
+              <button
+                type="button"
+                className="quick-issue-view-all"
+                onClick={() => {
+                  closeIssueReport()
+                  onNavigateToIssues()
+                }}
+              >
+                View all active issues <ChevronRight size={16} />
+              </button>
+            )}
+          </div>
+        ) : (
         <form onSubmit={submitIssueReport}>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
             Issue type
@@ -830,8 +877,14 @@ function BhtHub({
             </div>
           )}
 
+          {issueForm.issueType === 'safety_concern' && (
+            <div className="location-report-safety-warning" role="alert">
+              If anyone is in immediate danger, follow emergency procedures and contact a supervisor before submitting this report.
+            </div>
+          )}
+
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
-            What happened?
+            Describe the issue
           </label>
           <textarea
             className="input"
@@ -842,12 +895,12 @@ function BhtHub({
               setIssueForm(prev => ({ ...prev, description: event.target.value }))
             }}
             disabled={issueSubmitting}
-            placeholder="Add what happened, exact location/van, and any immediate safety concern..."
+            placeholder="Include any details staff or supervisors should know."
             style={{ width: '100%', resize: 'vertical', boxSizing: 'border-box' }}
           />
 
           <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
-            Location and staff name will be attached automatically.
+            Provide all relevant details so the issue can be understood and addressed. Location and staff name are attached automatically.
           </div>
 
           {isOffline && (
@@ -862,6 +915,7 @@ function BhtHub({
             </div>
           )}
         </form>
+        )}
       </AppModal>
     </div>
   )

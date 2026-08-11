@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { doc, collection, onSnapshot, orderBy, query } from 'firebase/firestore'
-import { ArrowLeft, CheckCircle2, Clock, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Clock, RotateCcw, ShieldAlert } from 'lucide-react'
 import { db } from '../firebase'
-import { LOCATIONS } from '../data/eocConstants'
-import { updateIssueStatus } from '../services/issueStatusService'
+import { LOCATIONS, VANS } from '../data/eocConstants'
+import { addBhtIssueFollowUp, addIssueNote, requestIssueReopen, updateIssueStatus } from '../services/issueStatusService'
 import { isAdminRole, isSupervisorRole } from '../utils/orgModel'
+import { getIssueSourceLabel, getIssueTypeMeta, hasPendingProblemReturned, inferIssueType } from '../utils/issueModel'
 
 function toDate(value) {
   if (!value) return null
@@ -36,7 +37,7 @@ function locationLabel(locationId) {
   return LOCATIONS.find(location => location.id === locationId)?.label || locationId || 'Unknown location'
 }
 
-function IssueDetail({ user, issueId, inIssueScope, onBack }) {
+function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack }) {
   const [issue, setIssue] = useState(null)
   const [activities, setActivities] = useState([])
   const [loading, setLoading] = useState(true)
@@ -44,6 +45,10 @@ function IssueDetail({ user, issueId, inIssueScope, onBack }) {
   const [action, setAction] = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
+  const [returnNote, setReturnNote] = useState('')
+  const [requestingReturn, setRequestingReturn] = useState(false)
+  const [followUpNote, setFollowUpNote] = useState('')
+  const [savingFollowUp, setSavingFollowUp] = useState(false)
 
   useEffect(() => {
     if (!issueId) return undefined
@@ -90,25 +95,82 @@ function IssueDetail({ user, issueId, inIssueScope, onBack }) {
 
   const canManage = useMemo(() => isSupervisorRole(user?.role) || isAdminRole(user?.role), [user?.role])
   const isClosed = ['resolved', 'voided'].includes(String(issue?.status || '').toLowerCase())
+  const canReportReturned = !canManage && issue?.status === 'resolved'
+  const returnAlreadyRequested = hasPendingProblemReturned(activities)
+  const canAddFollowUp = !canManage && !isClosed
 
   const submitStatus = async (event) => {
     event?.preventDefault()
     if (!action || !issue) return
+    if (isOffline) {
+      alert('Issue updates are unavailable until the connection returns.')
+      return
+    }
     setSaving(true)
     try {
-      await updateIssueStatus({
-        issueId: issue.id,
-        expectedIssue: issue,
-        nextStatus: action,
-        note,
-        actorUser: user
-      })
+      if (action === 'note_added') {
+        await addIssueNote({ issueId: issue.id, expectedIssue: issue, note, actorUser: user })
+      } else {
+        await updateIssueStatus({
+          issueId: issue.id,
+          expectedIssue: issue,
+          nextStatus: action,
+          note,
+          actorUser: user
+        })
+      }
       setAction('')
       setNote('')
     } catch (error) {
       alert(error?.message || 'Failed to update issue.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const submitProblemReturned = async (event) => {
+    event?.preventDefault()
+    if (!issue || !returnNote.trim()) return
+    if (isOffline) {
+      alert('This request needs an internet connection. Please try again when service returns.')
+      return
+    }
+    setRequestingReturn(true)
+    try {
+      await requestIssueReopen({
+        issueId: issue.id,
+        issue,
+        note: returnNote,
+        actorUser: user
+      })
+      setReturnNote('')
+    } catch (error) {
+      alert(error?.message || 'Failed to report that the problem returned.')
+    } finally {
+      setRequestingReturn(false)
+    }
+  }
+
+  const submitFollowUp = async (event) => {
+    event?.preventDefault()
+    if (!issue || !followUpNote.trim()) return
+    if (isOffline) {
+      alert('Follow-ups are unavailable until the connection returns.')
+      return
+    }
+    setSavingFollowUp(true)
+    try {
+      await addBhtIssueFollowUp({
+        issueId: issue.id,
+        expectedIssue: issue,
+        note: followUpNote,
+        actorUser: user
+      })
+      setFollowUpNote('')
+    } catch (error) {
+      alert(error?.message || 'Failed to add follow-up.')
+    } finally {
+      setSavingFollowUp(false)
     }
   }
 
@@ -131,37 +193,83 @@ function IssueDetail({ user, issueId, inIssueScope, onBack }) {
 
   return (
     <div className="issue-detail-page">
-      <button className="issue-detail-back" onClick={onBack}><ArrowLeft size={16} /> Location Issues</button>
+      <button className="issue-detail-back" onClick={onBack}><ArrowLeft size={16} /> Issues</button>
 
       <div className="issue-detail-badges">
         <span className={`location-issue-pill location-issue-pill-${String(issue.status || 'open').toLowerCase()}`}>{statusLabel(issue.status)}</span>
-        <span className="location-issue-pill location-issue-pill-severity">{String(issue.severity || 'medium').toUpperCase()}</span>
+        <span className="location-issue-pill">{issue.issueTypeLabel || getIssueTypeMeta(inferIssueType(issue)).label}</span>
+        <span className="location-issue-pill">{getIssueSourceLabel(issue.source)}</span>
       </div>
 
       <h1>{issue.label || 'Issue'}</h1>
       <div className="issue-detail-meta">
         Reported by {issue.reportedByName || 'staff'} - {relativeTime(issue.createdAt)} - {locationLabel(issue.locationId)}
+        {issue.vanId ? ` - ${VANS.find(van => van.id === issue.vanId)?.label || issue.vanId}` : ''}
       </div>
+
+      {issue.source === 'eoc_checklist' && (
+        <div className="issue-detail-context">
+          Checklist item: {issue.category ? `${issue.category} - ` : ''}{issue.label || 'Issue'}
+        </div>
+      )}
 
       <div className="issue-detail-description">
         {issue.description || 'No description provided.'}
       </div>
 
-      {canManage && !isClosed && (
+      {canManage && (
         <form className="issue-detail-actions" onSubmit={submitStatus}>
           <select value={action} onChange={(event) => setAction(event.target.value)}>
             <option value="">Choose action</option>
-            {issue.status === 'open' && <option value="in_progress">Mark in progress</option>}
-            <option value="resolved">Resolve</option>
-            <option value="voided">Void</option>
+            <option value="note_added">Add note</option>
+            {!isClosed && issue.status === 'open' && <option value="in_progress">Mark in progress</option>}
+            {!isClosed && <option value="resolved">Resolve</option>}
+            {!isClosed && <option value="voided">Void</option>}
+            {isClosed && <option value="open">Reopen</option>}
           </select>
           <textarea
             rows={3}
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            placeholder="Required note..."
+            placeholder={action === 'open' ? 'Explain why the issue is being reopened.' : 'Add the relevant update or action taken.'}
           />
-          <button type="submit" disabled={!action || saving}>{saving ? 'Saving...' : 'Save update'}</button>
+          <button type="submit" disabled={!action || !note.trim() || saving}>{saving ? 'Saving...' : 'Save update'}</button>
+        </form>
+      )}
+
+      {canAddFollowUp && (
+        <form className="issue-detail-actions issue-follow-up-form" onSubmit={submitFollowUp}>
+          <div className="issue-follow-up-heading">Add follow-up</div>
+          <textarea
+            rows={3}
+            value={followUpNote}
+            onChange={(event) => setFollowUpNote(event.target.value)}
+            placeholder="Include new information about this issue."
+          />
+          <button type="submit" disabled={!followUpNote.trim() || savingFollowUp}>
+            {savingFollowUp ? 'Adding...' : 'Add follow-up'}
+          </button>
+        </form>
+      )}
+
+      {canReportReturned && returnAlreadyRequested && (
+        <div className="issue-returned-status">
+          <RotateCcw size={17} /> A supervisor has been notified that this problem returned.
+        </div>
+      )}
+
+      {canReportReturned && !returnAlreadyRequested && (
+        <form className="issue-detail-actions issue-returned-form" onSubmit={submitProblemReturned}>
+          <div className="issue-returned-heading"><RotateCcw size={17} /> Did this problem return?</div>
+          <textarea
+            rows={3}
+            value={returnNote}
+            onChange={(event) => setReturnNote(event.target.value)}
+            placeholder="Describe what is happening now and include all relevant details."
+          />
+          <button type="submit" disabled={!returnNote.trim() || requestingReturn}>
+            {requestingReturn ? 'Sending...' : 'Report problem returned'}
+          </button>
         </form>
       )}
 
@@ -185,7 +293,7 @@ function IssueDetail({ user, issueId, inIssueScope, onBack }) {
 
       {!canManage && (
         <div className="location-issues-note">
-          Read-only. Everyone at {locationLabel(issue.locationId)} sees this record. Supervisor controls are not shown for BHTs.
+          Everyone assigned to {locationLabel(issue.locationId)} can see this issue and its updates. Supervisors control issue status.
         </div>
       )}
     </div>

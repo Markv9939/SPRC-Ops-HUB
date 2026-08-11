@@ -134,7 +134,8 @@ function SupervisorDashboard({
   onOpenTransportPanel,
   onOpenTransportRecord,
   onCloseTransportDetails,
-  onBackToTransportLog
+  onBackToTransportLog,
+  onOpenIssue
 }) {
   const activeTab = controlledActiveTab
   const setActiveTab = useCallback((nextTab) => {
@@ -1473,6 +1474,7 @@ function SupervisorDashboard({
           isOffline={isOffline}
           targetIssueId={navigationTarget?.type === 'issue' ? navigationTarget.issueId : null}
           onTargetIssueHandled={onNavigationHandled}
+          onOpenIssue={onOpenIssue}
         />
       )}
 
@@ -1840,6 +1842,7 @@ function SupervisorDashboard({
           inComplianceScope={inComplianceScope}
           inTransportScope={inTransportScope}
           onNavigateTab={setActiveTab}
+          onOpenIssue={onOpenIssue}
           onDrilldownToTransports={({ startDate: sd, endDate: ed, site, status, reason, driver }) => {
             setStartDate(sd)
             setEndDate(ed)

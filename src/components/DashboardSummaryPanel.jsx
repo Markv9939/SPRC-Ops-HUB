@@ -15,6 +15,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { ChevronRight } from 'lucide-react'
 import { db } from '../firebase'
 import {
   collection, query, where, orderBy, doc, getDocs, updateDoc,
@@ -22,10 +23,10 @@ import {
 } from 'firebase/firestore'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { writeAuditLog as writeAuditEntry } from '../services/notificationService'
-import { updateIssueStatus } from '../services/issueStatusService'
 import { notifySuccess } from '../utils/toast'
 import { getStatus } from '../utils/complianceStatus'
 import { getFleetTaskTypeLabel, parseMileageValue } from '../utils/fleetStatus'
+import { getIssueSourceLabel, getIssueTypeMeta, inferIssueType } from '../utils/issueModel'
 import { LOCATIONS, VANS, getShiftLabel } from '../data/eocConstants'
 import {
   MAIN_LOCATIONS,
@@ -114,7 +115,7 @@ function formatAlertTypeLabel(type) {
   if (type === 'shift_debrief_no_receivers') return 'No receiving BHT'
   if (type === 'shift_debrief_incoming_ack_late') return 'Late handoff acknowledgment'
   if (type === 'shift_debrief_submitted') return 'Shift debrief submitted'
-  if (type === 'eoc_issue') return 'EOC issue'
+  if (type === 'eoc_issue') return 'Issue'
   if (type === 'fleet_overdue') return 'Fleet overdue'
   if (type === 'fleet_upcoming') return 'Fleet upcoming'
   if (type === 'transport_completed') return 'Transport completed'
@@ -180,7 +181,8 @@ export default function DashboardSummaryPanel({
   inComplianceScope,
   inTransportScope,
   onNavigateTab,
-  onDrilldownToTransports
+  onDrilldownToTransports,
+  onOpenIssue
 }) {
   // ── Queue state ──
   const [queueView, setQueueView] = useState('issues')
@@ -198,7 +200,6 @@ export default function DashboardSummaryPanel({
   const [complianceQuickEditSaving, setComplianceQuickEditSaving] = useState(false)
 
   // ── Issue action notes ──
-  const [eocIssueActionNotes, setEocIssueActionNotes] = useState({})
 
   // ── Dashboard transport stats ──
   const [dashMonth, setDashMonth] = useState(() => {
@@ -246,19 +247,6 @@ export default function DashboardSummaryPanel({
   }
 
   // ── Issue action note helpers ──
-  const getIssueActionNote = (issueId) => String(eocIssueActionNotes[issueId] || '')
-  const updateIssueActionNote = (issueId, note) => {
-    setEocIssueActionNotes(prev => ({ ...prev, [issueId]: note }))
-  }
-  const clearIssueActionNote = (issueId) => {
-    setEocIssueActionNotes(prev => {
-      if (!(issueId in prev)) return prev
-      const next = { ...prev }
-      delete next[issueId]
-      return next
-    })
-  }
-
   // ── Overdue task helpers ──
   const resetOverdueTaskActionState = () => {
     setOverdueTaskActionId(null)
@@ -292,52 +280,6 @@ export default function DashboardSummaryPanel({
   }
 
   // ── Handlers ──
-  const handleDashStartIssue = async (issueId, progressNote) => {
-    if (blockIfOffline('starting issue progress')) return
-    const trimmedProgressNote = String(progressNote || '').trim()
-    if (!trimmedProgressNote) { alert('Note is required before moving an issue to in progress.'); return }
-
-    const selectedIssue = eocIssues.find(issue => issue.id === issueId)
-    if (!selectedIssue) { alert('Issue no longer exists.'); return }
-
-    try {
-      await updateIssueStatus({
-        issueId,
-        expectedIssue: selectedIssue,
-        nextStatus: 'in_progress',
-        note: trimmedProgressNote,
-        actorUser: user
-      })
-      clearIssueActionNote(issueId)
-    } catch (err) {
-      console.error('Error moving issue to in_progress:', err)
-      alertVersionConflict(err, 'Failed to start issue progress')
-    }
-  }
-
-  const handleDashResolveIssue = async (issueId, resolveNote) => {
-    if (blockIfOffline('resolving issues')) return
-    const trimmedResolveNote = String(resolveNote || '').trim()
-    if (!trimmedResolveNote) { alert('Resolution note is required.'); return }
-
-    const selectedIssue = eocIssues.find(issue => issue.id === issueId)
-    if (!selectedIssue) { alert('Issue no longer exists.'); return }
-
-    try {
-      await updateIssueStatus({
-        issueId,
-        expectedIssue: selectedIssue,
-        nextStatus: 'resolved',
-        note: trimmedResolveNote,
-        actorUser: user
-      })
-      clearIssueActionNote(issueId)
-    } catch (err) {
-      console.error('Error resolving issue:', err)
-      alertVersionConflict(err, 'Failed to resolve issue')
-    }
-  }
-
   const handleMarkAlertRead = async (alertId) => {
     if (blockIfOffline('marking alerts as read')) return
     const selectedAlert = [...eocAlerts, ...fleetAlerts].find(r => r.id === alertId)
@@ -616,31 +558,23 @@ export default function DashboardSummaryPanel({
             {/* Issues */}
             {queueView === 'issues' && filteredIssueQueue.length === 0 && (<div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No active issues for this filter.</div>)}
             {queueView === 'issues' && filteredIssueQueue.map(issue => (
-              <div key={issue.id} style={{ padding: '12px', borderRadius: '8px', border: issue.severity === 'high' ? '2px solid #B75E54' : '1px solid rgba(17,47,82,0.14)', backgroundColor: 'rgba(17,47,82,0.06)' }}>
+              <button type="button" key={issue.id} className="dashboard-issue-summary" onClick={() => onOpenIssue?.(issue.id)}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                   <span style={{ fontWeight: 700, fontSize: '14px' }}>{issue.label}</span>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <span className={`chip severity-${issue.severity}`} style={{ fontSize: '11px', textTransform: 'capitalize' }}>{issue.severity}</span>
-                    <span className="chip" style={{ fontSize: '11px', textTransform: 'uppercase' }}>{issue.status || 'open'}</span>
-                  </div>
+                  <span className={`location-issue-pill location-issue-pill-${String(issue.status || 'open').toLowerCase()}`}>
+                    {String(issue.status || 'open').replace('_', ' ').toUpperCase()}
+                  </span>
                 </div>
                 <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{issue.description}</div>
                 <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
                   {LOCATIONS.find(l => l.id === issue.locationId)?.label || issue.locationId} &bull; {issue.reportedByName}
                   {issue.vanId ? ` · ${VANS.find(v => v.id === issue.vanId)?.label || issue.vanId}` : ''}
                 </div>
-                {(issue.status === 'open' || issue.status === 'in_progress') && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <input className="input" placeholder="Add action taken, current status, and next step..." value={getIssueActionNote(issue.id)} onChange={e => updateIssueActionNote(issue.id, e.target.value)} style={{ width: '100%', padding: '6px 10px', fontSize: '13px' }} />
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      {issue.status === 'open' && (<button onClick={() => handleDashStartIssue(issue.id, getIssueActionNote(issue.id))} style={{ padding: '6px 14px', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-primary)', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>In Progress</button>)}
-                      <button onClick={() => handleDashResolveIssue(issue.id, getIssueActionNote(issue.id))} style={{ padding: '6px 14px', backgroundColor: '#2F7D57', color: 'white', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Resolve</button>
-                      <button onClick={() => clearIssueActionNote(issue.id)} style={{ padding: '6px 14px', backgroundColor: 'rgba(17,47,82,0.10)', color: 'var(--text-secondary)', border: 'none', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' }}>Clear Note</button>
-                    </div>
-                  </div>
-                )}
-                {issue.status === 'in_progress' && issue.inProgressByName && (<div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px' }}>In progress by {issue.inProgressByName}</div>)}
-              </div>
+                <div style={{ fontSize: '12px', color: '#556677', marginBottom: '8px' }}>
+                  {issue.issueTypeLabel || getIssueTypeMeta(inferIssueType(issue)).label} - {getIssueSourceLabel(issue.source)}
+                </div>
+                <ChevronRight size={18} />
+              </button>
             ))}
 
             {/* Overdue EOC tasks */}

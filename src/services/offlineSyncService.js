@@ -34,6 +34,7 @@ import {
   updateOfflineAction
 } from './offlineStore'
 import { toTransportRecordDate } from '../utils/transportRecord'
+import { buildIssueRecord } from '../utils/issueModel'
 
 export const OFFLINE_ACTION_TYPES = {
   EOC_SUBMISSION: 'eocSubmission',
@@ -161,8 +162,11 @@ function getDraftDocId(taskId, userId) {
 function buildEocAnswersData(templateItems, answers, repairDetails) {
   return (Array.isArray(templateItems) ? templateItems : []).map(item => ({
     itemId: item.id,
+    trackingId: item.trackingId || item.id,
     label: item.label,
     category: item.category,
+    helpText: item.helpText || '',
+    requiresPhotoOnIssue: item.requiresPhotoOnIssue === true,
     status: answers?.[item.id],
     ...(answers?.[item.id] === 'repair'
       ? { description: repairDetails?.[item.id]?.description || '' }
@@ -230,6 +234,8 @@ export async function submitEocSubmissionOnline(payload) {
       templateScope: task.templateScope || getTemplateScopeForShift(task.shiftId) || TEMPLATE_SCOPE_OTC_SHARED,
       templateId: task.templateId || null,
       templateName: task.templateName || '',
+      templateVersion: Number(task.templateVersion || 0) || null,
+      templateVersionId: task.templateVersionId || null,
       vanId: task.vanId || null,
       dueDate: task.dueDate,
       staffCompleting: user?.name || '',
@@ -283,21 +289,26 @@ export async function submitEocSubmissionOnline(payload) {
       }
       const issueData = {
         id: issueRef.id,
-        taskId: task.id,
-        submissionId: submissionRef.id,
-        locationId: task.locationId,
-        shiftId: task.shiftId,
-        vanId: task.vanId || null,
-        eocType,
-        itemId: issue.itemId,
-        label: issue.label,
-        category: issue.category,
-        description: issue.description,
-        severity: 'medium',
-        status: 'open',
-        reportedByUserId: normalizedUserId,
-        reportedByName: user?.name || '',
-        version: 1
+        ...buildIssueRecord({
+          source: 'eoc_checklist',
+          eocType,
+          locationId: task.locationId,
+          shiftId: task.shiftId,
+          vanId: task.vanId,
+          taskId: task.id,
+          submissionId: submissionRef.id,
+          templateId: task.templateId,
+          templateVersion: task.templateVersion,
+          templateVersionId: task.templateVersionId,
+          itemId: issue.itemId,
+          trackingId: issue.trackingId,
+          label: issue.label,
+          category: issue.category,
+          description: issue.description,
+          requiresPhotoOnIssue: issue.requiresPhotoOnIssue,
+          reportedByUserId: normalizedUserId,
+          reportedByName: user?.name
+        }),
       }
       const issueDocumentData = { ...issueData }
       delete issueDocumentData.id

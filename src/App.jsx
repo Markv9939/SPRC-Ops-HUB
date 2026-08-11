@@ -327,18 +327,19 @@ function App() {
     if (!user) return
     const isManagement = isSupervisorRole(user.role) || isAdminRole(user.role)
     const onManagementRoute = location.pathname.startsWith('/dashboard/')
+    const onSharedIssueRoute = activeRoute.page === 'issues' || activeRoute.page === 'issueDetail'
     if (location.pathname === '/') {
       navigate(getDefaultRoute(user), { replace: true })
       return
     }
-    if (isManagement && !onManagementRoute) {
+    if (isManagement && !onManagementRoute && !onSharedIssueRoute) {
       navigate(getDefaultRoute(user), { replace: true })
       return
     }
     if (!isManagement && onManagementRoute) {
       navigate('/home', { replace: true })
     }
-  }, [location.pathname, navigate, user])
+  }, [activeRoute.page, location.pathname, navigate, user])
 
   const navigateHome = useCallback((options = {}) => {
     navigate(getDefaultRoute(user), options)
@@ -393,7 +394,7 @@ function App() {
     const route = parseAppRoute(location.pathname)
     const isManagement = isSupervisorRole(userData?.role) || isAdminRole(userData?.role)
     const routeMatchesRole = isManagement
-      ? location.pathname.startsWith('/dashboard/')
+      ? (location.pathname.startsWith('/dashboard/') || ['issues', 'issueDetail'].includes(route.page))
       : ['home', 'transport', 'eocForm', 'debrief', 'issues', 'issueDetail'].includes(route.page)
     if (location.pathname === '/' || !routeMatchesRole) {
       navigate(getDefaultRoute(userData), { replace: true })
@@ -1195,7 +1196,7 @@ function App() {
         onReportIssue={handleReportIssue}
         assignment={bhtDebriefAssignment}
       />,
-      { title: 'Location Issues', showBack: true, onBack: () => navigateHome() }
+      { title: 'Issues', showBack: true, onBack: () => navigateHome() }
     )
   }
 
@@ -1205,9 +1206,10 @@ function App() {
         user={user}
         issueId={currentIssueId}
         inIssueScope={inIssueScope}
+        isOffline={isOffline}
         onBack={() => navigate('/issues')}
       />,
-      { title: 'Location Issues', showBack: true, onBack: () => navigate('/issues') }
+      { title: 'Issues', showBack: true, onBack: () => navigate('/issues') }
     )
   }
 
@@ -1234,6 +1236,7 @@ function App() {
           onOpenTransportRecord={openManagementTransportRecord}
           onCloseTransportDetails={closeManagementTransportDetails}
           onBackToTransportLog={returnToManagementTransportLog}
+          onOpenIssue={(issueId) => navigate(`/issues/${encodeURIComponent(issueId)}`)}
         />
       </>,
       { title: sectionTitle }

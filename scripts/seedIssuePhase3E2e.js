@@ -1,0 +1,246 @@
+/* global process */
+import { createHash } from 'node:crypto'
+import { initializeApp } from 'firebase-admin/app'
+import { getFirestore, Timestamp } from 'firebase-admin/firestore'
+import { getShiftById } from '../src/data/eocConstants.js'
+import { getCurrentCycleDueDate } from '../src/utils/eocSchedule.js'
+
+const PROJECT_ID = 'sprc-ops-hub-phase3-e2e'
+const PIN_HASH_PEPPER = 'sprc-pin-v2-6digit'
+
+process.env.FIRESTORE_EMULATOR_HOST ||= '127.0.0.1:8080'
+
+initializeApp({ projectId: PROJECT_ID })
+const db = getFirestore()
+
+function hashPin(pin) {
+  return createHash('sha256').update(`${PIN_HASH_PEPPER}:${pin}`).digest('hex')
+}
+
+const now = Timestamp.now()
+const dueDate = getCurrentCycleDueDate(getShiftById('shift_1'))
+const writes = [
+  ['appSettings/authPolicy', { authScopeEnforced: false, version: 1, updatedAt: now }],
+  ['users/phase3_bht', {
+    name: 'Phase 3 Test BHT',
+    role: 'bht',
+    active: true,
+    deleted: false,
+    pinHash: hashPin('111111'),
+    pinVersion: 'v2_sha256_6digit',
+    site: 'OTC',
+    location: 'OTC',
+    house: 'TEST_HOUSE',
+    authorizedLocations: ['OTC', 'TEST_HOUSE'],
+    issueLocationIds: ['test_house'],
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    vanId: 'van_test',
+    vanIds: ['van_test'],
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['users/phase3_supervisor', {
+    name: 'Phase 3 Test Supervisor',
+    role: 'supervisor',
+    active: true,
+    deleted: false,
+    pinHash: hashPin('222222'),
+    pinVersion: 'v2_sha256_6digit',
+    site: 'OTC',
+    location: 'OTC',
+    authorizedLocations: ['OTC', 'TEST_HOUSE'],
+    issueLocationIds: ['test_house'],
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['users/phase3_same_house_bht', {
+    name: 'Same House Test BHT',
+    role: 'bht',
+    active: true,
+    deleted: false,
+    site: 'OTC',
+    location: 'OTC',
+    house: 'TEST_HOUSE',
+    authorizedLocations: ['OTC', 'TEST_HOUSE'],
+    issueLocationIds: ['test_house'],
+    locationId: 'test_house',
+    shiftId: 'shift_2',
+    vanId: 'van_test',
+    vanIds: ['van_test'],
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['users/phase3_other_house_bht', {
+    name: 'Other House Test BHT',
+    role: 'bht',
+    active: true,
+    deleted: false,
+    site: 'OTC',
+    location: 'OTC',
+    house: 'MESQUITE',
+    authorizedLocations: ['OTC', 'MESQUITE'],
+    issueLocationIds: ['mesquite'],
+    locationId: 'mesquite',
+    shiftId: 'shift_1',
+    vanId: 'van_1',
+    vanIds: ['van_1'],
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['shiftAssignments/asg_phase3_bht', {
+    bhtUserId: 'phase3_bht',
+    bhtUserName: 'Phase 3 Test BHT',
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    vanId: 'van_test',
+    vanIds: ['van_test'],
+    active: true,
+    source: 'e2e_test',
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['shiftAssignments/asg_phase3_same_house_bht', {
+    bhtUserId: 'phase3_same_house_bht',
+    bhtUserName: 'Same House Test BHT',
+    locationId: 'test_house',
+    shiftId: 'shift_2',
+    vanId: 'van_test',
+    vanIds: ['van_test'],
+    active: true,
+    source: 'e2e_test',
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['shiftAssignments/asg_phase3_other_house_bht', {
+    bhtUserId: 'phase3_other_house_bht',
+    bhtUserName: 'Other House Test BHT',
+    locationId: 'mesquite',
+    shiftId: 'shift_1',
+    vanId: 'van_1',
+    vanIds: ['van_1'],
+    active: true,
+    source: 'e2e_test',
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['eocTemplateLibrary/phase3_house_template', {
+    name: 'Phase 3 Test House EOC',
+    eocType: 'house',
+    status: 'active',
+    items: [
+      { id: 'phase3_smoke_detectors', trackingId: 'phase3_smoke_detectors', category: 'Safety', label: 'Are the smoke detectors secure and undamaged?', helpText: '', requiresPhotoOnIssue: false, order: 1, active: true },
+      { id: 'phase3_kitchen_sink', trackingId: 'phase3_kitchen_sink', category: 'Kitchen', label: 'Is the kitchen sink working without leaks?', helpText: 'Check under the sink for moisture.', requiresPhotoOnIssue: false, order: 2, active: true }
+    ],
+    itemSchemaVersion: 2,
+    publishedVersion: 1,
+    publishedVersionId: 'phase3_house_template__v1',
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['eocTemplateVersions/phase3_house_template__v1', {
+    templateId: 'phase3_house_template',
+    templateName: 'Phase 3 Test House EOC',
+    eocType: 'house',
+    status: 'active',
+    items: [
+      { id: 'phase3_smoke_detectors', trackingId: 'phase3_smoke_detectors', category: 'Safety', label: 'Are the smoke detectors secure and undamaged?', helpText: '', requiresPhotoOnIssue: false, order: 1, active: true },
+      { id: 'phase3_kitchen_sink', trackingId: 'phase3_kitchen_sink', category: 'Kitchen', label: 'Is the kitchen sink working without leaks?', helpText: 'Check under the sink for moisture.', requiresPhotoOnIssue: false, order: 2, active: true }
+    ],
+    itemSchemaVersion: 2,
+    versionNumber: 1,
+    version: 1,
+    publishedAt: now,
+    createdAt: now
+  }],
+  ['eocTasks/phase3_house_task', {
+    taskType: 'house',
+    eocType: 'house',
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    dueDate,
+    cycleKey: `phase3_house_${dueDate}`,
+    status: 'pending',
+    eligibleUserIds: ['phase3_bht'],
+    assigneeUserId: 'phase3_bht',
+    templateScope: 'otc_shared',
+    templateId: 'phase3_house_template',
+    templateName: 'Phase 3 Test House EOC',
+    templateVersion: 1,
+    templateVersionId: 'phase3_house_template__v1',
+    version: 1,
+    dueAt: now,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['eocIssues/phase3_active_issue', {
+    schemaVersion: 2,
+    source: 'quick_report',
+    issueType: 'house_property',
+    issueTypeLabel: 'House/property',
+    eocType: 'house',
+    locationId: 'test_house',
+    shiftId: 'shift_2',
+    label: 'Laundry room dryer',
+    category: 'Staff report',
+    description: 'Dryer is running but not producing heat.',
+    status: 'open',
+    reportedByUserId: 'phase3_same_house_bht',
+    reportedByName: 'Same House Test BHT',
+    version: 1,
+    latestActivity: { id: 'v1_reported', eventType: 'reported', label: 'Reported', note: 'Dryer is running but not producing heat.', actorUserId: 'phase3_same_house_bht', actorName: 'Same House Test BHT', createdAt: now },
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['eocIssues/phase3_active_issue/activity/v1_reported', {
+    issueId: 'phase3_active_issue', eventType: 'reported', label: 'Reported', status: 'open', note: 'Dryer is running but not producing heat.', actorUserId: 'phase3_same_house_bht', actorName: 'Same House Test BHT', locationId: 'test_house', issueVersion: 1, version: 1, immutable: true, createdAt: now
+  }],
+  ['eocIssues/phase3_resolved_issue', {
+    schemaVersion: 2,
+    source: 'eoc_checklist',
+    issueType: 'house_property',
+    issueTypeLabel: 'House/property',
+    eocType: 'house',
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    taskId: 'older_test_task',
+    submissionId: 'older_test_submission',
+    itemId: 'back_door_latch',
+    trackingId: 'back_door_latch',
+    label: 'Back door latch',
+    category: 'Safety',
+    description: 'Latch was difficult to close.',
+    status: 'resolved',
+    reportedByUserId: 'phase3_bht',
+    reportedByName: 'Phase 3 Test BHT',
+    resolvedNotes: 'Latch aligned, lubricated, and tested.',
+    resolvedByUserId: 'phase3_supervisor',
+    resolvedByName: 'Phase 3 Test Supervisor',
+    resolvedAt: now,
+    closedAt: now,
+    version: 2,
+    latestActivity: { id: 'v2_resolved', eventType: 'resolved', label: 'Resolved', note: 'Latch aligned, lubricated, and tested.', actorUserId: 'phase3_supervisor', actorName: 'Phase 3 Test Supervisor', createdAt: now },
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['eocIssues/phase3_resolved_issue/activity/v1_reported', {
+    issueId: 'phase3_resolved_issue', eventType: 'reported', label: 'Reported', status: 'open', note: 'Latch was difficult to close.', actorUserId: 'phase3_bht', actorName: 'Phase 3 Test BHT', locationId: 'test_house', issueVersion: 1, version: 1, immutable: true, createdAt: Timestamp.fromMillis(now.toMillis() - 3600000)
+  }],
+  ['eocIssues/phase3_resolved_issue/activity/v2_resolved', {
+    issueId: 'phase3_resolved_issue', eventType: 'resolved', label: 'Resolved', status: 'resolved', note: 'Latch aligned, lubricated, and tested.', actorUserId: 'phase3_supervisor', actorName: 'Phase 3 Test Supervisor', locationId: 'test_house', issueVersion: 2, version: 1, immutable: true, createdAt: now
+  }]
+]
+
+const batch = db.batch()
+writes.forEach(([path, data]) => batch.set(db.doc(path), data))
+await batch.commit()
+
+console.log(JSON.stringify({ projectId: PROJECT_ID, dueDate, seededDocuments: writes.length }))

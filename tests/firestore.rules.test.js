@@ -1613,3 +1613,303 @@ test('PIN compatibility mode works after Firebase UID changes without orphaning 
     version: 2
   }))
 })
+
+test('supervisor can create an immutable owned EOC template version', async () => {
+  await seed('users/template_version_supervisor', {
+    name: 'Template Version Supervisor',
+    role: 'supervisor',
+    active: true,
+    email: 'template.version.supervisor@example.com',
+    authorizedLocations: ['OTC'],
+    issueLocationIds: ['test_house'],
+    version: 1
+  })
+  await seed('usersByAuthUid/template_version_supervisor_uid', {
+    userId: 'template_version_supervisor',
+    email: 'template.version.supervisor@example.com',
+    emailDomain: 'example.com',
+    linkedAt: new Date(),
+    linkedBy: 'self_first_login',
+    version: 1
+  })
+  await seed('eocTemplateLibrary/template_rules', {
+    name: 'Rules Test House EOC',
+    eocType: 'house',
+    status: 'active',
+    items: [],
+    ownerUserId: 'template_version_supervisor',
+    ownerName: 'Template Version Supervisor',
+    ownerAuthUid: 'template_version_supervisor_uid',
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  })
+
+  const supervisorDb = authed('template_version_supervisor_uid', 'template.version.supervisor@example.com')
+  const versionRef = doc(supervisorDb, 'eocTemplateVersions/template_rules__v2')
+  const publishBatch = writeBatch(supervisorDb)
+  publishBatch.update(doc(supervisorDb, 'eocTemplateLibrary/template_rules'), {
+    items: [{
+      id: 'front_lock',
+      trackingId: 'front_lock',
+      category: 'Safety',
+      label: 'Does the front lock work?',
+      helpText: '',
+      requiresPhotoOnIssue: false,
+      order: 1,
+      active: true
+    }],
+    itemSchemaVersion: 2,
+    publishedVersion: 2,
+    publishedVersionId: 'template_rules__v2',
+    version: 2,
+    updatedAt: serverTimestamp()
+  })
+  publishBatch.set(versionRef, {
+    templateId: 'template_rules',
+    templateName: 'Rules Test House EOC',
+    eocType: 'house',
+    status: 'active',
+    items: [{
+      id: 'front_lock',
+      trackingId: 'front_lock',
+      category: 'Safety',
+      label: 'Does the front lock work?',
+      helpText: '',
+      requiresPhotoOnIssue: false,
+      order: 1,
+      active: true
+    }],
+    itemSchemaVersion: 2,
+    versionNumber: 2,
+    ownerUserId: 'template_version_supervisor',
+    ownerName: 'Template Version Supervisor',
+    ownerAuthUid: 'template_version_supervisor_uid',
+    publishedByUserId: 'template_version_supervisor',
+    publishedByName: 'Template Version Supervisor',
+    publishedByAuthUid: 'template_version_supervisor_uid',
+    publishedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+    version: 1
+  })
+  await assertSucceeds(publishBatch.commit())
+
+  await assertFails(updateDoc(versionRef, {
+    templateName: 'Silently changed version'
+  }))
+  await assertFails(deleteDoc(versionRef))
+})
+
+test('authorized staff can save the automatic missed EOC lifecycle fields', async () => {
+  await seed('users/missed_eoc_admin', {
+    name: 'Missed EOC Admin',
+    role: 'admin',
+    active: true,
+    email: 'missed.eoc.admin@example.com',
+    authorizedLocations: ['OTC'],
+    issueLocationIds: ['test_house'],
+    version: 1
+  })
+  await seed('usersByAuthUid/missed_eoc_admin_uid', {
+    userId: 'missed_eoc_admin',
+    email: 'missed.eoc.admin@example.com',
+    emailDomain: 'example.com',
+    linkedAt: new Date(),
+    linkedBy: 'self_first_login',
+    version: 1
+  })
+
+  const adminDb = authed('missed_eoc_admin_uid', 'missed.eoc.admin@example.com')
+  const baseTask = {
+    taskType: 'house',
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    dueDate: '2026-08-10',
+    cycleKey: 'missed_eoc_rules',
+    eligibleUserIds: [],
+    templateScope: 'otc_shared',
+    version: 1,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  }
+
+  await assertSucceeds(setDoc(doc(adminDb, 'eocTasks/missed_eoc_rules_valid'), {
+    ...baseTask,
+    cycleKey: 'missed_eoc_rules_valid',
+    status: 'missed',
+    missedAt: serverTimestamp(),
+    missedReason: 'The next scheduled EOC cycle began without a completed submission.'
+  }))
+})
+
+test('BHT can report a returned problem but only a supervisor can reopen the issue', async () => {
+  await seed('appSettings/authPolicy', {
+    authScopeEnforced: true
+  })
+  await seed('users/returned_problem_bht', {
+    name: 'Returned Problem BHT',
+    role: 'bht',
+    active: true,
+    email: 'returned.problem.bht@example.com',
+    authorizedLocations: ['OTC', 'TEST_HOUSE'],
+    issueLocationIds: ['test_house'],
+    locationId: 'test_house',
+    version: 1
+  })
+  await seed('usersByAuthUid/returned_problem_bht_uid', {
+    userId: 'returned_problem_bht',
+    email: 'returned.problem.bht@example.com',
+    emailDomain: 'example.com',
+    linkedAt: new Date(),
+    linkedBy: 'self_first_login',
+    version: 1
+  })
+  await seed('users/returned_problem_supervisor', {
+    name: 'Returned Problem Supervisor',
+    role: 'supervisor',
+    active: true,
+    email: 'returned.problem.supervisor@example.com',
+    authorizedLocations: ['OTC', 'TEST_HOUSE'],
+    issueLocationIds: ['test_house'],
+    version: 1
+  })
+  await seed('usersByAuthUid/returned_problem_supervisor_uid', {
+    userId: 'returned_problem_supervisor',
+    email: 'returned.problem.supervisor@example.com',
+    emailDomain: 'example.com',
+    linkedAt: new Date(),
+    linkedBy: 'self_first_login',
+    version: 1
+  })
+  await seed('eocIssues/returned_problem_issue', {
+    locationId: 'test_house',
+    status: 'resolved',
+    eocType: 'house',
+    label: 'Front door lock',
+    description: 'Lock was sticking.',
+    reportedByUserId: 'returned_problem_bht',
+    resolvedNotes: 'Lock adjusted and tested.',
+    closedAt: new Date(),
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  })
+
+  const bhtDb = authed('returned_problem_bht_uid', 'returned.problem.bht@example.com')
+  await assertSucceeds(setDoc(doc(bhtDb, 'eocIssues/returned_problem_issue/activity/problem_returned_1'), {
+    issueId: 'returned_problem_issue',
+    eventType: 'problem_returned',
+    label: 'Problem returned',
+    status: 'resolved',
+    note: 'The lock is sticking again.',
+    actorUserId: 'returned_problem_bht',
+    actorName: 'Returned Problem BHT',
+    locationId: 'test_house',
+    issueVersion: 1,
+    immutable: true,
+    version: 1,
+    createdAt: serverTimestamp()
+  }))
+  await assertFails(setDoc(doc(bhtDb, 'eocIssues/returned_problem_issue/activity/problem_returned_impersonated'), {
+    issueId: 'returned_problem_issue',
+    eventType: 'problem_returned',
+    label: 'Problem returned',
+    status: 'resolved',
+    note: 'Impersonated request.',
+    actorUserId: 'someone_else',
+    actorName: 'Someone Else',
+    locationId: 'test_house',
+    issueVersion: 1,
+    immutable: true,
+    version: 1,
+    createdAt: serverTimestamp()
+  }))
+  await assertFails(updateDoc(doc(bhtDb, 'eocIssues/returned_problem_issue'), {
+    status: 'open',
+    closedAt: null,
+    version: 2,
+    updatedAt: serverTimestamp()
+  }))
+
+  const supervisorDb = authed('returned_problem_supervisor_uid', 'returned.problem.supervisor@example.com')
+  await assertSucceeds(updateDoc(doc(supervisorDb, 'eocIssues/returned_problem_issue'), {
+    status: 'open',
+    closedAt: null,
+    reopenNotes: 'Confirmed the lock is sticking again.',
+    version: 2,
+    updatedAt: serverTimestamp()
+  }))
+})
+
+test('BHT follow-ups preserve status and cannot impersonate another profile', async () => {
+  await seed('appSettings/authPolicy', { authScopeEnforced: true })
+  await seed('users/follow_up_bht', {
+    name: 'Follow Up BHT',
+    role: 'bht',
+    active: true,
+    email: 'follow.up.bht@example.com',
+    authorizedLocations: ['OTC', 'TEST_HOUSE'],
+    issueLocationIds: ['test_house'],
+    locationId: 'test_house',
+    version: 1
+  })
+  await seed('usersByAuthUid/follow_up_bht_uid', {
+    userId: 'follow_up_bht',
+    email: 'follow.up.bht@example.com',
+    emailDomain: 'example.com',
+    linkedAt: new Date(),
+    linkedBy: 'self_first_login',
+    version: 1
+  })
+  await seed('eocIssues/follow_up_issue', {
+    locationId: 'test_house',
+    status: 'open',
+    eocType: 'house',
+    label: 'Kitchen sink',
+    description: 'The faucet is leaking.',
+    reportedByUserId: 'follow_up_bht',
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  })
+
+  const bhtDb = authed('follow_up_bht_uid', 'follow.up.bht@example.com')
+  const issueRef = doc(bhtDb, 'eocIssues/follow_up_issue')
+  const activityRef = doc(bhtDb, 'eocIssues/follow_up_issue/activity/follow_up_1')
+  await assertSucceeds(setDoc(activityRef, {
+    issueId: 'follow_up_issue',
+    eventType: 'bht_follow_up',
+    label: 'Staff follow-up',
+    status: 'open',
+    note: 'The leak is now reaching the cabinet base.',
+    actorUserId: 'follow_up_bht',
+    actorName: 'Follow Up BHT',
+    locationId: 'test_house',
+    issueVersion: 1,
+    immutable: true,
+    version: 1,
+    createdAt: serverTimestamp()
+  }))
+
+  await assertFails(updateDoc(issueRef, {
+    status: 'resolved',
+    resolvedNotes: 'BHT attempted to close it.',
+    closedAt: serverTimestamp(),
+    version: 2,
+    updatedAt: serverTimestamp()
+  }))
+  await assertFails(setDoc(doc(bhtDb, 'eocIssues/follow_up_issue/activity/impersonated_follow_up'), {
+    issueId: 'follow_up_issue',
+    eventType: 'bht_follow_up',
+    label: 'Staff follow-up',
+    status: 'open',
+    note: 'Impersonated follow-up.',
+    actorUserId: 'someone_else',
+    actorName: 'Someone Else',
+    locationId: 'test_house',
+    issueVersion: 2,
+    immutable: true,
+    version: 1,
+    createdAt: serverTimestamp()
+  }))
+})

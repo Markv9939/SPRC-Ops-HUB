@@ -51,7 +51,7 @@ function safeIdPart(value) {
  * @returns {object} Firestore document data
  */
 export function buildEocIssueAlertPayload({ issueRefId, task, issue, userName }) {
-  const fromBhtHome = issue?.source === 'bht_home'
+  const fromBhtHome = issue?.source === 'bht_home' || issue?.source === 'quick_report'
   const prefix = fromBhtHome ? 'Issue report' : 'EOC issue'
 
   return {
@@ -61,7 +61,6 @@ export function buildEocIssueAlertPayload({ issueRefId, task, issue, userName })
     taskId: issue?.taskId || task?.id || null,
     locationId: issue?.locationId || task?.locationId || null,
     eocType: issue?.eocType || task?.eocType || null,
-    severity: issue?.severity || 'medium',
     source: issue?.source || null,
     issueType: issue?.issueType || null,
     message: `${prefix}: ${issue?.label || 'Issue'} - ${issue?.description || ''}`,
@@ -77,12 +76,12 @@ export async function getIssueNotificationRecipients(issue) {
   const recipients = new Map()
   const assignmentSnap = await getDocs(query(
     collection(db, 'shiftAssignments'),
-    where('locationId', '==', issue.locationId),
-    where('active', '==', true)
+    where('locationId', '==', issue.locationId)
   ))
 
   assignmentSnap.docs.forEach((docSnap) => {
     const assignment = docSnap.data()
+    if (assignment.active !== true) return
     const targetUserId = trimOrNull(assignment.bhtUserId)
     if (!targetUserId) return
     recipients.set(targetUserId, {
@@ -112,25 +111,31 @@ export function buildIssueAlertPayload({
   target,
   actorUser
 }) {
-  const statusLabel = issue?.status === 'resolved'
-    ? 'resolved'
-    : issue?.status === 'voided'
-      ? 'voided'
-      : issue?.status === 'in_progress'
-        ? 'in progress'
-        : 'updated'
   const actorName = actorUser?.name || activity?.actorName || 'Ops Hub'
-  const type = eventType === 'reported' ? 'eoc_issue' : 'eoc_issue_update'
+  const isBhtTarget = !!target?.targetUserId
+  const type = isBhtTarget ? 'eoc_issue_update' : 'eoc_issue'
+  const issueLabel = issue.label || 'Issue'
+  const messages = {
+    reported: `${actorName} reported: ${issueLabel} - ${issue.description || ''}`,
+    in_progress: `${actorName} marked "${issueLabel}" as in progress.`,
+    resolved: `${actorName} resolved "${issueLabel}".`,
+    voided: `${actorName} voided "${issueLabel}".`,
+    reopened: `${actorName} reopened "${issueLabel}".`,
+    note_added: `${actorName} added a note to "${issueLabel}".`,
+    bht_follow_up: `${actorName} added a follow-up to "${issueLabel}".`,
+    problem_returned: `${actorName} reported that "${issueLabel}" returned.`
+  }
 
   return {
-    audience: target?.targetUserId ? 'bht' : 'supervisor',
+    audience: isBhtTarget ? 'bht' : 'supervisor',
     type,
     issueId: issue.id,
     activityId: activity.id || null,
     eventType,
     locationId: issue.locationId,
     eocType: issue.eocType || null,
-    severity: issue.severity || 'medium',
+    source: issue.source || null,
+    issueType: issue.issueType || null,
     issueVersion: issue.version || 1,
     targetUserId: target?.targetUserId || null,
     targetUserName: target?.targetUserName || null,
@@ -139,9 +144,7 @@ export function buildIssueAlertPayload({
     statusNote: activity?.note || '',
     actorUserId: trimOrNull(actorUser?.id || activity?.actorUserId),
     actorName,
-    message: eventType === 'reported'
-      ? `Location issue reported: ${issue.label || 'Issue'} - ${issue.description || ''}`
-      : `${actorName} marked "${issue.label || 'Issue'}" as ${statusLabel}.`,
+    message: messages[eventType] || `${actorName} updated "${issueLabel}".`,
     ...basePayload()
   }
 }
@@ -149,9 +152,12 @@ export function buildIssueAlertPayload({
 export async function fanOutIssueAlerts({ issue, activity, eventType, actorUser }) {
   if (!issue?.id || !activity?.id) return { written: 0 }
 
-  const recipients = eventType === 'reported'
-    ? [{ targetUserId: null, targetUserName: null, recipientSource: 'supervisor_location' }]
-    : await getIssueNotificationRecipients(issue)
+  const actorUserId = trimOrNull(actorUser?.id || activity?.actorUserId)
+  const bhtRecipients = await getIssueNotificationRecipients(issue)
+  const recipients = [
+    { targetUserId: null, targetUserName: null, recipientSource: 'supervisor_location' },
+    ...bhtRecipients.filter(target => target.targetUserId !== actorUserId)
+  ]
 
   const batch = writeBatch(db)
   let written = 0
@@ -203,7 +209,6 @@ export async function createIssueStatusNotification({ issue, nextStatus, note, a
     taskId: issue.taskId || null,
     locationId: issue.locationId,
     eocType: issue.eocType || null,
-    severity: issue.severity || 'medium',
     targetUserId: issue.reportedByUserId,
     targetUserName: issue.reportedByName || null,
     status: nextStatus,

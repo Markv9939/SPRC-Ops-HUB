@@ -3,6 +3,7 @@ import { getShiftById, getTemplateScopeForShift } from '../data/eocConstants'
 import { getCurrentCycleDueDate } from '../utils/eocSchedule'
 import { collection, query, where, getDocs, doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore'
 import { getVersionNumber } from './versioning'
+import { MISSED_EOC_REASON, shouldMarkEocTaskMissed } from '../utils/eocTaskLifecycle'
 import { loadTemplateAssignmentsByScope, resolveTemplateForScope } from './eocTemplateService'
 import { getAvailableMainLocationsForUser, isAdminRole, isBhtRole, isSupervisorRole, locationIdToMainLocation } from '../utils/orgModel'
 import {
@@ -31,7 +32,7 @@ function buildGroupKey(locationId, shiftId) {
 }
 
 function getDesiredStatus(task, currentStatus, todayStr, now = new Date()) {
-  if (currentStatus === 'completed' || currentStatus === 'ignored') return currentStatus
+  if (currentStatus === 'completed' || currentStatus === 'missed' || currentStatus === 'ignored') return currentStatus
   if (task?.dueAt) return hasTimestampPassed(task.dueAt, now) ? 'overdue' : 'pending'
   return task?.dueDate < todayStr ? 'overdue' : 'pending'
 }
@@ -99,9 +100,13 @@ function createTaskRecord(group, taskType, vanId = null, templateMeta = null) {
   if (templateMeta?.templateId) {
     task.templateId = templateMeta.templateId
     task.templateName = templateMeta.templateName || ''
+    task.templateVersion = Number(templateMeta.templateVersion || 0) || null
+    task.templateVersionId = templateMeta.templateVersionId || null
   } else {
     task.templateId = null
     task.templateName = ''
+    task.templateVersion = null
+    task.templateVersionId = null
   }
 
   if (taskType === 'van') {
@@ -431,8 +436,6 @@ async function runEocTaskSyncForUserScope(user) {
       || toDate(existing.outgoingDebriefDueAt)?.getTime() !== toDate(task.outgoingDebriefDueAt)?.getTime()
       || toDate(existing.incomingAcknowledgmentLateAt)?.getTime() !== toDate(task.incomingAcknowledgmentLateAt)?.getTime()
       || existing.timingSource !== task.timingSource
-      || String(existing.templateId || '').trim() !== String(task.templateId || '').trim()
-      || String(existing.templateName || '').trim() !== String(task.templateName || '').trim()
       || !arraysEqual(currentEligibleUserIds, nextEligibleUserIds)
       || !arraysEqual(currentEligibleUserNames, nextEligibleUserNames)
       || existing.assigneeUserId !== (task.assigneeUserId || '')
@@ -456,8 +459,6 @@ async function runEocTaskSyncForUserScope(user) {
         timingSource: task.timingSource || 'legacy',
         shiftLabel: task.shiftLabel,
         scopeKey,
-        templateId: task.templateId || null,
-        templateName: task.templateName || '',
         eligibleUserIds: nextEligibleUserIds,
         eligibleUserNames: nextEligibleUserNames,
         assigneeUserId: task.assigneeUserId || '',
@@ -481,13 +482,23 @@ async function runEocTaskSyncForUserScope(user) {
     if (!taskInScope(data, scopedGroupKeys)) continue
     if (desiredTaskIds.has(taskDoc.id)) continue
 
-    batch.update(taskDoc.ref, {
-      active: false,
-      status: 'ignored',
-      ignoredReason: 'Task no longer matches the current assignment scope.',
-      version: getVersionNumber(data) + 1,
-      updatedAt: serverTimestamp()
-    })
+    const isMissed = shouldMarkEocTaskMissed(data, desiredTasks)
+    batch.update(taskDoc.ref, isMissed
+      ? {
+          active: false,
+          status: 'missed',
+          missedAt: serverTimestamp(),
+          missedReason: MISSED_EOC_REASON,
+          version: getVersionNumber(data) + 1,
+          updatedAt: serverTimestamp()
+        }
+      : {
+          active: false,
+          status: 'ignored',
+          ignoredReason: 'Task no longer matches the current assignment scope.',
+          version: getVersionNumber(data) + 1,
+          updatedAt: serverTimestamp()
+        })
     touched.add(taskDoc.id)
     updated += 1
   }

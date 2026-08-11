@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useState } from 'react'
-import { addDoc, collection, deleteDoc, doc, onSnapshot, serverTimestamp, updateDoc } from 'firebase/firestore'
+import { collection, doc, onSnapshot, serverTimestamp, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase'
 import { LOCATIONS, SHIFTS, isShiftAllowedForMainLocation } from '../data/eocConstants'
 import { getAvailableMainLocationsForUser, isAdminRole, locationIdToMainLocation } from '../utils/orgModel'
@@ -8,8 +8,10 @@ import {
   assignDefaultTemplateForScope,
   deleteTemplateAndReassignScopes,
   getTemplateAssignmentMapKey,
-  previewDefaultAssignmentImpact
+  previewDefaultAssignmentImpact,
+  savePublishedTemplateVersion
 } from '../services/eocTemplateService'
+import { normalizeEocTemplateItems } from '../utils/eocTemplateModel'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
 import AppModal from './AppModal'
@@ -25,15 +27,7 @@ function toMillis(value) {
 }
 
 function normalizeTemplateItems(items) {
-  return (Array.isArray(items) ? items : [])
-    .map((item, index) => ({
-      category: String(item?.category || '').trim(),
-      label: String(item?.label || '').trim(),
-      order: Number(item?.order) || index + 1,
-      active: item?.active !== false
-    }))
-    .filter(item => item.category && item.label)
-    .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
+  return normalizeEocTemplateItems(items)
 }
 
 function sortByUpdated(items) {
@@ -292,9 +286,10 @@ function EocTemplateManager({ user, isOffline = false }) {
     }
 
     try {
-      let templateId = String(editorTemplate?.id || '').trim()
+      const templateId = String(editorTemplate?.id || '').trim()
+      let existingTemplate = null
       if (templateId) {
-        const existingTemplate = templates.find(template => template.id === templateId)
+        existingTemplate = templates.find(template => template.id === templateId)
         if (!existingTemplate) {
           alert('Template no longer exists. Refresh and try again.')
           return
@@ -303,47 +298,22 @@ function EocTemplateManager({ user, isOffline = false }) {
           alert('You can only edit your own templates. Clone this template to customize it.')
           return
         }
-
-        await updateDoc(doc(db, 'eocTemplateLibrary', templateId), {
-          name: String(payload.name || '').trim(),
-          eocType: payload.eocType,
-          status: payload.status,
-          items: normalizedItems,
-          updatedByUserId: user?.id || null,
-          updatedByName: user?.name || null,
-          updatedByAuthUid: user?.authUid || null,
-          updatedAt: serverTimestamp(),
-          version: Number(existingTemplate.version || 0) + 1
-        })
-        notifySuccess('Template updated')
-      } else {
-        const created = await addDoc(collection(db, 'eocTemplateLibrary'), {
-          name: String(payload.name || '').trim(),
-          eocType: payload.eocType,
-          status: payload.status,
-          items: normalizedItems,
-          ownerUserId: user?.id || null,
-          ownerName: user?.name || null,
-          ownerAuthUid: user?.authUid || null,
-          ownerRole: user?.role || null,
-          createdByUserId: user?.id || null,
-          createdByName: user?.name || null,
-          createdByAuthUid: user?.authUid || null,
-          updatedByUserId: user?.id || null,
-          updatedByName: user?.name || null,
-          updatedByAuthUid: user?.authUid || null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          version: 1
-        })
-        templateId = created.id
-        notifySuccess('Template saved to library')
       }
 
+      const saved = await savePublishedTemplateVersion({
+        actor: user,
+        templateId,
+        existingTemplate,
+        payload: { ...payload, items: normalizedItems }
+      })
+      notifySuccess(existingTemplate ? `Template version ${saved.versionNumber} published` : 'Template saved to library')
+
       const savedTemplate = {
-        id: templateId,
-        name: String(payload.name || '').trim(),
-        eocType: payload.eocType
+        id: saved.templateId,
+        name: saved.templateName,
+        eocType: saved.eocType,
+        publishedVersion: saved.versionNumber,
+        publishedVersionId: saved.versionId
       }
       setSmartTemplate(savedTemplate)
       setPreferredTemplateIds(previous => ({ ...previous, [savedTemplate.eocType]: savedTemplate.id }))
@@ -372,28 +342,27 @@ function EocTemplateManager({ user, isOffline = false }) {
     try {
       const cloneName = `${String(template.name || 'Template').trim()} (Copy)`
       const cloneType = String(template.eocType || 'house').trim() === 'van' ? 'van' : 'house'
-      const created = await addDoc(collection(db, 'eocTemplateLibrary'), {
+      const created = await savePublishedTemplateVersion({
+        actor: user,
+        payload: {
+          name: cloneName,
+          eocType: cloneType,
+          status: 'active',
+          items: normalizeTemplateItems(template.items)
+        },
+        cloneMeta: {
+          clonedFromTemplateId: template.id,
+          clonedFromTemplateName: template.name || '',
+          clonedFromVersion: template.publishedVersion || template.version || null
+        }
+      })
+      setSmartTemplate({
+        id: created.templateId,
         name: cloneName,
         eocType: cloneType,
-        status: 'active',
-        items: normalizeTemplateItems(template.items),
-        ownerUserId: user?.id || null,
-        ownerName: user?.name || null,
-        ownerAuthUid: user?.authUid || null,
-        ownerRole: user?.role || null,
-        createdByUserId: user?.id || null,
-        createdByName: user?.name || null,
-        createdByAuthUid: user?.authUid || null,
-        updatedByUserId: user?.id || null,
-        updatedByName: user?.name || null,
-        updatedByAuthUid: user?.authUid || null,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        version: 1,
-        clonedFromTemplateId: template.id,
-        clonedFromTemplateName: template.name || ''
+        publishedVersion: created.versionNumber,
+        publishedVersionId: created.versionId
       })
-      setSmartTemplate({ id: created.id, name: cloneName, eocType: cloneType })
       notifySuccess('Template copied. Open it in My Templates to edit.')
     } catch (error) {
       console.error('Error cloning template:', error)
@@ -410,24 +379,31 @@ function EocTemplateManager({ user, isOffline = false }) {
 
   const handleDeleteTemplate = async (template) => {
     if (!isAdmin) {
-      alert('Only admins can delete templates.')
+      alert('Only admins can archive templates.')
       return
     }
     if (isOffline) {
-      alert('Offline mode: deleting templates is unavailable.')
+      alert('Offline mode: archiving templates is unavailable.')
       return
     }
 
     const impactedAssignments = assignments.filter(assignment => assignment.defaultTemplateId === template.id)
     if (impactedAssignments.length === 0) {
-      const confirmed = await showConfirmDialog(`Delete template "${template.name}"?`, {
-        title: 'Delete Template',
-        tone: 'danger',
-        confirmText: 'Delete'
+      const confirmed = await showConfirmDialog(`Archive template "${template.name}"?`, {
+        title: 'Archive Template',
+        tone: 'warning',
+        confirmText: 'Archive'
       })
       if (!confirmed) return
-      await deleteDoc(doc(db, 'eocTemplateLibrary', template.id))
-      notifySuccess('Template deleted')
+      await updateDoc(doc(db, 'eocTemplateLibrary', template.id), {
+        status: 'archived',
+        archivedByUserId: user?.id || null,
+        archivedByName: user?.name || null,
+        archivedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        version: Number(template.version || 0) + 1
+      })
+      notifySuccess('Template archived')
       return
     }
 
@@ -437,7 +413,7 @@ function EocTemplateManager({ user, isOffline = false }) {
     ))
 
     if (replacementOptions.length === 0) {
-      alert('Delete blocked: this template is assigned and no replacement template is available for this type.')
+      alert('Archive blocked: this template is assigned and no replacement template is available for this type.')
       return
     }
 
@@ -466,7 +442,7 @@ function EocTemplateManager({ user, isOffline = false }) {
     if (!deleteModal.template || !deleteModal.replacementId) return
     const replacementTemplate = deleteModal.options.find(option => option.id === deleteModal.replacementId)
     if (!replacementTemplate) {
-      alert('Select a replacement template before deleting.')
+      alert('Select a replacement template before archiving.')
       return
     }
 
@@ -477,11 +453,11 @@ function EocTemplateManager({ user, isOffline = false }) {
         templateId: deleteModal.template.id,
         replacementTemplate
       })
-      notifySuccess(`Template deleted. ${result.reassignedScopeCount} scope(s) reassigned.`)
+      notifySuccess(`Template archived. ${result.reassignedScopeCount} scope(s) reassigned.`)
       closeDeleteModal()
     } catch (error) {
-      console.error('Error deleting template:', error)
-      alert('Failed to delete template.')
+      console.error('Error archiving template:', error)
+      alert('Failed to archive template.')
       setDeleteModal(previous => ({ ...previous, isWorking: false }))
     }
   }
@@ -518,9 +494,11 @@ function EocTemplateManager({ user, isOffline = false }) {
           `Location: ${locationLabel(locationId)}`,
           `Shift: ${shiftId}`,
           '',
-          `Incomplete EOCs impacted: ${impact.totalCount}`,
+          `Existing EOCs kept on their current version: ${impact.totalCount}`,
           `- Pending: ${impact.pendingCount}`,
-          `- Overdue: ${impact.overdueCount}`
+          `- Overdue: ${impact.overdueCount}`,
+          '',
+          'The new default begins with the next EOC cycle.'
         ].join('\n'),
         {
           title: 'Apply Default Template',
@@ -530,15 +508,17 @@ function EocTemplateManager({ user, isOffline = false }) {
       )
       if (!confirmed) return
 
-      const result = await assignDefaultTemplateForScope({
+      await assignDefaultTemplateForScope({
         actor: user,
         locationId,
         shiftId,
         eocType,
         templateId: selectedTemplate.id,
-        templateName: selectedTemplate.name || ''
+        templateName: selectedTemplate.name || '',
+        templateVersion: selectedTemplate.publishedVersion || selectedTemplate.version || null,
+        templateVersionId: selectedTemplate.publishedVersionId || null
       })
-      notifySuccess(`Default updated. ${result.updatedTasks} incomplete EOC task(s) switched immediately.`)
+      notifySuccess('Default updated. Existing EOC tasks keep their current template version.')
       setPreferredTemplateIds(previous => ({ ...previous, [eocType]: selectedTemplate.id }))
     } catch (error) {
       console.error('Error assigning default template:', error)
@@ -676,7 +656,7 @@ function EocTemplateManager({ user, isOffline = false }) {
                           <button type="button" style={subtleButton} onClick={() => openEditTemplate(template)} disabled={!canManageTemplates || isOffline}>Edit</button>
                           <button type="button" style={subtleButton} onClick={() => handleCloneTemplate(template)} disabled={!canManageTemplates || isOffline}>Clone</button>
                           <button type="button" style={subtleButton} onClick={() => handleOpenAssignForTemplate(template)} disabled={!canManageTemplates || isOffline}>Assign</button>
-                          <button type="button" style={subtleButton} onClick={() => handleDeleteTemplate(template)} disabled={!isAdmin || isOffline}>Delete</button>
+                          <button type="button" style={subtleButton} onClick={() => handleDeleteTemplate(template)} disabled={!isAdmin || isOffline}>Archive</button>
                         </div>
                       </div>
                     </div>
@@ -804,14 +784,14 @@ function EocTemplateManager({ user, isOffline = false }) {
       <AppModal
         isOpen={deleteModal.isOpen}
         tone="warning"
-        title="Delete Template"
+        title="Archive Template"
         maxWidth="500px"
         footer={[
           <button key="cancel" type="button" style={subtleButton} onClick={closeDeleteModal}>
             Cancel
           </button>,
           <button key="delete" type="button" style={primaryButton} onClick={confirmDeleteWithReplacement} disabled={deleteModal.isWorking || !deleteModal.replacementId}>
-            {deleteModal.isWorking ? 'Deleting...' : 'Delete + Reassign'}
+            {deleteModal.isWorking ? 'Archiving...' : 'Archive + Reassign'}
           </button>
         ]}
       >
@@ -819,7 +799,7 @@ function EocTemplateManager({ user, isOffline = false }) {
           This template is currently assigned in <strong>{deleteModal.impactedCount}</strong> scope(s).
         </div>
         <div style={{ fontSize: '13px', color: '#556677', marginBottom: '10px' }}>
-          Choose a replacement template to apply before deletion.
+          Choose a replacement template to apply before archiving.
         </div>
         <select
           value={deleteModal.replacementId}

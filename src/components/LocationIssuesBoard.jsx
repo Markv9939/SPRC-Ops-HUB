@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, ChevronRight, MapPin, Plus } from 'lucide-react'
+import { AlertTriangle, ChevronRight, MapPin, Plus, Search } from 'lucide-react'
 import { LOCATIONS, VANS } from '../data/eocConstants'
 import { BHT_HOME_ISSUE_TYPES } from '../services/bhtIssueReportService'
 import useScopedIssues from '../hooks/useScopedIssues'
+import { getIssueSourceLabel, getIssueTypeMeta, inferIssueType } from '../utils/issueModel'
 
 function toDate(value) {
   if (!value) return null
@@ -47,7 +48,8 @@ function IssueCard({ issue, onOpenIssue }) {
         </span>
       </div>
       <div className="location-issue-meta">
-        <span className="location-issue-pill location-issue-pill-severity">{String(issue.severity || 'medium').toUpperCase()}</span>
+        <span>{issue.issueTypeLabel || getIssueTypeMeta(inferIssueType(issue)).label}</span>
+        <span>- {getIssueSourceLabel(issue.source)}</span>
         <span>Reported by {issue.reportedByName || 'staff'} - {relativeTime(issue.createdAt)}</span>
         {vanLabel && <span>- {vanLabel}</span>}
       </div>
@@ -74,6 +76,8 @@ function LocationIssuesBoard({
   assignment
 }) {
   const [tab, setTab] = useState('active')
+  const [searchText, setSearchText] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [reportOpen, setReportOpen] = useState(false)
   const [form, setForm] = useState({
     issueType: BHT_HOME_ISSUE_TYPES[0].value,
@@ -146,7 +150,22 @@ function LocationIssuesBoard({
     }
   }
 
-  const visibleIssues = tab === 'active' ? issues : resolvedIssues
+  const visibleIssues = useMemo(() => {
+    const source = tab === 'active' ? issues : resolvedIssues
+    const search = searchText.trim().toLowerCase()
+    return source.filter((issue) => {
+      if (typeFilter !== 'all' && inferIssueType(issue) !== typeFilter) return false
+      if (!search) return true
+      return [
+        issue.label,
+        issue.description,
+        issue.reportedByName,
+        issue.category,
+        issue.issueTypeLabel,
+        issue.vanId
+      ].some(value => String(value || '').toLowerCase().includes(search))
+    })
+  }, [issues, resolvedIssues, searchText, tab, typeFilter])
 
   if (!locationIds.length) {
     return (
@@ -164,7 +183,7 @@ function LocationIssuesBoard({
     <div className="location-issues-page">
       <div className="location-issues-header">
         <div>
-          <h1>Location Issues</h1>
+          <h1>Issues</h1>
           <div className="location-issues-subtitle">
             <MapPin size={15} /> {locationText} - Shared across all shifts
           </div>
@@ -179,8 +198,26 @@ function LocationIssuesBoard({
           Active {issues.length}
         </button>
         <button className={tab === 'resolved' ? 'is-active' : ''} onClick={() => setTab('resolved')}>
-          Resolved 30 Days
+          Resolved
         </button>
+      </div>
+
+      <div className="location-issues-filters">
+        <label className="location-issues-search">
+          <Search size={16} />
+          <span className="sr-only">Search issues</span>
+          <input
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
+            placeholder="Search issues"
+          />
+        </label>
+        <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="Filter by issue type">
+          <option value="all">All types</option>
+          {BHT_HOME_ISSUE_TYPES.map(type => (
+            <option key={type.value} value={type.value}>{type.label}</option>
+          ))}
+        </select>
       </div>
 
       {tab === 'active' && (
@@ -193,7 +230,7 @@ function LocationIssuesBoard({
         <div className="location-issues-empty">
           <AlertTriangle size={28} />
           <h2>No {tab === 'active' ? 'active' : 'resolved'} issues</h2>
-          <p>{tab === 'active' ? 'Report property, van, or safety issues when they come up.' : 'Resolved issues from the last 30 days will show here.'}</p>
+          <p>{tab === 'active' ? 'Report property, van, safety, or other issues when they come up.' : 'Resolved and voided issues will show here.'}</p>
         </div>
       ) : (
         <div className="location-issues-list">
@@ -229,13 +266,19 @@ function LocationIssuesBoard({
                   </select>
                 </>
               )}
-              <label>What happened?</label>
+              {form.issueType === 'safety_concern' && (
+                <div className="location-report-safety-warning" role="alert">
+                  If anyone is in immediate danger, follow emergency procedures and contact a supervisor before submitting this report.
+                </div>
+              )}
+              <label>Describe the issue</label>
               <textarea
                 rows={4}
                 value={form.description}
                 onChange={(event) => setForm(prev => ({ ...prev, description: event.target.value }))}
-                placeholder="Add what happened, exact location/van, and any immediate safety concern..."
+                placeholder="Include any details staff or supervisors should know."
               />
+              <div className="location-report-helper">Provide all relevant details so the issue can be understood and addressed.</div>
               {isOffline && <div className="location-report-warning">Offline: this report will send when internet returns.</div>}
               {error && <div className="location-report-error">{error}</div>}
               <div className="location-report-actions">

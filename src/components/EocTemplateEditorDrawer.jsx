@@ -1,26 +1,18 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useState } from 'react'
 import { EOC_HOUSE_TEMPLATE, EOC_VAN_TEMPLATE } from '../data/eocConstants'
+import {
+  createEmptyEocTemplateItem,
+  findDuplicateEocTrackingIds,
+  normalizeEocTemplateItems
+} from '../utils/eocTemplateModel'
 
 function emptyItem(order = 1) {
-  return {
-    category: '',
-    label: '',
-    order,
-    active: true
-  }
+  return createEmptyEocTemplateItem(order)
 }
 
 function normalizeTemplateItems(items) {
-  return (Array.isArray(items) ? items : [])
-    .map((item, index) => ({
-      category: String(item?.category || '').trim(),
-      label: String(item?.label || '').trim(),
-      order: Number(item?.order) || (index + 1),
-      active: item?.active !== false
-    }))
-    .filter(item => item.category && item.label)
-    .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
+  return normalizeEocTemplateItems(items)
 }
 
 function buildInitialForm(initialTemplate) {
@@ -77,6 +69,10 @@ function EocTemplateEditorDrawer({
     }
     if (normalizedItems.length === 0) {
       setError('Add at least one valid item before saving.')
+      return
+    }
+    if (findDuplicateEocTrackingIds(normalizedItems).length > 0) {
+      setError('Two checklist items have the same permanent tracking ID. Remove and recreate one of the duplicate items.')
       return
     }
     await onSave({
@@ -214,10 +210,10 @@ function EocTemplateEditorDrawer({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {form.items.map((item, index) => (
               <div
-                key={`template-item-${index}`}
+                key={item.trackingId || item.id || `template-item-${index}`}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: isMobile ? '1fr' : '1.1fr 2fr 88px 102px 60px 60px 74px',
+                  gridTemplateColumns: isMobile ? '1fr' : '1fr 1.6fr 1.35fr 72px 102px 118px 60px 60px 74px',
                   gap: '8px',
                   alignItems: 'center',
                   padding: '8px',
@@ -249,6 +245,17 @@ function EocTemplateEditorDrawer({
                   disabled={isDisabled}
                 />
                 <input
+                  value={item.helpText || ''}
+                  onChange={event => {
+                    const nextItems = [...form.items]
+                    nextItems[index] = { ...nextItems[index], helpText: event.target.value }
+                    setForm({ ...form, items: nextItems })
+                  }}
+                  style={inputStyle}
+                  placeholder="Optional staff guidance"
+                  disabled={isDisabled}
+                />
+                <input
                   type="number"
                   value={item.order}
                   onChange={event => {
@@ -259,6 +266,20 @@ function EocTemplateEditorDrawer({
                   style={inputStyle}
                   disabled={isDisabled}
                 />
+                <select
+                  value={item.requiresPhotoOnIssue ? 'required' : 'optional'}
+                  onChange={event => {
+                    const nextItems = [...form.items]
+                    nextItems[index] = { ...nextItems[index], requiresPhotoOnIssue: event.target.value === 'required' }
+                    setForm({ ...form, items: nextItems })
+                  }}
+                  style={selectStyle}
+                  disabled={isDisabled}
+                  aria-label={`Photo requirement for ${item.label || `item ${index + 1}`}`}
+                >
+                  <option value="optional">Photo optional</option>
+                  <option value="required">Photo required</option>
+                </select>
                 <select
                   value={item.active ? 'true' : 'false'}
                   onChange={event => {

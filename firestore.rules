@@ -477,7 +477,7 @@ service cloud.firestore {
     }
 
     function validEocTaskStatus(status) {
-      return status in ['pending', 'overdue', 'completed', 'ignored'];
+      return status in ['pending', 'overdue', 'completed', 'missed', 'ignored'];
     }
 
     function validIgnoredTaskPayload(data) {
@@ -496,6 +496,9 @@ service cloud.firestore {
         && data.eocType in ['house', 'van']
         && data.items is list
         && data.status in ['active', 'archived']
+        && (!('itemSchemaVersion' in data) || data.itemSchemaVersion is int)
+        && (!('publishedVersion' in data) || data.publishedVersion is int)
+        && (!('publishedVersionId' in data) || data.publishedVersionId == null || data.publishedVersionId is string)
         && (!('ownerUserId' in data) || data.ownerUserId == null || data.ownerUserId is string)
         && (!('ownerAuthUid' in data) || data.ownerAuthUid == null || data.ownerAuthUid is string)
         && (!('ownerName' in data) || data.ownerName == null || data.ownerName is string);
@@ -533,7 +536,39 @@ service cloud.firestore {
         && data.eocType in ['house', 'van']
         && data.defaultTemplateId is string
         && data.defaultTemplateId.size() > 0
-        && (!('defaultTemplateName' in data) || data.defaultTemplateName == null || data.defaultTemplateName is string);
+        && (!('defaultTemplateName' in data) || data.defaultTemplateName == null || data.defaultTemplateName is string)
+        && (!('defaultTemplateVersion' in data) || data.defaultTemplateVersion == null || data.defaultTemplateVersion is int)
+        && (!('defaultTemplateVersionId' in data) || data.defaultTemplateVersionId == null || data.defaultTemplateVersionId is string);
+    }
+
+    function validTemplateVersionData(data) {
+      return data.keys().hasAll([
+          'templateId', 'templateName', 'eocType', 'items', 'status',
+          'versionNumber', 'ownerAuthUid', 'publishedByUserId'
+        ])
+        && data.templateId is string
+        && data.templateId.size() > 0
+        && data.templateName is string
+        && data.templateName.size() > 0
+        && data.eocType in ['house', 'van']
+        && data.items is list
+        && data.status in ['active', 'archived']
+        && data.versionNumber is int
+        && data.versionNumber > 0
+        && (data.ownerAuthUid == null || data.ownerAuthUid is string)
+        && data.publishedByUserId != null
+        && data.publishedByUserId is string
+        && (!('itemSchemaVersion' in data) || data.itemSchemaVersion is int);
+    }
+
+    function templateVersionCreateAllowed() {
+      return hasLegacyAuthSession()
+        || authRoleAllowed(['admin'])
+        || (
+          authRoleAllowed(['supervisor'])
+          && request.auth != null
+          && request.resource.data.ownerAuthUid == request.auth.uid
+        );
     }
 
     function fleetMainLocationFromData(data) {
@@ -808,16 +843,10 @@ service cloud.firestore {
 
       allow update: if validEocTaskStatus(request.resource.data.status)
         && validIgnoredTaskPayload(request.resource.data)
-        && (!('shiftId' in request.resource.data)
-          || (
-            request.resource.data.shiftId is string
-            && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
-          ))
-        && (!('templateScope' in request.resource.data)
-          || (
-            request.resource.data.templateScope is string
-            && validTemplateScope(request.resource.data.templateScope)
-          ))
+        && request.resource.data.shiftId is string
+        && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
+        && request.resource.data.templateScope is string
+        && validTemplateScope(request.resource.data.templateScope)
         && (!('eligibleUserIds' in request.resource.data) || request.resource.data.eligibleUserIds is list)
         && (!('eligibleUserNames' in request.resource.data) || request.resource.data.eligibleUserNames is list)
         && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
@@ -1037,6 +1066,14 @@ service cloud.firestore {
           && request.resource.data.issueId == docId
           && exactIssueLocationAllowed(request.resource.data.locationId)
           && request.resource.data.immutable == true
+          && (
+            !(request.resource.data.eventType in ['problem_returned', 'bht_follow_up'])
+            || hasLegacyAuthSession()
+            || (
+              authRoleAllowed(['bht', 'tech'])
+              && request.resource.data.actorUserId == authAppUserId()
+            )
+          )
           && validVersionField(request.resource.data);
         allow update, delete: if false;
       }
@@ -1203,7 +1240,10 @@ service cloud.firestore {
     // EOC Template Version History
     match /eocTemplateVersions/{docId} {
       allow read: if true;
-      allow write: if authRoleAllowed(['admin']);
+      allow create: if validTemplateVersionData(request.resource.data)
+        && templateVersionCreateAllowed()
+        && validVersionField(request.resource.data);
+      allow update, delete: if false;
     }
 
     // EOC Vehicles
