@@ -200,18 +200,11 @@ function PinLogin({ onLogin }) {
           'Login timed out while loading access policy. Please try again.'
         )
         const authScopeEnforced = policy?.authScopeEnforced === true
-        const authSession = authScopeEnforced
-          ? await withTimeout(
-              ensureAuthSession(),
-              LOGIN_STEP_TIMEOUT_MS,
-              'Login timed out while validating auth session. Please try again.'
-            )
-          : {
-              authUid: null,
-              authClaimsReady: false,
-              authClaimRole: null,
-              authClaimLocations: []
-            }
+        const authSession = await withTimeout(
+          ensureAuthSession(),
+          LOGIN_STEP_TIMEOUT_MS,
+          'Login timed out while starting the secure file session. Please try again.'
+        )
         const normalizedRole = normalizeRole(userData.role)
 
         // When claim enforcement is on, prevent stale claim sessions from constraining PIN identity.

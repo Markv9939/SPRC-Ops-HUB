@@ -854,6 +854,17 @@ service cloud.firestore {
         && createdAtUnchanged();
 
       allow delete: if authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.locationId);
+
+      match /missedNotes/{noteId} {
+        allow read: if true;
+        allow create: if request.resource.data.taskId == docId
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.immutable == true
+          && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
+          && validVersionField(request.resource.data);
+        allow update, delete: if false;
+      }
     }
 
     // EOC Assignments (legacy — kept for historical data)
@@ -1041,6 +1052,25 @@ service cloud.firestore {
         && authRoleAllowed(['supervisor', 'admin'])
         && exactIssueLocationAllowed(request.resource.data.locationId)
         && validVersionField(request.resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'source', 'sourceTrackingId', 'trackingId', 'recurrenceEligible'
+        ])
+        && (
+          !(
+            ('parentIssueId' in resource.data)
+            && resource.data.parentIssueId != null
+            && request.resource.data.parentIssueId == null
+          )
+          || authRoleAllowed(['admin'])
+        )
+        && (
+          !(
+            ('linkedTrackingId' in resource.data)
+            && resource.data.linkedTrackingId != null
+            && request.resource.data.linkedTrackingId == null
+          )
+          || authRoleAllowed(['admin'])
+        )
         && (
           !(request.resource.data.status in ['resolved', 'voided'])
           || (
@@ -1074,6 +1104,62 @@ service cloud.firestore {
               && request.resource.data.actorUserId == authAppUserId()
             )
           )
+          && (
+            !('relationshipAudit' in request.resource.data)
+            || request.resource.data.relationshipAudit != true
+            || hasLegacyAuthSession()
+            || authRoleAllowed(['supervisor', 'admin'])
+          )
+          && (
+            request.resource.data.eventType != 'relationship_unlinked'
+            || hasLegacyAuthSession()
+            || authRoleAllowed(['admin'])
+          )
+          && validVersionField(request.resource.data);
+        allow update, delete: if false;
+      }
+
+      match /attachments/{attachmentId} {
+        allow read: if exactIssueLocationAllowed(get(/databases/$(database)/documents/eocIssues/$(docId)).data.locationId);
+        allow create: if (hasLegacyAuthSession() || signedIn())
+          && request.resource.data.attachmentId == attachmentId
+          && request.resource.data.issueId == docId
+          && request.resource.data.locationId == get(/databases/$(database)/documents/eocIssues/$(docId)).data.locationId
+          && request.resource.data.kind in ['report', 'resolution']
+          && request.resource.data.mimeType == 'image/jpeg'
+          && request.resource.data.sizeBytes is int
+          && request.resource.data.sizeBytes > 0
+          && request.resource.data.sizeBytes <= 2 * 1024 * 1024
+          && request.resource.data.state in ['waiting', 'uploading', 'uploaded', 'failed']
+          && exactIssueLocationAllowed(request.resource.data.locationId)
+          && validVersionField(request.resource.data);
+        allow update: if exactIssueLocationAllowed(resource.data.locationId)
+          && request.resource.data.attachmentId == resource.data.attachmentId
+          && request.resource.data.issueId == resource.data.issueId
+          && request.resource.data.locationId == resource.data.locationId
+          && request.resource.data.storagePath == resource.data.storagePath
+          && request.resource.data.mimeType == 'image/jpeg'
+          && request.resource.data.state in ['waiting', 'uploading', 'uploaded', 'failed']
+          && (
+            hasLegacyAuthSession()
+            || authRoleAllowed(['supervisor', 'admin'])
+            || (
+              authRoleAllowed(['bht', 'tech'])
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'state', 'uploadedAt', 'lastError', 'updatedAt', 'version'
+              ])
+            )
+          )
+          && validVersionField(request.resource.data)
+          && createdAtUnchanged();
+        allow delete: if false;
+      }
+
+      match /attachmentHistory/{historyId} {
+        allow read: if exactIssueLocationAllowed(get(/databases/$(database)/documents/eocIssues/$(docId)).data.locationId);
+        allow create: if (hasLegacyAuthSession() || signedIn())
+          && request.resource.data.issueId == docId
+          && request.resource.data.immutable == true
           && validVersionField(request.resource.data);
         allow update, delete: if false;
       }
@@ -1174,7 +1260,7 @@ service cloud.firestore {
 
     // Audit Logs
     match /auditLogs/{docId} {
-      allow read: if true;
+      allow read: if hasLegacyAuthSession() || authRoleAllowed(['admin']);
 
       allow create: if request.resource.data.keys().hasAll([
         'action', 'collectionPath', 'documentId',
@@ -1244,6 +1330,25 @@ service cloud.firestore {
         && templateVersionCreateAllowed()
         && validVersionField(request.resource.data);
       allow update, delete: if false;
+    }
+
+    match /eocIssuePatterns/{patternId} {
+      allow read: if exactIssueLocationAllowed(resource.data.locationId);
+      allow create, update: if request.resource.data.patternId == patternId
+        && request.resource.data.locationId is string
+        && request.resource.data.trackingId is string
+        && request.resource.data.observations is list
+        && request.resource.data.recentCount is int
+        && request.resource.data.recentCount >= 0
+        && request.resource.data.lifetimeCount is int
+        && request.resource.data.lifetimeCount >= request.resource.data.recentCount
+        && request.resource.data.reportedBefore is bool
+        && request.resource.data.recurringIssue is bool
+        && exactIssueLocationAllowed(request.resource.data.locationId)
+        && authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
+        && validVersionField(request.resource.data);
+      allow delete: if false;
+
     }
 
     // EOC Vehicles
@@ -1449,6 +1554,11 @@ service cloud.firestore {
     match /appSettings/{docId} {
       allow read: if true;
       allow write: if authRoleAllowed(['admin']);
+    }
+
+    match /appMetrics/{docId} {
+      allow read: if hasLegacyAuthSession() || authRoleAllowed(['admin']);
+      allow write: if false;
     }
 
     // Deny all other paths

@@ -31,10 +31,16 @@ import {
   markOfflineActionSynced,
   mutateOfflineDraft,
   queueOfflineAction,
+  queueOfflineActionWithAttachments,
+  listOfflineAttachments,
+  updateOfflineAttachment,
+  deleteOfflineAttachment,
   updateOfflineAction
 } from './offlineStore'
 import { toTransportRecordDate } from '../utils/transportRecord'
 import { buildIssueRecord } from '../utils/issueModel'
+import { addPatternObservation, buildIssuePatternId } from '../utils/issueRecurrence'
+import { uploadIssuePhotos } from './issueAttachmentService'
 
 export const OFFLINE_ACTION_TYPES = {
   EOC_SUBMISSION: 'eocSubmission',
@@ -43,6 +49,7 @@ export const OFFLINE_ACTION_TYPES = {
   SHIFT_DEBRIEF_EXTRA_NOTE: 'shiftDebriefExtraNote',
   SHIFT_DEBRIEF_CONFIRMATION: 'shiftDebriefConfirmation',
   BHT_ISSUE_REPORT: 'bhtIssueReport',
+  ISSUE_ATTACHMENT_UPLOAD: 'issueAttachmentUpload',
   TRANSPORT_CREATE: 'transportCreate',
   TRANSPORT_UPDATE: 'transportUpdate',
   TRANSPORT_CLOSE: 'transportClose'
@@ -91,11 +98,9 @@ export function getTransportCreateActionId(localTransportId) {
 }
 
 export function queueEocSubmission(payload) {
-  return queueOfflineAction({
-    id: `eoc-submit:${payload?.task?.id || ''}:${payload?.normalizedUserId || payload?.user?.id || ''}`,
-    type: OFFLINE_ACTION_TYPES.EOC_SUBMISSION,
-    payload
-  })
+  const actionId = `eoc-submit:${payload?.task?.id || ''}:${payload?.normalizedUserId || payload?.user?.id || ''}`
+  const { cleanPayload, attachments } = detachPayloadPhotos(OFFLINE_ACTION_TYPES.EOC_SUBMISSION, payload, actionId)
+  return queueOfflineActionWithAttachments({ id: actionId, type: OFFLINE_ACTION_TYPES.EOC_SUBMISSION, payload: cleanPayload, attachments })
 }
 
 export function queueShiftDebriefSubmission(payload) {
@@ -104,6 +109,10 @@ export function queueShiftDebriefSubmission(payload) {
     type: OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION,
     payload: { ...payload, schemaVersion: DEBRIEF_SCHEMA_VERSION }
   })
+}
+
+function safeIdPart(value) {
+  return String(value || '').trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80) || 'unknown'
 }
 
 export function queueShiftDebriefExtraNote(payload) {
@@ -124,11 +133,86 @@ export function queueShiftDebriefConfirmation(payload) {
 
 export function queueBhtIssueReport(payload) {
   const localReportId = payload?.localReportId || makeLocalBhtIssueReportId()
-  return queueOfflineAction({
-    id: `bht-issue:${localReportId}`,
-    type: OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT,
-    payload: { ...payload, localReportId }
-  })
+  const actionId = `bht-issue:${localReportId}`
+  const payloadWithId = { ...payload, localReportId }
+  const { cleanPayload, attachments } = detachPayloadPhotos(OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT, payloadWithId, actionId)
+  return queueOfflineActionWithAttachments({ id: actionId, type: OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT, payload: cleanPayload, attachments })
+}
+
+export function queueIssuePhotoRetry({ issueId, locationId, photos, kind = 'report', user }) {
+  const retryPhotos = Array.isArray(photos) ? photos.filter(photo => photo?.blob && photo?.id) : []
+  if (!issueId || !locationId || retryPhotos.length === 0) return Promise.resolve(null)
+  const actionId = `issue-photos:${safeIdPart(issueId)}:${kind}:${retryPhotos.map(photo => safeIdPart(photo.id)).sort().join('_')}`
+  const ownerProfileId = String(user?.id || '')
+  const payload = {
+    issueId,
+    locationId,
+    kind,
+    user,
+    photos: retryPhotos.map(photoDescriptor)
+  }
+  const attachments = retryPhotos.map(photo => attachmentRecord(photo, {
+    actionId,
+    ownerProfileId,
+    kind,
+    locationId,
+    issueId
+  }))
+  return queueOfflineActionWithAttachments({ id: actionId, type: OFFLINE_ACTION_TYPES.ISSUE_ATTACHMENT_UPLOAD, payload, attachments })
+}
+
+function photoDescriptor(photo) {
+  return { id: photo.id, width: photo.width, height: photo.height, size: photo.size, type: 'image/jpeg', state: 'waiting' }
+}
+
+function attachmentRecord(photo, { actionId, ownerProfileId, itemId = '', kind = 'report', locationId = '', issueId = '' }) {
+  return {
+    id: photo.id,
+    actionId,
+    ownerProfileId,
+    itemId,
+    kind,
+    locationId,
+    issueId,
+    width: photo.width,
+    height: photo.height,
+    size: photo.size,
+    type: 'image/jpeg',
+    blob: photo.blob,
+    state: 'waiting'
+  }
+}
+
+function detachPayloadPhotos(type, payload, actionId) {
+  const ownerProfileId = String(payload?.user?.id || payload?.normalizedUserId || '')
+  const locationId = String(payload?.task?.locationId || payload?.assignment?.locationId || payload?.user?.locationId || '')
+  if (type === OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT) {
+    const photos = Array.isArray(payload?.photos) ? payload.photos : []
+    return {
+      cleanPayload: { ...payload, photos: photos.map(photoDescriptor) },
+      attachments: photos.map(photo => attachmentRecord(photo, { actionId, ownerProfileId, locationId }))
+    }
+  }
+  const attachments = []
+  const repairDetails = Object.fromEntries(Object.entries(payload?.repairDetails || {}).map(([itemId, details]) => {
+    const photos = Array.isArray(details?.photos) ? details.photos : []
+    photos.forEach(photo => attachments.push(attachmentRecord(photo, { actionId, ownerProfileId, itemId, locationId })))
+    return [itemId, { ...details, photos: photos.map(photoDescriptor) }]
+  }))
+  return { cleanPayload: { ...payload, repairDetails }, attachments }
+}
+
+function hydratePayloadPhotos(type, payload, records) {
+  const toPhoto = record => ({ id: record.id, blob: record.blob, width: record.width, height: record.height, size: record.size, type: 'image/jpeg', state: record.state })
+  if (type === OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT || type === OFFLINE_ACTION_TYPES.ISSUE_ATTACHMENT_UPLOAD) {
+    return { ...payload, photos: records.map(toPhoto) }
+  }
+  if (type !== OFFLINE_ACTION_TYPES.EOC_SUBMISSION) return payload
+  const repairDetails = Object.fromEntries(Object.entries(payload?.repairDetails || {}).map(([itemId, details]) => [
+    itemId,
+    { ...details, photos: records.filter(record => record.itemId === itemId).map(toPhoto) }
+  ]))
+  return { ...payload, repairDetails }
 }
 
 export function queueTransportCreate(payload) {
@@ -169,7 +253,12 @@ function buildEocAnswersData(templateItems, answers, repairDetails) {
     requiresPhotoOnIssue: item.requiresPhotoOnIssue === true,
     status: answers?.[item.id],
     ...(answers?.[item.id] === 'repair'
-      ? { description: repairDetails?.[item.id]?.description || '' }
+      ? {
+          description: repairDetails?.[item.id]?.description || '',
+          photoAttachmentIds: (repairDetails?.[item.id]?.photos || []).map(photo => photo.id),
+          unableToTakePhoto: repairDetails?.[item.id]?.unableToTakePhoto === true,
+          unablePhotoReason: repairDetails?.[item.id]?.unableReason || ''
+        }
       : {})
   }))
 }
@@ -197,17 +286,41 @@ export async function submitEocSubmissionOnline(payload) {
 
   const answersData = buildEocAnswersData(activeTemplate, answers, repairDetails)
   const issueItems = answersData.filter(a => a.status === 'repair')
+  const observedAtMs = Date.now()
+  const issuePlans = issueItems.map(issue => {
+    const issueRef = doc(db, 'eocIssues', `eoc_${safeIdPart(task?.id)}_${safeIdPart(issue.trackingId)}`)
+    const patternId = buildIssuePatternId(task?.locationId, issue.trackingId)
+    return {
+      issue,
+      photos: Array.isArray(repairDetails?.[issue.itemId]?.photos) ? repairDetails[issue.itemId].photos : [],
+      issueRef,
+      patternId,
+      patternRef: doc(db, 'eocIssuePatterns', patternId)
+    }
+  })
   let submittedEocSubmissionId = ''
   const issuesToNotify = []
+  const photoResults = []
+  const submissionRef = doc(db, 'eocSubmissions', `eoc_${safeIdPart(task?.id)}_${safeIdPart(normalizedUserId)}`)
+  submittedEocSubmissionId = submissionRef.id
+  let alreadySubmitted = false
 
   await runTransaction(db, async (transaction) => {
     const taskRef = doc(db, 'eocTasks', task.id)
     const taskSnap = await transaction.get(taskRef)
     const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
     const draftSnap = await transaction.get(draftRef)
+    const patternSnapshots = new Map()
+    for (const plan of issuePlans) {
+      patternSnapshots.set(plan.patternId, await transaction.get(plan.patternRef))
+    }
     if (!taskSnap.exists()) throw new Error('Task no longer exists.')
 
     const latestTask = taskSnap.data()
+    if (latestTask.status === 'completed' && latestTask.submissionId === submissionRef.id) {
+      alreadySubmitted = true
+      return
+    }
     if (latestTask.status !== 'pending' && latestTask.status !== 'overdue') {
       throw new Error(`This EOC task is already ${latestTask.status}.`)
     }
@@ -225,8 +338,6 @@ export async function submitEocSubmissionOnline(payload) {
       recordLabel: 'EOC Task'
     })
 
-    const submissionRef = doc(collection(db, 'eocSubmissions'))
-    submittedEocSubmissionId = submissionRef.id
     transaction.set(submissionRef, {
       taskId: task.id,
       locationId: task.locationId,
@@ -269,8 +380,13 @@ export async function submitEocSubmissionOnline(payload) {
       transaction.delete(draftRef)
     }
 
-    for (const issue of issueItems) {
-      const issueRef = doc(collection(db, 'eocIssues'))
+    for (const plan of issuePlans) {
+      const { issue, issueRef, patternId, patternRef } = plan
+      const patternSnap = patternSnapshots.get(patternId)
+      const patternUpdate = addPatternObservation(patternSnap?.exists() ? patternSnap.data() : null, {
+        issueId: issueRef.id,
+        observedAtMs
+      })
       const activityId = 'v1_reported'
       const activityRef = doc(db, 'eocIssues', issueRef.id, 'activity', activityId)
       const activity = {
@@ -309,6 +425,11 @@ export async function submitEocSubmissionOnline(payload) {
           reportedByUserId: normalizedUserId,
           reportedByName: user?.name
         }),
+        patternId,
+        reportedBefore: patternUpdate.reportedBefore,
+        recurringIssue: patternUpdate.recurringIssue,
+        recurrenceCountAtReport: patternUpdate.recentCount,
+        recurrenceObservedAtMs: observedAtMs,
       }
       const issueDocumentData = { ...issueData }
       delete issueDocumentData.id
@@ -327,6 +448,23 @@ export async function submitEocSubmissionOnline(payload) {
         updatedAt: serverTimestamp()
       })
       transaction.set(activityRef, activity)
+      transaction.set(patternRef, {
+        schemaVersion: 1,
+        patternId,
+        locationId: task.locationId,
+        trackingId: issue.trackingId,
+        observations: patternUpdate.observations,
+        recentCount: patternUpdate.recentCount,
+        lifetimeCount: patternUpdate.lifetimeCount,
+        reportedBefore: patternUpdate.reportedBefore,
+        recurringIssue: patternUpdate.recurringIssue,
+        firstObservedAtMs: patternUpdate.observations[0]?.observedAtMs || observedAtMs,
+        lastObservedAtMs: observedAtMs,
+        lastIssueId: issueRef.id,
+        updatedAt: serverTimestamp(),
+        ...(patternSnap?.exists() ? {} : { createdAt: serverTimestamp() }),
+        version: Number(patternSnap?.data()?.version || 0) + 1
+      }, { merge: true })
       issuesToNotify.push({
         issue: issueData,
         activity: { id: activityId, ...activity }
@@ -341,6 +479,18 @@ export async function submitEocSubmissionOnline(payload) {
       eventType: 'reported',
       actorUser: user
     })
+  }
+  for (const plan of issuePlans) {
+    if (plan.photos.length) {
+      const results = await uploadIssuePhotos({
+        issueId: plan.issueRef.id,
+        locationId: task.locationId,
+        photos: plan.photos,
+        kind: 'report',
+        uploader: user
+      })
+      photoResults.push(...results)
+    }
   }
 
   if (eocType === 'van' && submittedEocSubmissionId) {
@@ -361,7 +511,7 @@ export async function submitEocSubmissionOnline(payload) {
   }
 
   await deleteOfflineDraft(getEocDraftId(task.id, normalizedUserId))
-  return { submissionId: submittedEocSubmissionId }
+  return { submissionId: submittedEocSubmissionId, photoResults, alreadySubmitted }
 }
 
 async function submitShiftDebriefOnline(payload) {
@@ -394,7 +544,7 @@ async function syncShiftDebriefQuickNoteOnline(payload) {
 
 async function submitBhtIssueReportActionOnline(payload) {
   const result = await submitBhtIssueReportOnline(payload)
-  return { syncedDocumentId: result?.issueId || '' }
+  return { syncedDocumentId: result?.issueId || '', photoResults: result?.photoResults || [] }
 }
 
 function toDate(value, fallback = new Date()) {
@@ -575,10 +725,14 @@ async function processAction(action) {
   }
 
   await updateOfflineAction(action.id, { status: 'syncing', attempts: Number(action.attempts || 0) + 1 })
+  let attachmentRecords = []
   try {
+    attachmentRecords = await listOfflineAttachments({ ownerProfileId: action.ownerProfileId, actionId: action.id, states: ['waiting', 'failed', 'uploading'] })
+    for (const record of attachmentRecords) await updateOfflineAttachment(record.id, { state: 'uploading', attempts: Number(record.attempts || 0) + 1 })
+    const hydratedPayload = hydratePayloadPhotos(action.type, action.payload, attachmentRecords.map(record => ({ ...record, state: 'uploading' })))
     let syncResult = null
     if (action.type === OFFLINE_ACTION_TYPES.EOC_SUBMISSION) {
-      syncResult = await submitEocSubmissionOnline(action.payload)
+      syncResult = await submitEocSubmissionOnline(hydratedPayload)
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_QUICK_NOTE) {
       syncResult = await syncShiftDebriefQuickNoteOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION) {
@@ -588,7 +742,16 @@ async function processAction(action) {
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_CONFIRMATION) {
       await saveDebriefConfirmation(action.payload.debriefId, action.payload.confirmation, action.payload.user)
     } else if (action.type === OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT) {
-      syncResult = await submitBhtIssueReportActionOnline(action.payload)
+      syncResult = await submitBhtIssueReportActionOnline(hydratedPayload)
+    } else if (action.type === OFFLINE_ACTION_TYPES.ISSUE_ATTACHMENT_UPLOAD) {
+      const photoResults = await uploadIssuePhotos({
+        issueId: hydratedPayload.issueId,
+        locationId: hydratedPayload.locationId,
+        photos: hydratedPayload.photos,
+        kind: hydratedPayload.kind,
+        uploader: hydratedPayload.user
+      })
+      syncResult = { syncedDocumentId: hydratedPayload.issueId, photoResults }
     } else if (action.type === OFFLINE_ACTION_TYPES.TRANSPORT_CREATE) {
       syncResult = await applyTransportCreateOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.TRANSPORT_UPDATE) {
@@ -598,9 +761,19 @@ async function processAction(action) {
     } else {
       throw new Error(`Unsupported offline action: ${action.type}`)
     }
+    for (const result of syncResult?.photoResults || []) {
+      if (result.state === 'uploaded') await deleteOfflineAttachment(result.attachmentId)
+      else await updateOfflineAttachment(result.attachmentId, { state: 'failed', issueId: result.issueId || '', lastError: result.error || 'Upload failed.' })
+    }
+    if ((syncResult?.photoResults || []).some(result => result.state !== 'uploaded')) {
+      throw new Error('One or more photos are still waiting to upload.')
+    }
     await markOfflineActionSynced(action.id, syncResult?.syncedDocumentId ? { syncedDocumentId: syncResult.syncedDocumentId } : {})
     return { id: action.id, status: 'synced', ...(syncResult || {}) }
   } catch (error) {
+    for (const record of attachmentRecords) {
+      await updateOfflineAttachment(record.id, { state: 'failed', lastError: error?.message || 'Sync failed.' })
+    }
     if (needsReviewError(error)) {
       await markOfflineActionNeedsReview(action.id, error?.message || 'Needs supervisor review.')
       return { id: action.id, status: 'needsReview', error }
@@ -610,15 +783,44 @@ async function processAction(action) {
   }
 }
 
+export async function retryOfflinePhotoUploads({ ownerProfileId, uploader }) {
+  if (!ownerProfileId) return { uploaded: 0, failed: 0 }
+  const records = await listOfflineAttachments({ ownerProfileId, states: ['waiting', 'failed'] })
+  let uploaded = 0
+  let failed = 0
+  for (const record of records) {
+    if (!record.issueId || !record.locationId || !record.blob) {
+      failed += 1
+      continue
+    }
+    await updateOfflineAttachment(record.id, { state: 'uploading', attempts: Number(record.attempts || 0) + 1 })
+    const results = await uploadIssuePhotos({
+      issueId: record.issueId,
+      locationId: record.locationId,
+      photos: [{ id: record.id, blob: record.blob, width: record.width, height: record.height, size: record.size, type: 'image/jpeg' }],
+      kind: record.kind || 'report',
+      uploader
+    })
+    if (results[0]?.state === 'uploaded') {
+      await deleteOfflineAttachment(record.id)
+      uploaded += 1
+    } else {
+      await updateOfflineAttachment(record.id, { state: 'failed', lastError: results[0]?.error || 'Upload failed.' })
+      failed += 1
+    }
+  }
+  return { uploaded, failed }
+}
+
 let syncRunning = false
 
-export async function syncOfflineOutbox() {
+export async function syncOfflineOutbox(ownerProfileId = '') {
   if (syncRunning || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
     return { synced: 0, failed: 0, needsReview: 0 }
   }
   syncRunning = true
   try {
-    const actions = await listOfflineActions(['pending', 'failed', 'syncing'])
+    const actions = await listOfflineActions(['pending', 'failed', 'syncing'], ownerProfileId)
     const results = []
     for (const action of actions) {
       results.push(await processAction(action))

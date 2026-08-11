@@ -9,7 +9,7 @@
 
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
-import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore'
+import { collection, query, where, orderBy, onSnapshot, limit } from 'firebase/firestore'
 import { isAdminRole } from '../utils/orgModel'
 
 const ACTIVE_STATUSES = ['open', 'in_progress']
@@ -46,6 +46,7 @@ export default function useScopedIssues({
   const [issues, setIssues] = useState([])
   const [resolvedIssues, setResolvedIssues] = useState([])
   const [overdueTasks, setOverdueTasks] = useState([])
+  const [resolvedLimit, setResolvedLimit] = useState(50)
   useEffect(() => {
     if (!enabled || !inEocScope) return
 
@@ -111,7 +112,9 @@ export default function useScopedIssues({
       const resolvedBuckets = []
       resolvedQueryLocations.forEach((locations, index) => {
         const constraints = [
-          where('status', 'in', RESOLVED_STATUSES)
+          where('status', 'in', RESOLVED_STATUSES),
+          orderBy('closedAt', 'desc'),
+          limit(resolvedLimit)
         ]
         if (locations) constraints.unshift(where('locationId', 'in', locations))
         const unsub = onSnapshot(
@@ -158,7 +161,13 @@ export default function useScopedIssues({
       resolvedUnsubs.forEach(unsub => unsub())
       unsubOverdue()
     }
-  }, [enabled, includeResolved, inEocScope, inIssueScope, issueLocationIds, user?.role])
+  }, [enabled, includeResolved, inEocScope, inIssueScope, issueLocationIds, resolvedLimit, user?.role])
 
-  return { issues, resolvedIssues, overdueTasks }
+  return {
+    issues,
+    resolvedIssues,
+    overdueTasks,
+    resolvedLimit,
+    loadMoreResolved: () => setResolvedLimit(value => value + 50)
+  }
 }

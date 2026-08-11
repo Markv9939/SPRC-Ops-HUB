@@ -6,6 +6,9 @@ import {
   getDoc,
   getDocs,
   query,
+  limit,
+  orderBy,
+  Timestamp,
   runTransaction,
   serverTimestamp,
   setDoc,
@@ -276,6 +279,41 @@ export async function submitShiftDebrief(context, items, user) {
     acc[row.id] = row.name || 'BHT'
     return acc
   }, {})
+  let issueSnapshot = []
+  try {
+    const [activeSnap, resolvedSnap] = await Promise.all([
+      getDocs(query(
+        collection(db, 'eocIssues'),
+        where('locationId', '==', context.locationId),
+        where('status', 'in', ['open', 'in_progress']),
+        orderBy('createdAt', 'desc'),
+        limit(25)
+      )),
+      getDocs(query(
+        collection(db, 'eocIssues'),
+        where('locationId', '==', context.locationId),
+        where('status', '==', 'resolved'),
+        where('closedAt', '>=', Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000)),
+        orderBy('closedAt', 'desc'),
+        limit(25)
+      ))
+    ])
+    issueSnapshot = [...activeSnap.docs, ...resolvedSnap.docs].map(item => {
+      const issue = item.data()
+      return {
+        issueId: item.id,
+        label: issue.label || 'Issue',
+        description: issue.description || '',
+        status: issue.status || 'open',
+        issueType: issue.issueType || '',
+        reportedByName: issue.reportedByName || '',
+        createdAt: issue.createdAt || null,
+        closedAt: issue.closedAt || null
+      }
+    })
+  } catch (error) {
+    console.warn('Issue snapshot unavailable for shift handoff:', error)
+  }
 
   await runTransaction(db, async transaction => {
     const submittedSnap = await transaction.get(submittedRef)
@@ -301,6 +339,8 @@ export async function submitShiftDebrief(context, items, user) {
       receivingShiftLabel: receivingShiftId ? getShiftLabel(receivingShiftId) : '',
       receivingUserIds: receivingUsers.map(row => row.id),
       receivingUserNames,
+      issueSnapshot,
+      issueSnapshotCapturedAt: serverTimestamp(),
       shiftStartAt: outgoingTiming?.shiftStartAt || context.shiftStartAt || null,
       shiftEndAt: outgoingTiming?.shiftEndAt || context.shiftEndAt || null,
       outgoingDebriefDueAt: outgoingTiming?.outgoingDebriefDueAt || context.outgoingDebriefDueAt || null,

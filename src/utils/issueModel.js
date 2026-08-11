@@ -1,4 +1,4 @@
-export const ISSUE_SCHEMA_VERSION = 2
+export const ISSUE_SCHEMA_VERSION = 3
 
 export const ISSUE_TYPES = [
   { value: 'house_property', label: 'House/property', eocType: 'house' },
@@ -53,12 +53,18 @@ export function buildIssueRecord({
   description,
   requiresPhotoOnIssue = false,
   reportedByUserId,
-  reportedByName
+  reportedByName,
+  linkedTrackingId,
+  parentIssueId,
+  relationshipDecision
 }) {
   const resolvedIssueType = issueType || (eocType === 'van' ? 'van_vehicle' : 'house_property')
   const meta = getIssueTypeMeta(resolvedIssueType)
   const resolvedEocType = trim(eocType) || meta.eocType
   const resolvedItemId = trimOrNull(itemId)
+
+  const resolvedTrackingId = trimOrNull(trackingId) || resolvedItemId
+  const isEocObservation = source === 'eoc_checklist' && !!resolvedTrackingId
 
   return {
     schemaVersion: ISSUE_SCHEMA_VERSION,
@@ -75,7 +81,15 @@ export function buildIssueRecord({
     templateVersion: Number(templateVersion || 0) || null,
     templateVersionId: trimOrNull(templateVersionId),
     itemId: resolvedItemId,
-    trackingId: trimOrNull(trackingId) || resolvedItemId,
+    trackingId: resolvedTrackingId,
+    sourceTrackingId: isEocObservation ? resolvedTrackingId : null,
+    linkedTrackingId: isEocObservation ? null : trimOrNull(linkedTrackingId),
+    parentIssueId: trimOrNull(parentIssueId),
+    relationshipDecision: trimOrNull(relationshipDecision),
+    recurrenceEligible: isEocObservation,
+    reportedBefore: false,
+    recurringIssue: false,
+    recurrenceCountAtReport: isEocObservation ? 1 : 0,
     label: trim(label) || meta.label,
     category: trim(category) || getIssueSourceLabel(source),
     description: trim(description),

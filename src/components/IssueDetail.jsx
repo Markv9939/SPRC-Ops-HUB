@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { doc, collection, onSnapshot, orderBy, query } from 'firebase/firestore'
-import { ArrowLeft, CheckCircle2, Clock, RotateCcw, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Clock, Link2, RotateCcw, ShieldAlert, Unlink } from 'lucide-react'
 import { db } from '../firebase'
 import { LOCATIONS, VANS } from '../data/eocConstants'
 import { addBhtIssueFollowUp, addIssueNote, requestIssueReopen, updateIssueStatus } from '../services/issueStatusService'
 import { isAdminRole, isSupervisorRole } from '../utils/orgModel'
 import { getIssueSourceLabel, getIssueTypeMeta, hasPendingProblemReturned, inferIssueType } from '../utils/issueModel'
+import useEocIssueFeatures from '../hooks/useEocIssueFeatures'
+import { getChecklistChoicesForLocation, getRelationshipCandidates } from '../services/issueRecurrenceService'
+import { classifyQuickReport, keepIssueSeparate, linkIssueAsFollowUp, unlinkIssueRelationship } from '../services/issueRelationshipService'
+import IssuePhotoPicker from './IssuePhotoPicker'
+import IssuePhotoGallery from './IssuePhotoGallery'
+import { uploadIssuePhotos } from '../services/issueAttachmentService'
+import { queueIssuePhotoRetry } from '../services/offlineSyncService'
 
 function toDate(value) {
   if (!value) return null
@@ -49,6 +56,15 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
   const [requestingReturn, setRequestingReturn] = useState(false)
   const [followUpNote, setFollowUpNote] = useState('')
   const [savingFollowUp, setSavingFollowUp] = useState(false)
+  const [relationshipCandidates, setRelationshipCandidates] = useState([])
+  const [checklistChoices, setChecklistChoices] = useState([])
+  const [relationshipTargetId, setRelationshipTargetId] = useState('')
+  const [checklistTrackingId, setChecklistTrackingId] = useState('')
+  const [relationshipReason, setRelationshipReason] = useState('')
+  const [savingRelationship, setSavingRelationship] = useState(false)
+  const [resolutionPhotos, setResolutionPhotos] = useState([])
+  const [returnPhotos, setReturnPhotos] = useState([])
+  const { enabledForLocation } = useEocIssueFeatures()
 
   useEffect(() => {
     if (!issueId) return undefined
@@ -99,6 +115,40 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
   const returnAlreadyRequested = hasPendingProblemReturned(activities)
   const canAddFollowUp = !canManage && !isClosed
 
+  const retainFailedPhotos = async ({ photos, results, kind }) => {
+    const failedIds = new Set((results || []).filter(item => item.state !== 'uploaded').map(item => item.attachmentId))
+    const failedPhotos = photos.filter(photo => failedIds.has(photo.id))
+    if (failedPhotos.length === 0) return false
+    try {
+      await queueIssuePhotoRetry({ issueId: issue.id, locationId: issue.locationId, photos: failedPhotos, kind, user })
+      return true
+    } catch (queueError) {
+      console.error('Issue updated, but failed photos could not be queued:', queueError)
+      alert('The issue update was saved, but this device could not retain a failed photo upload. Do not clear browser data and notify a supervisor.')
+      return false
+    }
+  }
+  const recurrenceEnabled = enabledForLocation('recurrence', issue?.locationId)
+  const photosEnabled = enabledForLocation('photos', issue?.locationId)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!issue || !canManage || !recurrenceEnabled) {
+      setRelationshipCandidates([])
+      setChecklistChoices([])
+      return undefined
+    }
+    Promise.all([
+      getRelationshipCandidates({ issue }),
+      issue.source === 'eoc_checklist' ? Promise.resolve([]) : getChecklistChoicesForLocation(issue.locationId)
+    ]).then(([candidates, choices]) => {
+      if (cancelled) return
+      setRelationshipCandidates(candidates)
+      setChecklistChoices(choices)
+    }).catch(error => console.warn('Issue relationship options failed:', error))
+    return () => { cancelled = true }
+  }, [canManage, issue, recurrenceEnabled])
+
   const submitStatus = async (event) => {
     event?.preventDefault()
     if (!action || !issue) return
@@ -118,6 +168,13 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
           note,
           actorUser: user
         })
+        if (action === 'resolved' && resolutionPhotos.length > 0) {
+          const results = await uploadIssuePhotos({ issueId: issue.id, locationId: issue.locationId, photos: resolutionPhotos, kind: 'resolution', uploader: user })
+          if (await retainFailedPhotos({ photos: resolutionPhotos, results, kind: 'resolution' })) {
+            alert('The issue was resolved. A failed resolution photo will retry automatically from this device.')
+          }
+          setResolutionPhotos([])
+        }
       }
       setAction('')
       setNote('')
@@ -143,6 +200,13 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
         note: returnNote,
         actorUser: user
       })
+      if (returnPhotos.length > 0) {
+        const results = await uploadIssuePhotos({ issueId: issue.id, locationId: issue.locationId, photos: returnPhotos, kind: 'report', uploader: user })
+        if (await retainFailedPhotos({ photos: returnPhotos, results, kind: 'report' })) {
+          alert('The returned problem was reported. A failed photo will retry automatically from this device.')
+        }
+        setReturnPhotos([])
+      }
       setReturnNote('')
     } catch (error) {
       alert(error?.message || 'Failed to report that the problem returned.')
@@ -171,6 +235,49 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
       alert(error?.message || 'Failed to add follow-up.')
     } finally {
       setSavingFollowUp(false)
+    }
+  }
+
+  const runRelationshipAction = async (actionName) => {
+    if (!issue || isOffline) {
+      alert('Relationship updates require an internet connection.')
+      return
+    }
+    setSavingRelationship(true)
+    try {
+      if (actionName === 'separate') {
+        await keepIssueSeparate({ issueId: issue.id, reason: relationshipReason, actorUser: user })
+      } else if (actionName === 'link') {
+        const parent = relationshipCandidates.find(item => item.id === relationshipTargetId)
+        if (!parent) throw new Error('Choose the related active or recently resolved issue.')
+        await linkIssueAsFollowUp({
+          childIssueId: issue.id,
+          parentIssueId: parent.id,
+          reason: relationshipReason,
+          reopenParent: parent.status === 'resolved',
+          actorUser: user
+        })
+      } else if (actionName === 'classify') {
+        const choice = checklistChoices.find(item => item.trackingId === checklistTrackingId)
+        if (!choice) throw new Error('Choose a checklist item.')
+        await classifyQuickReport({
+          issueId: issue.id,
+          trackingId: choice.trackingId,
+          checklistLabel: choice.label,
+          categoryLabel: choice.category,
+          reason: relationshipReason,
+          actorUser: user
+        })
+      } else if (actionName === 'unlink') {
+        await unlinkIssueRelationship({ issueId: issue.id, reason: relationshipReason, actorUser: user })
+      }
+      setRelationshipReason('')
+      setRelationshipTargetId('')
+      setChecklistTrackingId('')
+    } catch (error) {
+      alert(error?.message || 'Failed to update issue relationship.')
+    } finally {
+      setSavingRelationship(false)
     }
   }
 
@@ -217,6 +324,14 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
         {issue.description || 'No description provided.'}
       </div>
 
+      {recurrenceEnabled && (issue.reportedBefore || issue.recurringIssue) && (
+        <div className="issue-pattern-badges">
+          {issue.reportedBefore && <span>Reported before</span>}
+          {issue.recurringIssue && <strong>Recurring issue</strong>}
+          {issue.recurrenceCountAtReport > 0 && <small>{issue.recurrenceCountAtReport} observations in 90 days when reported</small>}
+        </div>
+      )}
+
       {canManage && (
         <form className="issue-detail-actions" onSubmit={submitStatus}>
           <select value={action} onChange={(event) => setAction(event.target.value)}>
@@ -233,8 +348,39 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
             onChange={(event) => setNote(event.target.value)}
             placeholder={action === 'open' ? 'Explain why the issue is being reopened.' : 'Add the relevant update or action taken.'}
           />
+          {photosEnabled && action === 'resolved' && <IssuePhotoPicker value={resolutionPhotos} onChange={setResolutionPhotos} disabled={saving} label="Add resolution photos" />}
           <button type="submit" disabled={!action || !note.trim() || saving}>{saving ? 'Saving...' : 'Save update'}</button>
         </form>
+      )}
+
+      {canManage && recurrenceEnabled && (
+        <div className="issue-relationship-tools">
+          <div className="issue-relationship-heading"><Link2 size={17} /> Related reports</div>
+          <p>Review possible repeats. Reports stay separate unless you choose an action.</p>
+          {relationshipCandidates.length > 0 && !isClosed && (
+            <select value={relationshipTargetId} onChange={event => setRelationshipTargetId(event.target.value)}>
+              <option value="">Choose a related report</option>
+              {relationshipCandidates.map(candidate => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.status === 'resolved' ? 'Resolved - ' : ''}{candidate.label || candidate.description || 'Issue'}
+                </option>
+              ))}
+            </select>
+          )}
+          {issue.source !== 'eoc_checklist' && checklistChoices.length > 0 && (
+            <select value={checklistTrackingId} onChange={event => setChecklistTrackingId(event.target.value)}>
+              <option value="">Choose assigned checklist item</option>
+              {checklistChoices.map(choice => <option key={choice.trackingId} value={choice.trackingId}>{choice.category} - {choice.label}</option>)}
+            </select>
+          )}
+          <textarea rows={2} value={relationshipReason} onChange={event => setRelationshipReason(event.target.value)} placeholder="Reason or review note" />
+          <div className="issue-relationship-actions">
+            {!isClosed && <button type="button" onClick={() => runRelationshipAction('separate')} disabled={savingRelationship}>Keep separate</button>}
+            {!isClosed && relationshipCandidates.length > 0 && <button type="button" onClick={() => runRelationshipAction('link')} disabled={savingRelationship || !relationshipTargetId || !relationshipReason.trim()}>Link as follow-up</button>}
+            {issue.source !== 'eoc_checklist' && checklistChoices.length > 0 && <button type="button" onClick={() => runRelationshipAction('classify')} disabled={savingRelationship || !checklistTrackingId}>Link checklist item</button>}
+            {isAdminRole(user?.role) && (issue.parentIssueId || issue.linkedTrackingId) && <button type="button" onClick={() => runRelationshipAction('unlink')} disabled={savingRelationship || !relationshipReason.trim()}><Unlink size={15} /> Unlink</button>}
+          </div>
+        </div>
       )}
 
       {canAddFollowUp && (
@@ -246,6 +392,7 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
             onChange={(event) => setFollowUpNote(event.target.value)}
             placeholder="Include new information about this issue."
           />
+          {photosEnabled && <IssuePhotoPicker value={returnPhotos} onChange={setReturnPhotos} disabled={requestingReturn} />}
           <button type="submit" disabled={!followUpNote.trim() || savingFollowUp}>
             {savingFollowUp ? 'Adding...' : 'Add follow-up'}
           </button>
@@ -274,6 +421,7 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
       )}
 
       <h2 className="issue-detail-section-title">Activity</h2>
+      {photosEnabled && <IssuePhotoGallery issue={issue} user={user} />}
       <div className="issue-timeline">
         {activities.length === 0 ? (
           <div className="issue-detail-empty">No activity yet.</div>

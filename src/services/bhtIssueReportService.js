@@ -2,6 +2,7 @@ import { collection, doc } from 'firebase/firestore'
 import { db } from '../firebase'
 import { buildIssueRecord, getIssueTypeMeta, ISSUE_TYPES } from '../utils/issueModel'
 import { createIssueWithActivity } from './issueStatusService'
+import { uploadIssuePhotos } from './issueAttachmentService'
 
 export const BHT_HOME_ISSUE_TYPES = ISSUE_TYPES
 
@@ -57,5 +58,13 @@ export async function submitBhtIssueReportOnline(payload) {
     eventType: 'reported'
   })
 
-  return { issueId: result.issueId }
+  const photoResults = await uploadIssuePhotos({
+    issueId: result.issueId,
+    locationId: issueData.locationId,
+    photos: payload?.photos,
+    kind: 'report',
+    uploader: payload?.user
+  })
+
+  return { issueId: result.issueId, photoResults }
 }

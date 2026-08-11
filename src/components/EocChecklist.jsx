@@ -25,8 +25,11 @@ import { EOC_HOUSE_TEMPLATE, EOC_VAN_TEMPLATE, LOCATIONS, TEMPLATE_SCOPE_OTC_SHA
 import { formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { parseMileageValue } from '../utils/fleetStatus'
 import { deleteOfflineDraft, getOfflineDraft, saveOfflineDraft } from '../services/offlineStore'
-import { getEocDraftId, queueEocSubmission, submitEocSubmissionOnline } from '../services/offlineSyncService'
+import { getEocDraftId, queueEocSubmission, queueIssuePhotoRetry, submitEocSubmissionOnline } from '../services/offlineSyncService'
 import { notifySuccess } from '../utils/toast'
+import useEocIssueFeatures from '../hooks/useEocIssueFeatures'
+import { getMatchingChecklistIssues } from '../services/issueRecurrenceService'
+import IssuePhotoPicker from './IssuePhotoPicker'
 import { normalizeEocTemplateItems } from '../utils/eocTemplateModel'
 import {
   findFirstIncompleteEocItemIndex,
@@ -55,7 +58,7 @@ function formatDueLabel(task) {
   return task?.dueDate || '--'
 }
 
-function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
+function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline = false }) {
   const [task, setTask] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -73,6 +76,9 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   const [draftRestoredNotice, setDraftRestoredNotice] = useState('')
   const [currentItemIndex, setCurrentItemIndex] = useState(0)
   const [showReview, setShowReview] = useState(false)
+  const [matchingIssues, setMatchingIssues] = useState([])
+  const [matchingIssuesLoading, setMatchingIssuesLoading] = useState(false)
+  const { enabledForLocation } = useEocIssueFeatures()
 
   const normalizedUserId = String(user?.id || '').trim()
   const draftTimerRef = useRef(null)
@@ -318,14 +324,19 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     const filtered = templateItems.filter(i => i.active !== false)
     return filtered.length > 0 ? filtered : fallback
   }, [eocType, templateItems])
+  const photosEnabled = enabledForLocation('photos', task?.locationId)
+  const validationTemplate = useMemo(() => activeTemplate.map(item => ({
+    ...item,
+    requiresPhotoOnIssue: photosEnabled && item.requiresPhotoOnIssue === true
+  })), [activeTemplate, photosEnabled])
 
   const checklistProgress = useMemo(
-    () => getEocChecklistProgress(activeTemplate, answers, repairDetails),
-    [activeTemplate, answers, repairDetails]
+    () => getEocChecklistProgress(validationTemplate, answers, repairDetails),
+    [validationTemplate, answers, repairDetails]
   )
   const categoryProgress = useMemo(
-    () => getEocCategoryProgress(activeTemplate, answers, repairDetails),
-    [activeTemplate, answers, repairDetails]
+    () => getEocCategoryProgress(validationTemplate, answers, repairDetails),
+    [validationTemplate, answers, repairDetails]
   )
   const currentItem = activeTemplate[currentItemIndex] || activeTemplate[0] || null
   const currentCategoryItems = currentItem
@@ -334,8 +345,35 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
   const currentCategoryPosition = currentItem
     ? currentCategoryItems.findIndex(item => item.id === currentItem.id) + 1
     : 0
+  const recurrenceEnabled = enabledForLocation('recurrence', task?.locationId)
 
-  const isRepairMissing = (itemId) => isEocIssueDetailMissing(itemId, answers, repairDetails)
+  useEffect(() => {
+    let cancelled = false
+    const trackingId = currentItem?.trackingId || currentItem?.id
+    if (!recurrenceEnabled || isOffline || !task?.locationId || !trackingId || answers[currentItem?.id] !== 'repair') {
+      setMatchingIssues([])
+      setMatchingIssuesLoading(false)
+      return undefined
+    }
+    setMatchingIssuesLoading(true)
+    getMatchingChecklistIssues({ locationId: task.locationId, trackingId })
+      .then(rows => {
+        if (!cancelled) setMatchingIssues(rows)
+      })
+      .catch(error => {
+        console.warn('Matching issue lookup failed:', error)
+        if (!cancelled) setMatchingIssues([])
+      })
+      .finally(() => {
+        if (!cancelled) setMatchingIssuesLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [answers, currentItem?.id, currentItem?.trackingId, isOffline, recurrenceEnabled, task?.locationId])
+
+  const isRepairMissing = (itemId) => {
+    const item = validationTemplate.find(candidate => candidate.id === itemId) || itemId
+    return isEocIssueDetailMissing(item, answers, repairDetails)
+  }
 
   const findFirstInvalid = () => {
     if (eocType === 'van') {
@@ -347,7 +385,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       }
     }
 
-    for (const item of activeTemplate) {
+    for (const item of validationTemplate) {
       if (!answers[item.id]) {
         return {
           type: 'missing-answer',
@@ -424,7 +462,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
 
   useEffect(() => {
     if (!draftReady || activeTemplate.length === 0 || guidedPositionReadyRef.current) return
-    const firstIncompleteIndex = findFirstIncompleteEocItemIndex(activeTemplate, answers, repairDetails)
+    const firstIncompleteIndex = findFirstIncompleteEocItemIndex(validationTemplate, answers, repairDetails)
     guidedPositionReadyRef.current = true
     if (firstIncompleteIndex < 0) {
       setCurrentItemIndex(Math.max(activeTemplate.length - 1, 0))
@@ -432,7 +470,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       return
     }
     setCurrentItemIndex(firstIncompleteIndex)
-  }, [activeTemplate, answers, draftReady, repairDetails])
+  }, [activeTemplate, answers, draftReady, repairDetails, validationTemplate])
 
   useEffect(() => {
     if (!draftRestoredNotice) return undefined
@@ -464,6 +502,16 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       answers,
       repairDetails
     }
+    const cloudPayload = {
+      ...payload,
+      repairDetails: Object.fromEntries(Object.entries(repairDetails).map(([itemId, details]) => [itemId, {
+        description: details?.description || '',
+        unableToTakePhoto: details?.unableToTakePhoto === true,
+        unableReason: details?.unableReason || '',
+        photoAttachmentIds: (details?.photos || []).map(photo => photo.id)
+      }]))
+    }
+    const hasLocalPhotos = Object.values(repairDetails).some(details => (details?.photos || []).length > 0)
 
     const serialized = JSON.stringify(payload)
     if (!initialDraftSnapshotRef.current) {
@@ -489,13 +537,13 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
         const existingDraft = await getDoc(draftRef)
         await setDoc(draftRef, {
-          ...payload,
+          ...cloudPayload,
           version: 1,
           lastTouchedAt: serverTimestamp(),
           ...(existingDraft.exists() ? {} : { createdAt: serverTimestamp() }),
           updatedAt: serverTimestamp()
         }, { merge: true })
-        await deleteOfflineDraft(getEocDraftId(task.id, normalizedUserId))
+        if (!hasLocalPhotos) await deleteOfflineDraft(getEocDraftId(task.id, normalizedUserId))
         lastSavedPayloadRef.current = serialized
         setDraftStatus('saved')
       } catch (err) {
@@ -515,8 +563,9 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       setError('Choose Looks good or Needs attention before continuing.')
       return
     }
-    if (isEocIssueDetailMissing(item.id, nextAnswers, nextRepairDetails)) {
-      setError('Describe the issue before continuing.')
+    const validationItem = validationTemplate.find(candidate => candidate.id === item.id) || item
+    if (isEocIssueDetailMissing(validationItem, nextAnswers, nextRepairDetails)) {
+      setError(validationItem.requiresPhotoOnIssue ? 'Add a photo or explain why one cannot be taken safely.' : 'Describe the issue before continuing.')
       window.setTimeout(() => issueDetailInputRef.current?.focus(), 80)
       return
     }
@@ -527,7 +576,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
       return
     }
 
-    const firstIncompleteIndex = findFirstIncompleteEocItemIndex(activeTemplate, nextAnswers, nextRepairDetails)
+    const firstIncompleteIndex = findFirstIncompleteEocItemIndex(validationTemplate, nextAnswers, nextRepairDetails)
     if (firstIncompleteIndex >= 0) {
       setCurrentItemIndex(firstIncompleteIndex)
       setError('Complete the remaining checklist item before review.')
@@ -559,7 +608,24 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
     setError('')
     setRepairDetails(prev => ({
       ...prev,
-      [itemId]: { description: value }
+      [itemId]: { ...(prev[itemId] || {}), description: value }
+    }))
+  }
+
+  const setRepairPhotos = (itemId, photos) => {
+    setError('')
+    setRepairDetails(prev => ({ ...prev, [itemId]: { ...(prev[itemId] || {}), photos } }))
+  }
+
+  const setUnablePhoto = (itemId, unableToTakePhoto) => {
+    setError('')
+    setRepairDetails(prev => ({
+      ...prev,
+      [itemId]: {
+        ...(prev[itemId] || {}),
+        unableToTakePhoto,
+        ...(unableToTakePhoto ? { photos: [] } : {})
+      }
     }))
   }
 
@@ -620,7 +686,30 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
         return
       }
 
-      await submitEocSubmissionOnline(buildSubmissionPayload())
+      const result = await submitEocSubmissionOnline(buildSubmissionPayload())
+      const failedResults = (result.photoResults || []).filter(item => item.state !== 'uploaded')
+      if (failedResults.length > 0) {
+        const photoById = new Map(Object.values(repairDetails).flatMap(details => details?.photos || []).map(photo => [photo.id, photo]))
+        const failedByIssue = new Map()
+        failedResults.forEach(item => {
+          const photo = photoById.get(item.attachmentId)
+          if (!photo || !item.issueId) return
+          failedByIssue.set(item.issueId, [...(failedByIssue.get(item.issueId) || []), photo])
+        })
+        try {
+          await Promise.all(Array.from(failedByIssue, ([issueId, photos]) => queueIssuePhotoRetry({
+            issueId,
+            locationId: task.locationId,
+            photos,
+            kind: 'report',
+            user
+          })))
+          notifySuccess('EOC submitted. Photo upload will retry automatically.')
+        } catch (queueError) {
+          console.error('EOC saved, but failed photos could not be queued:', queueError)
+          alert('The EOC was submitted, but this device could not retain a failed photo upload. Do not clear browser data and notify a supervisor.')
+        }
+      }
       onComplete()
     } catch (err) {
       console.error('Error submitting EOC:', err)
@@ -853,6 +942,20 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
           </div>
           {answers[currentItem.id] === 'repair' && (
             <div className="eoc-guided-issue">
+              {recurrenceEnabled && (matchingIssuesLoading || matchingIssues.length > 0) && (
+                <div className="eoc-related-issues">
+                  <div className="eoc-related-heading">
+                    {matchingIssues.length > 0 ? 'Reported before' : 'Checking prior reports...'}
+                  </div>
+                  {matchingIssues.slice(0, 5).map(issue => (
+                    <button type="button" key={issue.id} onClick={() => onOpenIssue?.(issue.id)} disabled={!onOpenIssue}>
+                      <span>{issue.description || issue.label || 'Prior report'}</span>
+                      <strong>{String(issue.status || 'open').replace('_', ' ')}</strong>
+                    </button>
+                  ))}
+                  {matchingIssues.length > 0 && <p>Continue with this EOC observation. Prior reports are shown for context and are not merged automatically.</p>}
+                </div>
+              )}
               <label htmlFor={`eoc-issue-${currentItem.id}`}>Describe the issue</label>
               <p>Provide all relevant details that would help someone understand and address the issue.</p>
               <textarea
@@ -864,6 +967,31 @@ function EocChecklist({ taskId, user, onComplete, onBack, isOffline = false }) {
                 onChange={(event) => setRepairField(currentItem.id, event.target.value)}
                 placeholder="Describe what you observed and any details that may help."
               />
+              {photosEnabled && (
+                <>
+                  <IssuePhotoPicker
+                    value={repairDetails[currentItem.id]?.photos || []}
+                    onChange={photos => setRepairPhotos(currentItem.id, photos)}
+                    disabled={submitting || repairDetails[currentItem.id]?.unableToTakePhoto === true}
+                  />
+                  {currentItem.requiresPhotoOnIssue && (
+                    <div className="eoc-photo-exception">
+                      <label>
+                        <input type="checkbox" checked={repairDetails[currentItem.id]?.unableToTakePhoto === true} onChange={event => setUnablePhoto(currentItem.id, event.target.checked)} />
+                        Unable to safely take a photo
+                      </label>
+                      {repairDetails[currentItem.id]?.unableToTakePhoto === true && (
+                        <textarea
+                          rows={2}
+                          value={repairDetails[currentItem.id]?.unableReason || ''}
+                          onChange={event => setRepairDetails(prev => ({ ...prev, [currentItem.id]: { ...(prev[currentItem.id] || {}), unableReason: event.target.value } }))}
+                          placeholder="Explain why a photo cannot be taken safely."
+                        />
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
           <div className="eoc-item-navigation">

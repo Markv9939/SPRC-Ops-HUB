@@ -113,7 +113,7 @@ function ShiftDebriefGuide({ onComplete }) {
   )
 }
 
-function SubmittedDebriefView({ debrief, user, isOffline }) {
+function SubmittedDebriefView({ debrief, user, isOffline, onOpenIssue }) {
   const [extraNoteText, setExtraNoteText] = useState('')
   const [confirmation, setConfirmation] = useState(() => getCurrentUserConfirmation(debrief, user))
   const [savingExtra, setSavingExtra] = useState(false)
@@ -195,6 +195,20 @@ function SubmittedDebriefView({ debrief, user, isOffline }) {
         <DebriefGroupedReadView items={debrief.items} emptyText="No notes in this debrief." />
       </section>
 
+      {(debrief.issueSnapshot || []).length > 0 && (
+        <section className="debrief-document-card debrief-submitted-panel">
+          <div className="debrief-document-header">House Issues at Handoff</div>
+          <div className="debrief-submitted-body debrief-issue-snapshot">
+            {debrief.issueSnapshot.map(issue => (
+              <button type="button" key={issue.issueId} onClick={() => onOpenIssue?.(issue.issueId)} disabled={!onOpenIssue}>
+                <span><strong>{issue.label}</strong><small>{issue.description}</small></span>
+                <b>{String(issue.status || '').replace('_', ' ')}</b>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="debrief-document-card debrief-submitted-panel">
         <div className="debrief-document-header">Extra Notes / Corrections</div>
         <div className="debrief-submitted-body">
@@ -267,7 +281,8 @@ export default function ShiftDebriefPage({
   isOffline = false,
   onBack,
   onDone,
-  onViewFull
+  onViewFull,
+  onOpenIssue
 }) {
   const context = useMemo(() => getBhtDebriefContext(user, new Date(), assignment), [assignment, user])
   const targetDebriefId = debriefId || context?.id || ''
@@ -630,7 +645,7 @@ export default function ShiftDebriefPage({
           onViewFull={onViewFull}
         />
       ) : submitted ? (
-        <SubmittedDebriefView debrief={submitted} user={user} isOffline={isOffline} />
+        <SubmittedDebriefView debrief={submitted} user={user} isOffline={isOffline} onOpenIssue={onOpenIssue} />
       ) : (
         <ShiftDebriefDocumentEditor
           items={visibleItems}

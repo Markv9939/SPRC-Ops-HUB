@@ -1913,3 +1913,68 @@ test('BHT follow-ups preserve status and cannot impersonate another profile', as
     createdAt: serverTimestamp()
   }))
 })
+
+test('Phase 4-8 metadata rules protect tracking, attachments, patterns, and missed notes', async () => {
+  await seed('appSettings/authPolicy', { authScopeEnforced: true })
+  await seed('users/upgrade_bht', { name: 'Upgrade BHT', role: 'bht', active: true, issueLocationIds: ['test_house'], authorizedLocations: ['TEST_HOUSE'], version: 1 })
+  await seed('usersByAuthUid/upgrade_bht_uid', { userId: 'upgrade_bht', version: 1 })
+  await seed('users/upgrade_supervisor', { name: 'Upgrade Supervisor', role: 'supervisor', active: true, issueLocationIds: ['test_house'], authorizedLocations: ['OTC', 'TEST_HOUSE'], version: 1 })
+  await seed('usersByAuthUid/upgrade_supervisor_uid', { userId: 'upgrade_supervisor', version: 1 })
+  await seed('eocIssues/upgrade_issue', { source: 'eoc_checklist', sourceTrackingId: 'sink', trackingId: 'sink', recurrenceEligible: true, locationId: 'test_house', status: 'open', eocType: 'house', label: 'Sink', reportedByUserId: 'upgrade_bht', version: 1, createdAt: new Date(), updatedAt: new Date() })
+  await seed('eocTasks/upgrade_missed_task', { locationId: 'test_house', shiftId: 'shift_1', taskType: 'house', status: 'missed', version: 1 })
+
+  const bhtDb = authed('upgrade_bht_uid', 'upgrade.bht@example.com')
+  await assertSucceeds(setDoc(doc(bhtDb, 'eocIssuePatterns/test_house__sink__test'), {
+    schemaVersion: 1,
+    patternId: 'test_house__sink__test',
+    locationId: 'test_house',
+    trackingId: 'sink',
+    observations: [{ issueId: 'upgrade_issue', observedAtMs: Date.now() }],
+    recentCount: 1,
+    lifetimeCount: 1,
+    reportedBefore: false,
+    recurringIssue: false,
+    version: 1,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  }))
+  await assertFails(setDoc(doc(bhtDb, 'eocIssuePatterns/mesquite__sink__test'), {
+    schemaVersion: 1,
+    patternId: 'mesquite__sink__test',
+    locationId: 'mesquite',
+    trackingId: 'sink',
+    observations: [],
+    recentCount: 0,
+    lifetimeCount: 0,
+    reportedBefore: false,
+    recurringIssue: false,
+    version: 1
+  }))
+  const attachment = {
+    schemaVersion: 1,
+    attachmentId: 'photo_1',
+    issueId: 'upgrade_issue',
+    locationId: 'test_house',
+    kind: 'report',
+    state: 'uploading',
+    width: 100,
+    height: 100,
+    sizeBytes: 100,
+    mimeType: 'image/jpeg',
+    uploaderProfileId: 'upgrade_bht',
+    storagePath: 'issueAttachments/test_house/upgrade_issue/photo_1.jpg',
+    visibility: 'location',
+    hiddenFromBht: false,
+    retentionDays: 90,
+    version: 1,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  }
+  await assertSucceeds(setDoc(doc(bhtDb, 'eocIssues/upgrade_issue/attachments/photo_1'), attachment))
+  await assertFails(updateDoc(doc(bhtDb, 'eocIssues/upgrade_issue/attachments/photo_1'), { storagePath: 'issueAttachments/mesquite/stolen.jpg', version: 2 }))
+  await assertFails(setDoc(doc(bhtDb, 'eocTasks/upgrade_missed_task/missedNotes/bht_note'), { taskId: 'upgrade_missed_task', locationId: 'test_house', text: 'BHT cannot add this note.', authorUserId: 'upgrade_bht', immutable: true, version: 1 }))
+
+  const supervisorDb = authed('upgrade_supervisor_uid', 'upgrade.supervisor@example.com')
+  await assertSucceeds(setDoc(doc(supervisorDb, 'eocTasks/upgrade_missed_task/missedNotes/supervisor_note'), { taskId: 'upgrade_missed_task', locationId: 'test_house', text: 'Supervisor reviewed the missed checklist.', authorUserId: 'upgrade_supervisor', authorName: 'Upgrade Supervisor', immutable: true, version: 1, createdAt: serverTimestamp() }))
+  await assertFails(updateDoc(doc(supervisorDb, 'eocIssues/upgrade_issue'), { sourceTrackingId: 'changed', trackingId: 'changed', version: 2, updatedAt: serverTimestamp() }))
+})

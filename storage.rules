@@ -1,0 +1,70 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function strictAuthEnabled() {
+      return firestore.exists(/databases/(default)/documents/appSettings/authPolicy)
+        && firestore.get(/databases/(default)/documents/appSettings/authPolicy).data.authScopeEnforced == true;
+    }
+
+    function mappedUserId() {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/usersByAuthUid/$(request.auth.uid))
+        ? firestore.get(/databases/(default)/documents/usersByAuthUid/$(request.auth.uid)).data.userId
+        : '';
+    }
+
+    function strictLocationAllowed(locationId) {
+      let userId = mappedUserId();
+      let profilePath = /databases/(default)/documents/users/$(userId);
+      return userId != ''
+        && firestore.exists(profilePath)
+        && firestore.get(profilePath).data.active == true
+        && (
+          firestore.get(profilePath).data.role == 'admin'
+          || (
+            firestore.get(profilePath).data.issueLocationIds is list
+            && locationId in firestore.get(profilePath).data.issueLocationIds
+          )
+        );
+    }
+
+    function locationAllowed(locationId) {
+      return signedIn() && (!strictAuthEnabled() || strictLocationAllowed(locationId));
+    }
+
+    function strictAttachmentReadable(locationId, issueId, attachmentId) {
+      let userId = mappedUserId();
+      let profilePath = /databases/(default)/documents/users/$(userId);
+      let attachmentPath = /databases/(default)/documents/eocIssues/$(issueId)/attachments/$(attachmentId);
+      return strictLocationAllowed(locationId)
+        && firestore.exists(attachmentPath)
+        && (
+          firestore.get(profilePath).data.role in ['supervisor', 'admin']
+          || firestore.get(attachmentPath).data.hiddenFromBht != true
+        );
+    }
+
+    match /issueAttachments/{locationId}/{issueId}/{fileName} {
+      allow get: if signedIn()
+        && (!strictAuthEnabled() || strictAttachmentReadable(locationId, issueId, resource.metadata.attachmentId));
+      allow list: if false;
+      allow create, update: if locationAllowed(locationId)
+        && request.resource.size > 0
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType == 'image/jpeg'
+        && request.resource.metadata.locationId == locationId
+        && request.resource.metadata.issueId == issueId
+        && fileName == request.resource.metadata.attachmentId + '.jpg';
+      allow delete: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

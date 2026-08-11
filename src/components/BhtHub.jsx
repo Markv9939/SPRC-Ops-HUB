@@ -21,6 +21,9 @@ import AppModal from './AppModal'
 import useUserScope from '../hooks/useUserScope'
 import useScopedIssues from '../hooks/useScopedIssues'
 import { toTransportRecordDate } from '../utils/transportRecord'
+import IssuePhotoPicker from './IssuePhotoPicker'
+import useEocIssueFeatures from '../hooks/useEocIssueFeatures'
+import useOfflinePhotoQueue from '../hooks/useOfflinePhotoQueue'
 
 const LOCAL_REMINDER_INTERVAL_MS = 60 * 60 * 1000
 
@@ -62,6 +65,9 @@ function BhtHub({
   })
   const [issueError, setIssueError] = useState('')
   const [issueSubmitting, setIssueSubmitting] = useState(false)
+  const [issuePhotos, setIssuePhotos] = useState([])
+  const { enabledForLocation } = useEocIssueFeatures()
+  const pendingPhotos = useOfflinePhotoQueue(user)
 
   const hasAssignment = !!assignment
 
@@ -186,6 +192,7 @@ function BhtHub({
   const locationLabel = hasAssignment
     ? (LOCATIONS.find(l => l.id === assignment.locationId)?.label || assignment.locationId || '')
     : ''
+  const issuePhotosEnabled = enabledForLocation('photos', assignment?.locationId || user?.locationId)
 
   const firstName = String(user?.name || '').split(' ')[0]
   const assignedVanIds = [
@@ -208,6 +215,7 @@ function BhtHub({
     })
     setIssueError('')
     setIssueSubmitting(false)
+    setIssuePhotos([])
   }
 
   const openIssueReport = () => {
@@ -264,7 +272,8 @@ function BhtHub({
         issueType: issueForm.issueType,
         description,
         vanId,
-        assignment
+        assignment,
+        photos: issuePhotos
       })
       setIssueModalOpen(false)
       resetIssueForm()
@@ -436,6 +445,13 @@ function BhtHub({
         <MapPin size={15} strokeWidth={2.2} />
         {locationLabel}
       </div>
+
+      {pendingPhotos.total > 0 && (
+        <div className="pending-photo-banner">
+          <div><strong>{pendingPhotos.total} photo{pendingPhotos.total === 1 ? '' : 's'} pending</strong><span>{pendingPhotos.failed > 0 ? `${pendingPhotos.failed} failed. ` : ''}Do not clear browser data until uploads finish.</span></div>
+          <button type="button" onClick={pendingPhotos.retry} disabled={pendingPhotos.retrying || isOffline}>{pendingPhotos.retrying ? 'Retrying...' : 'Retry'}</button>
+        </div>
+      )}
 
       {renderIssueUpdates()}
 
@@ -902,6 +918,8 @@ function BhtHub({
           <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
             Provide all relevant details so the issue can be understood and addressed. Location and staff name are attached automatically.
           </div>
+
+          {issuePhotosEnabled && <IssuePhotoPicker value={issuePhotos} onChange={setIssuePhotos} disabled={issueSubmitting} />}
 
           {isOffline && (
             <div style={{ color: '#B07A28', fontSize: '13px', marginTop: '10px', padding: '8px', background: 'rgba(176,122,40,0.08)', borderRadius: '8px' }}>

@@ -1,6 +1,18 @@
-export function isEocIssueDetailMissing(itemId, answers, issueDetails) {
+import { requiredPhotoSatisfied } from './photoModel.js'
+
+export function isEocIssueDetailMissing(itemOrId, answers, issueDetails) {
+  const itemId = typeof itemOrId === 'object' ? itemOrId?.id : itemOrId
   if (answers?.[itemId] !== 'repair') return false
-  return !String(issueDetails?.[itemId]?.description || '').trim()
+  const details = issueDetails?.[itemId] || {}
+  if (!String(details.description || '').trim()) return true
+  if (typeof itemOrId === 'object' && itemOrId?.requiresPhotoOnIssue === true) {
+    return !requiredPhotoSatisfied({
+      photos: details.photos,
+      unableToTakePhoto: details.unableToTakePhoto,
+      unableReason: details.unableReason
+    })
+  }
+  return false
 }
 
 export function getEocChecklistProgress(items, answers, issueDetails) {
@@ -18,7 +30,7 @@ export function getEocChecklistProgress(items, answers, issueDetails) {
 
   const readyCount = normalizedItems.filter(item => (
     Boolean(answers?.[item.id])
-    && !isEocIssueDetailMissing(item.id, answers, issueDetails)
+    && !isEocIssueDetailMissing(item, answers, issueDetails)
   )).length
 
   return {
@@ -38,7 +50,7 @@ export function findFirstIncompleteEocItemIndex(items, answers, issueDetails) {
   const normalizedItems = Array.isArray(items) ? items : []
   return normalizedItems.findIndex(item => (
     !answers?.[item.id]
-    || isEocIssueDetailMissing(item.id, answers, issueDetails)
+    || isEocIssueDetailMissing(item, answers, issueDetails)
   ))
 }
 
@@ -56,7 +68,7 @@ export function getEocCategoryProgress(items, answers, issueDetails) {
     }
     existing.totalCount += 1
     if (answers?.[item.id] === 'repair') existing.attentionCount += 1
-    if (answers?.[item.id] && !isEocIssueDetailMissing(item.id, answers, issueDetails)) {
+    if (answers?.[item.id] && !isEocIssueDetailMissing(item, answers, issueDetails)) {
       existing.readyCount += 1
     }
     groups.set(category, existing)

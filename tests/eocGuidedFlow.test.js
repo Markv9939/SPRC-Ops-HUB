@@ -53,3 +53,11 @@ test('category progress identifies where each section begins', () => {
     { category: 'Kitchen', firstItemIndex: 2, totalCount: 1, readyCount: 1, attentionCount: 0 }
   ])
 })
+
+test('required-photo items accept a ready photo or a documented safety exception', () => {
+  const item = { id: 'lock', requiresPhotoOnIssue: true }
+  const answers = { lock: 'repair' }
+  assert.equal(isEocIssueDetailMissing(item, answers, { lock: { description: 'Lock is damaged.' } }), true)
+  assert.equal(isEocIssueDetailMissing(item, answers, { lock: { description: 'Lock is damaged.', photos: [{ state: 'ready' }] } }), false)
+  assert.equal(isEocIssueDetailMissing(item, answers, { lock: { description: 'Lock is damaged.', unableToTakePhoto: true, unableReason: 'Client information cannot be moved safely.' } }), false)
+})

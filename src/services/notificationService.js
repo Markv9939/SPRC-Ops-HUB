@@ -123,6 +123,12 @@ export function buildIssueAlertPayload({
     reopened: `${actorName} reopened "${issueLabel}".`,
     note_added: `${actorName} added a note to "${issueLabel}".`,
     bht_follow_up: `${actorName} added a follow-up to "${issueLabel}".`,
+    kept_separate: `${actorName} reviewed "${issueLabel}" and kept it separate.`,
+    linked_as_follow_up: `${actorName} linked "${issueLabel}" as a follow-up.`,
+    follow_up_linked: `${actorName} added a related follow-up to "${issueLabel}".`,
+    reopened_with_follow_up: `${actorName} reopened "${issueLabel}" and added a follow-up.`,
+    checklist_classified: `${actorName} linked "${issueLabel}" to a checklist item.`,
+    relationship_unlinked: `${actorName} removed a relationship from "${issueLabel}".`,
     problem_returned: `${actorName} reported that "${issueLabel}" returned.`
   }
 

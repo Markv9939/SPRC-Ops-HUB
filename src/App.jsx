@@ -28,6 +28,7 @@ import {
   isLocalTransportId,
   makeLocalTransportId,
   queueBhtIssueReport,
+  queueIssuePhotoRetry,
   queueTransportCreate,
   syncOfflineOutbox
 } from './services/offlineSyncService'
@@ -293,6 +294,7 @@ function App() {
     (typeof navigator !== 'undefined' && navigator.onLine === false)
     || (import.meta.env.DEV && new URLSearchParams(window.location.search).has('offline-test'))
   ))
+  const activeUserId = user?.id || ''
   const [offlineOutboxSummary, setOfflineOutboxSummary] = useState({ pending: 0, syncing: 0, failed: 0, needsReview: 0 })
   const [pendingEocTaskIds, setPendingEocTaskIds] = useState([])
   const [isChangePinOpen, setIsChangePinOpen] = useState(false)
@@ -444,7 +446,7 @@ function App() {
 
   const refreshOfflineOutboxSummary = useCallback(async () => {
     try {
-      const actions = await listAllOfflineActions()
+      const actions = await listAllOfflineActions(activeUserId)
       const next = { pending: 0, syncing: 0, failed: 0, needsReview: 0 }
       for (const action of Array.isArray(actions) ? actions : []) {
         if (action.status === 'pending') next.pending += 1
@@ -463,7 +465,7 @@ function App() {
     } catch (err) {
       console.warn('Offline outbox summary unavailable:', err)
     }
-  }, [])
+  }, [activeUserId])
 
   const loadLocalTransportDrafts = useCallback(async () => {
     if (!user || !isBhtRole(user.role)) return []
@@ -475,7 +477,7 @@ function App() {
     if (!user || !isBhtRole(user.role)) return
     try {
       const [actions, drafts] = await Promise.all([
-        listAllOfflineActions(),
+        listAllOfflineActions(user?.id || ''),
         listOfflineDrafts('transport')
       ])
       const localTransports = getLocalTransportSnapshots(drafts, user)
@@ -518,7 +520,7 @@ function App() {
     if (!user || isOffline) return undefined
     let cancelled = false
     ;(async () => {
-      const result = await syncOfflineOutbox()
+      const result = await syncOfflineOutbox(user.id)
       if (cancelled) return
       await refreshOfflineOutboxSummary()
       if (result.synced > 0) {
@@ -845,7 +847,8 @@ function App() {
       assignment: report?.assignment || bhtDebriefAssignment,
       issueType: report?.issueType || '',
       description: report?.description || '',
-      vanId: report?.vanId || ''
+      vanId: report?.vanId || '',
+      photos: Array.isArray(report?.photos) ? report.photos : []
     }
 
     if (isOffline) {
@@ -854,7 +857,25 @@ function App() {
       return
     }
 
-    await submitBhtIssueReportOnline(payload)
+    const result = await submitBhtIssueReportOnline(payload)
+    const failedIds = new Set((result.photoResults || []).filter(item => item.state !== 'uploaded').map(item => item.attachmentId))
+    const failedPhotos = payload.photos.filter(photo => failedIds.has(photo.id))
+    if (failedPhotos.length > 0) {
+      try {
+        await queueIssuePhotoRetry({
+          issueId: result.issueId,
+          locationId: report?.assignment?.locationId || user?.locationId,
+          photos: failedPhotos,
+          kind: 'report',
+          user
+        })
+        notifySuccess('Issue reported. Photo upload will retry automatically.')
+      } catch (queueError) {
+        console.error('Issue saved, but failed photos could not be queued:', queueError)
+        alert('The issue was reported, but this device could not retain the failed photo upload. Do not clear browser data; try adding the photo again from the issue.')
+      }
+      return
+    }
     notifySuccess('Issue reported')
   }
 
@@ -1158,6 +1179,7 @@ function App() {
         isOffline={isOffline}
         onComplete={handleEocComplete}
         onBack={handleEocBack}
+        onOpenIssue={(issueId) => navigate(`/issues/${encodeURIComponent(issueId)}`)}
       />,
       { title: 'End of Shift Checklist', showBack: true, onBack: handleEocBack }
     )
@@ -1175,6 +1197,7 @@ function App() {
         onBack={handleDebriefBack}
         onDone={navigateHome}
         onViewFull={() => navigate('/debrief/full')}
+        onOpenIssue={(issueId) => navigate(`/issues/${encodeURIComponent(issueId)}`)}
       />,
       {
         title: currentDebriefMode === 'quick' ? 'Add Debrief Note' : 'Shift Debrief',

@@ -19,8 +19,17 @@ function hashPin(pin) {
 
 const now = Timestamp.now()
 const dueDate = getCurrentCycleDueDate(getShiftById('shift_1'))
+const dueDateShift2 = getCurrentCycleDueDate(getShiftById('shift_2'))
 const writes = [
   ['appSettings/authPolicy', { authScopeEnforced: false, version: 1, updatedAt: now }],
+  ['appSettings/eocIssueFeatures', {
+    flags: { recurrence: true, photos: true, offlinePhotos: true, supervisorTools: true, retention: true, strictAuthentication: false },
+    enabledLocationIds: ['test_house'],
+    canaryLabel: 'Synthetic Test House',
+    version: 1,
+    updatedAt: now
+  }],
+  ['appMetrics/photoRetention', { dueIssues: 1, deleted: 2, failed: 0, version: 1, updatedAt: now }],
   ['users/phase3_bht', {
     name: 'Phase 3 Test BHT',
     role: 'bht',
@@ -61,6 +70,8 @@ const writes = [
     role: 'bht',
     active: true,
     deleted: false,
+    pinHash: hashPin('444444'),
+    pinVersion: 'v2_sha256_6digit',
     site: 'OTC',
     location: 'OTC',
     house: 'TEST_HOUSE',
@@ -70,6 +81,21 @@ const writes = [
     shiftId: 'shift_2',
     vanId: 'van_test',
     vanIds: ['van_test'],
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['users/phase3_admin', {
+    name: 'Phase 3 Test Admin',
+    role: 'admin',
+    active: true,
+    deleted: false,
+    pinHash: hashPin('333333'),
+    pinVersion: 'v2_sha256_6digit',
+    site: 'ALL',
+    location: 'ALL',
+    authorizedLocations: ['ALL', 'OTC', 'RES', 'TEST_HOUSE'],
+    issueLocationIds: ['test_house', 'mesquite', 'lone_mountain', 'res'],
     version: 1,
     createdAt: now,
     updatedAt: now
@@ -137,7 +163,7 @@ const writes = [
     status: 'active',
     items: [
       { id: 'phase3_smoke_detectors', trackingId: 'phase3_smoke_detectors', category: 'Safety', label: 'Are the smoke detectors secure and undamaged?', helpText: '', requiresPhotoOnIssue: false, order: 1, active: true },
-      { id: 'phase3_kitchen_sink', trackingId: 'phase3_kitchen_sink', category: 'Kitchen', label: 'Is the kitchen sink working without leaks?', helpText: 'Check under the sink for moisture.', requiresPhotoOnIssue: false, order: 2, active: true }
+      { id: 'phase3_kitchen_sink', trackingId: 'phase3_kitchen_sink', category: 'Kitchen', label: 'Is the kitchen sink working without leaks?', helpText: 'Check under the sink for moisture.', requiresPhotoOnIssue: true, order: 2, active: true }
     ],
     itemSchemaVersion: 2,
     publishedVersion: 1,
@@ -153,13 +179,37 @@ const writes = [
     status: 'active',
     items: [
       { id: 'phase3_smoke_detectors', trackingId: 'phase3_smoke_detectors', category: 'Safety', label: 'Are the smoke detectors secure and undamaged?', helpText: '', requiresPhotoOnIssue: false, order: 1, active: true },
-      { id: 'phase3_kitchen_sink', trackingId: 'phase3_kitchen_sink', category: 'Kitchen', label: 'Is the kitchen sink working without leaks?', helpText: 'Check under the sink for moisture.', requiresPhotoOnIssue: false, order: 2, active: true }
+      { id: 'phase3_kitchen_sink', trackingId: 'phase3_kitchen_sink', category: 'Kitchen', label: 'Is the kitchen sink working without leaks?', helpText: 'Check under the sink for moisture.', requiresPhotoOnIssue: true, order: 2, active: true }
     ],
     itemSchemaVersion: 2,
     versionNumber: 1,
     version: 1,
     publishedAt: now,
     createdAt: now
+  }],
+  ['eocTemplateAssignments/asg_test_house_shift_1_house', {
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    eocType: 'house',
+    defaultTemplateId: 'phase3_house_template',
+    defaultTemplateName: 'Phase 3 Test House EOC',
+    defaultTemplateVersion: 1,
+    defaultTemplateVersionId: 'phase3_house_template__v1',
+    version: 1,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['eocTemplateAssignments/asg_test_house_shift_2_house', {
+    locationId: 'test_house',
+    shiftId: 'shift_2',
+    eocType: 'house',
+    defaultTemplateId: 'phase3_house_template',
+    defaultTemplateName: 'Phase 3 Test House EOC',
+    defaultTemplateVersion: 1,
+    defaultTemplateVersionId: 'phase3_house_template__v1',
+    version: 1,
+    createdAt: now,
+    updatedAt: now
   }],
   ['eocTasks/phase3_house_task', {
     taskType: 'house',
@@ -171,6 +221,26 @@ const writes = [
     status: 'pending',
     eligibleUserIds: ['phase3_bht'],
     assigneeUserId: 'phase3_bht',
+    templateScope: 'otc_shared',
+    templateId: 'phase3_house_template',
+    templateName: 'Phase 3 Test House EOC',
+    templateVersion: 1,
+    templateVersionId: 'phase3_house_template__v1',
+    version: 1,
+    dueAt: now,
+    createdAt: now,
+    updatedAt: now
+  }],
+  ['eocTasks/phase3_house_task_shift2', {
+    taskType: 'house',
+    eocType: 'house',
+    locationId: 'test_house',
+    shiftId: 'shift_2',
+    dueDate: dueDateShift2,
+    cycleKey: `phase3_house_shift2_${dueDateShift2}`,
+    status: 'pending',
+    eligibleUserIds: ['phase3_same_house_bht'],
+    assigneeUserId: 'phase3_same_house_bht',
     templateScope: 'otc_shared',
     templateId: 'phase3_house_template',
     templateName: 'Phase 3 Test House EOC',
@@ -243,4 +313,4 @@ const batch = db.batch()
 writes.forEach(([path, data]) => batch.set(db.doc(path), data))
 await batch.commit()
 
-console.log(JSON.stringify({ projectId: PROJECT_ID, dueDate, seededDocuments: writes.length }))
+console.log(JSON.stringify({ projectId: PROJECT_ID, dueDate, dueDateShift2, seededDocuments: writes.length }))

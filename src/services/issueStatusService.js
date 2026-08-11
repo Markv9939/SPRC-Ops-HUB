@@ -1,9 +1,11 @@
-import { collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore'
+import { collection, doc, runTransaction, serverTimestamp, Timestamp } from 'firebase/firestore'
 import { db } from '../firebase'
 import { assertExpectedVersion, getVersionNumber } from './versioning'
 import { fanOutIssueAlerts, writeAuditLog } from './notificationService'
+import { addPatternObservation, buildIssuePatternId, removePatternObservation } from '../utils/issueRecurrence'
 
 const TERMINAL_STATUSES = new Set(['resolved', 'voided'])
+const PHOTO_RETENTION_MS = 90 * 24 * 60 * 60 * 1000
 
 function trim(value) {
   return String(value || '').trim()
@@ -129,6 +131,23 @@ export async function updateIssueStatus({
       throw new Error(`This issue is already ${normalizedStatus.replace('_', ' ')}.`)
     }
 
+    const recurrenceTrackingId = trim(latest.sourceTrackingId || latest.trackingId)
+    const shouldInvalidateRecurrence = normalizedStatus === 'voided'
+      && latest.source === 'eoc_checklist'
+      && latest.recurrenceEligible !== false
+      && !!recurrenceTrackingId
+      && latest.recurrenceInvalidated !== true
+    const shouldRestoreRecurrence = reopening
+      && currentStatus === 'voided'
+      && latest.source === 'eoc_checklist'
+      && latest.recurrenceInvalidated === true
+      && !!recurrenceTrackingId
+    const patternId = (shouldInvalidateRecurrence || shouldRestoreRecurrence)
+      ? (latest.patternId || buildIssuePatternId(latest.locationId, recurrenceTrackingId))
+      : ''
+    const patternRef = patternId ? doc(db, 'eocIssuePatterns', patternId) : null
+    const patternSnap = patternRef ? await transaction.get(patternRef) : null
+
     const { nextVersion } = assertExpectedVersion({
       expectedVersion: getVersionNumber(expectedIssue || latest),
       currentVersion: getVersionNumber(latest),
@@ -165,10 +184,12 @@ export async function updateIssueStatus({
     }
     if (reopening) {
       updatePayload.closedAt = null
+      updatePayload.photoDeletionDueAt = null
       updatePayload.reopenedAt = serverTimestamp()
       updatePayload.reopenedByUserId = actorUser?.id || null
       updatePayload.reopenedByName = actorUser?.name || null
       updatePayload.reopenNotes = trimmedNote
+      if (shouldRestoreRecurrence) updatePayload.recurrenceInvalidated = false
     }
     if (normalizedStatus === 'in_progress') {
       updatePayload.inProgressNotes = trimmedNote
@@ -182,6 +203,7 @@ export async function updateIssueStatus({
       updatePayload.closedAt = serverTimestamp()
       updatePayload.resolvedByUserId = actorUser?.id || null
       updatePayload.resolvedByName = actorUser?.name || null
+      updatePayload.photoDeletionDueAt = Timestamp.fromMillis(Date.now() + PHOTO_RETENTION_MS)
     }
     if (normalizedStatus === 'voided') {
       updatePayload.voidReason = trimmedNote
@@ -189,10 +211,34 @@ export async function updateIssueStatus({
       updatePayload.closedAt = serverTimestamp()
       updatePayload.voidedByUserId = actorUser?.id || null
       updatePayload.voidedByName = actorUser?.name || null
+      updatePayload.photoDeletionDueAt = Timestamp.fromMillis(Date.now() + PHOTO_RETENTION_MS)
+      if (shouldInvalidateRecurrence) {
+        updatePayload.recurrenceInvalidated = true
+        updatePayload.recurrenceInvalidatedAt = serverTimestamp()
+        updatePayload.recurrenceInvalidatedReason = trimmedNote
+      }
     }
 
     transaction.update(issueRef, updatePayload)
     transaction.set(doc(db, 'eocIssues', issueId, 'activity', activityId), activity)
+    if (patternRef && patternSnap?.exists()) {
+      const patternUpdate = shouldInvalidateRecurrence
+        ? removePatternObservation(patternSnap.data(), issueId)
+        : addPatternObservation(patternSnap.data(), {
+            issueId,
+            observedAtMs: Number(latest.recurrenceObservedAtMs || Date.now())
+          })
+      transaction.set(patternRef, {
+        observations: patternUpdate.observations,
+        recentCount: patternUpdate.recentCount,
+        lifetimeCount: patternUpdate.lifetimeCount,
+        reportedBefore: patternUpdate.reportedBefore,
+        recurringIssue: patternUpdate.recurringIssue,
+        lastIssueId: issueId,
+        updatedAt: serverTimestamp(),
+        version: Number(patternSnap.data()?.version || 0) + 1
+      }, { merge: true })
+    }
     updatedIssue = { id: issueId, ...latest, ...updatePayload, version: nextVersion }
   })
 

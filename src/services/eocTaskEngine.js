@@ -102,11 +102,14 @@ function createTaskRecord(group, taskType, vanId = null, templateMeta = null) {
     task.templateName = templateMeta.templateName || ''
     task.templateVersion = Number(templateMeta.templateVersion || 0) || null
     task.templateVersionId = templateMeta.templateVersionId || null
+    task.templateFallbackUsed = false
   } else {
-    task.templateId = null
-    task.templateName = ''
-    task.templateVersion = null
-    task.templateVersionId = null
+    task.templateId = `standard_fallback_${taskType}`
+    task.templateName = taskType === 'van' ? 'Standard Van fallback' : 'Standard House fallback'
+    task.templateVersion = 1
+    task.templateVersionId = `standard_fallback_${taskType}__v1`
+    task.templateFallbackUsed = true
+    task.templateFallbackLocked = true
   }
 
   if (taskType === 'van') {

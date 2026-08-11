@@ -4,6 +4,8 @@ import { LOCATIONS, VANS } from '../data/eocConstants'
 import { BHT_HOME_ISSUE_TYPES } from '../services/bhtIssueReportService'
 import useScopedIssues from '../hooks/useScopedIssues'
 import { getIssueSourceLabel, getIssueTypeMeta, inferIssueType } from '../utils/issueModel'
+import IssuePhotoPicker from './IssuePhotoPicker'
+import useEocIssueFeatures from '../hooks/useEocIssueFeatures'
 
 function toDate(value) {
   if (!value) return null
@@ -86,8 +88,10 @@ function LocationIssuesBoard({
   })
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [photos, setPhotos] = useState([])
+  const { enabledForLocation } = useEocIssueFeatures()
 
-  const { issues, resolvedIssues } = useScopedIssues({
+  const { issues, resolvedIssues, loadMoreResolved } = useScopedIssues({
     user,
     inEocScope: inIssueScope,
     inIssueScope,
@@ -97,6 +101,7 @@ function LocationIssuesBoard({
   })
 
   const primaryLocation = locationIds[0] || user?.locationId || ''
+  const photosEnabled = enabledForLocation('photos', primaryLocation)
   const locationText = locationIds.length === 1
     ? locationLabel(primaryLocation)
     : locationIds.map(locationLabel).join(', ')
@@ -139,10 +144,12 @@ function LocationIssuesBoard({
         issueType: form.issueType,
         description,
         vanId,
-        assignment
+        assignment,
+        photos
       })
       setReportOpen(false)
       setForm({ issueType: BHT_HOME_ISSUE_TYPES[0].value, description: '', vanId: '' })
+      setPhotos([])
     } catch (err) {
       setError(err?.message || 'Issue report failed.')
     } finally {
@@ -237,6 +244,9 @@ function LocationIssuesBoard({
           {visibleIssues.map(issue => (
             <IssueCard key={issue.id} issue={issue} onOpenIssue={onOpenIssue} />
           ))}
+          {tab === 'resolved' && resolvedIssues.length >= 50 && (
+            <button type="button" className="location-issues-load-more" onClick={loadMoreResolved}>Load more history</button>
+          )}
         </div>
       )}
 
@@ -279,6 +289,7 @@ function LocationIssuesBoard({
                 placeholder="Include any details staff or supervisors should know."
               />
               <div className="location-report-helper">Provide all relevant details so the issue can be understood and addressed.</div>
+              {photosEnabled && <IssuePhotoPicker value={photos} onChange={setPhotos} disabled={submitting} />}
               {isOffline && <div className="location-report-warning">Offline: this report will send when internet returns.</div>}
               {error && <div className="location-report-error">{error}</div>}
               <div className="location-report-actions">

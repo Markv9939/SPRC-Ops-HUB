@@ -55,6 +55,8 @@ test('EOC issues retain checklist and template context', () => {
   assert.equal(issue.taskId, 'task-1')
   assert.equal(issue.templateVersion, 3)
   assert.equal(issue.trackingId, 'van_tires')
+  assert.equal(issue.sourceTrackingId, 'van_tires')
+  assert.equal(issue.recurrenceEligible, true)
 })
 
 test('legacy issues infer a usable issue type', () => {

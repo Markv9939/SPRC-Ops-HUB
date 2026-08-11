@@ -1,6 +1,8 @@
 import { initializeApp } from 'firebase/app'
 import { connectFirestoreEmulator, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
 import { connectAuthEmulator, getAuth } from 'firebase/auth'
+import { connectStorageEmulator, getStorage } from 'firebase/storage'
+import { connectFunctionsEmulator, getFunctions } from 'firebase/functions'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -19,11 +21,15 @@ const db = initializeFirestore(app, {
   })
 })
 const auth = getAuth(app)
+const storage = getStorage(app)
+const functions = getFunctions(app, 'us-central1')
 
 if (import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true' && !globalThis.__SPRC_FIREBASE_EMULATORS_CONNECTED__) {
   connectFirestoreEmulator(db, '127.0.0.1', 8080)
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })
+  connectStorageEmulator(storage, '127.0.0.1', 9199)
+  connectFunctionsEmulator(functions, '127.0.0.1', 5001)
   globalThis.__SPRC_FIREBASE_EMULATORS_CONNECTED__ = true
 }
 
-export { db, auth }
+export { db, auth, storage, functions }
