@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "test:rules": "firebase emulators:exec --only firestore,auth \"node tests/firestore.rules.test.js\"",
     "test:storage-rules": "firebase emulators:exec --project demo-sprc-storage-rules --only firestore,auth,storage \"node tests/storage.rules.test.js\"",
+    "test:storage:production-smoke": "node scripts/verifyProductionStorageSmoke.js",
     "test:debrief": "node --test tests/shiftDebriefModel.test.js tests/shiftDebriefTimingSimulator.test.js",
     "test:debrief:emulator": "firebase emulators:exec --only firestore \"node --test tests/shiftDebriefTransactions.emulator.test.js\"",
     "test:debrief-reset": "node --test tests/resetShiftDebriefBetaData.test.js",
