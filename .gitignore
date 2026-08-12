@@ -27,6 +27,7 @@ playwright-report
 
 # Firebase deploy cache
 .firebase
+.release-backups/
 .claude/worktrees/
 .codex-remote-attachments/
 
