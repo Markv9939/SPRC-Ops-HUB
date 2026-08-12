@@ -20,6 +20,11 @@ export default defineConfig({
       metadata: { pin: '111111' }
     },
     {
+      name: 'tablet',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 768, height: 1024 } },
+      metadata: { pin: '555555' }
+    },
+    {
       name: 'desktop',
       use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 720 } },
       metadata: { pin: '444444' }

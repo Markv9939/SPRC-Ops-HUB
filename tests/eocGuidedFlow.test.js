@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  findFirstIncompleteEocAreaIndex,
   findFirstIncompleteEocItemIndex,
+  findNextIncompleteEocAreaIndex,
+  getEocAreaProgress,
+  getEocAreaShortLabel,
   getEocCategoryProgress,
   getEocChecklistProgress,
+  isEocAreaComplete,
   isEocIssueDetailMissing
 } from '../src/utils/eocGuidedFlow.js'
 
@@ -60,4 +65,65 @@ test('required-photo items accept a ready photo or a documented safety exception
   assert.equal(isEocIssueDetailMissing(item, answers, { lock: { description: 'Lock is damaged.' } }), true)
   assert.equal(isEocIssueDetailMissing(item, answers, { lock: { description: 'Lock is damaged.', photos: [{ state: 'ready' }] } }), false)
   assert.equal(isEocIssueDetailMissing(item, answers, { lock: { description: 'Lock is damaged.', unableToTakePhoto: true, unableReason: 'Client information cannot be moved safely.' } }), false)
+})
+
+test('area labels stay compact for house and van categories', () => {
+  assert.equal(getEocAreaShortLabel('Front of house'), 'Front')
+  assert.equal(getEocAreaShortLabel('Laundry room/ Washer and Dryers / Linen Closets'), 'Laundry')
+  assert.equal(getEocAreaShortLabel('Back of house/Outside'), 'Back/Outside')
+  assert.equal(getEocAreaShortLabel('General Areas/ Bedrooms'), 'General')
+  assert.equal(getEocAreaShortLabel('Gym/Garage'), 'Gym/Garage')
+  assert.equal(getEocAreaShortLabel('Engine Off Criteria'), 'Engine Off Cri')
+})
+
+test('area progress groups items in template order and tracks ready flagged items', () => {
+  const areas = getEocAreaProgress(
+    items,
+    { lock: 'ok', light: 'repair', sink: 'ok' },
+    { light: { description: 'Bulb does not illuminate.' } }
+  )
+
+  assert.deepEqual(areas, [
+    {
+      category: 'Safety',
+      shortLabel: 'Safety',
+      firstItemIndex: 0,
+      lastItemIndex: 1,
+      itemIds: ['lock', 'light'],
+      totalCount: 2,
+      readyCount: 2,
+      attentionCount: 1,
+      percent: 100,
+      isComplete: true
+    },
+    {
+      category: 'Kitchen',
+      shortLabel: 'Kitchen',
+      firstItemIndex: 2,
+      lastItemIndex: 2,
+      itemIds: ['sink'],
+      totalCount: 1,
+      readyCount: 1,
+      attentionCount: 0,
+      percent: 100,
+      isComplete: true
+    }
+  ])
+  assert.equal(isEocAreaComplete(areas[0]), true)
+})
+
+test('area routing finds and wraps to incomplete areas', () => {
+  const routeItems = [
+    { id: 'a', category: 'First' },
+    { id: 'b', category: 'Second' },
+    { id: 'c', category: 'Third' }
+  ]
+  const answers = { a: 'ok', b: 'repair' }
+  const details = { b: { description: '' } }
+  const areas = getEocAreaProgress(routeItems, answers, details)
+
+  assert.equal(findFirstIncompleteEocAreaIndex(routeItems, answers, details), 1)
+  assert.equal(findNextIncompleteEocAreaIndex(areas, 0), 1)
+  assert.equal(findNextIncompleteEocAreaIndex(areas, 1), 2)
+  assert.equal(findNextIncompleteEocAreaIndex(areas, 2), 1)
 })

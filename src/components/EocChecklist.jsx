@@ -32,9 +32,11 @@ import { getMatchingChecklistIssues } from '../services/issueRecurrenceService'
 import IssuePhotoPicker from './IssuePhotoPicker'
 import { normalizeEocTemplateItems } from '../utils/eocTemplateModel'
 import {
-  findFirstIncompleteEocItemIndex,
-  getEocCategoryProgress,
+  findFirstIncompleteEocAreaIndex,
+  findNextIncompleteEocAreaIndex,
+  getEocAreaProgress,
   getEocChecklistProgress,
+  isEocAreaComplete,
   isEocIssueDetailMissing
 } from '../utils/eocGuidedFlow'
 
@@ -74,10 +76,11 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
   const [draftReady, setDraftReady] = useState(false)
   const [draftStatus, setDraftStatus] = useState('idle')
   const [draftRestoredNotice, setDraftRestoredNotice] = useState('')
-  const [currentItemIndex, setCurrentItemIndex] = useState(0)
+  const [selectedAreaIndex, setSelectedAreaIndex] = useState(0)
   const [showReview, setShowReview] = useState(false)
-  const [matchingIssues, setMatchingIssues] = useState([])
-  const [matchingIssuesLoading, setMatchingIssuesLoading] = useState(false)
+  const [matchingIssuesByItem, setMatchingIssuesByItem] = useState({})
+  const [matchingIssuesLoadingByItem, setMatchingIssuesLoadingByItem] = useState({})
+  const [mobileRailHeight, setMobileRailHeight] = useState(0)
   const { enabledForLocation } = useEocIssueFeatures()
 
   const normalizedUserId = String(user?.id || '').trim()
@@ -86,8 +89,12 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
   const isDraftLoadedRef = useRef(false)
   const initialDraftSnapshotRef = useRef(false)
   const guidedPositionReadyRef = useRef(false)
-  const issueDetailInputRef = useRef(null)
+  const issueDetailInputRefs = useRef(new Map())
   const odometerInputRef = useRef(null)
+  const railRef = useRef(null)
+  const panelTopRef = useRef(null)
+  const touchStartRef = useRef(null)
+  const matchingIssueRequestsRef = useRef(new Set())
 
   useEffect(() => {
     async function loadTask() {
@@ -334,41 +341,69 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
     () => getEocChecklistProgress(validationTemplate, answers, repairDetails),
     [validationTemplate, answers, repairDetails]
   )
-  const categoryProgress = useMemo(
-    () => getEocCategoryProgress(validationTemplate, answers, repairDetails),
+  const areaProgress = useMemo(
+    () => getEocAreaProgress(validationTemplate, answers, repairDetails),
     [validationTemplate, answers, repairDetails]
   )
-  const currentItem = activeTemplate[currentItemIndex] || activeTemplate[0] || null
-  const currentCategoryItems = currentItem
-    ? activeTemplate.filter(item => item.category === currentItem.category)
-    : []
-  const currentCategoryPosition = currentItem
-    ? currentCategoryItems.findIndex(item => item.id === currentItem.id) + 1
-    : 0
+  const currentArea = areaProgress[selectedAreaIndex] || areaProgress[0] || null
+  const currentAreaItems = useMemo(() => (
+    currentArea
+      ? activeTemplate.filter(item => item.category === currentArea.category)
+      : []
+  ), [activeTemplate, currentArea])
   const recurrenceEnabled = enabledForLocation('recurrence', task?.locationId)
 
   useEffect(() => {
+    if (!recurrenceEnabled || isOffline || !task?.locationId) return undefined
+
     let cancelled = false
-    const trackingId = currentItem?.trackingId || currentItem?.id
-    if (!recurrenceEnabled || isOffline || !task?.locationId || !trackingId || answers[currentItem?.id] !== 'repair') {
-      setMatchingIssues([])
-      setMatchingIssuesLoading(false)
-      return undefined
-    }
-    setMatchingIssuesLoading(true)
-    getMatchingChecklistIssues({ locationId: task.locationId, trackingId })
-      .then(rows => {
-        if (!cancelled) setMatchingIssues(rows)
+    currentAreaItems
+      .filter(item => answers[item.id] === 'repair')
+      .forEach((item) => {
+        const trackingId = item.trackingId || item.id
+        const requestKey = `${task.locationId}:${trackingId}`
+        if (!trackingId || matchingIssueRequestsRef.current.has(requestKey)) return
+
+        matchingIssueRequestsRef.current.add(requestKey)
+        setMatchingIssuesLoadingByItem(prev => ({ ...prev, [item.id]: true }))
+        getMatchingChecklistIssues({ locationId: task.locationId, trackingId })
+          .then(rows => {
+            if (!cancelled) setMatchingIssuesByItem(prev => ({ ...prev, [item.id]: rows }))
+          })
+          .catch(lookupError => {
+            console.warn('Matching issue lookup failed:', lookupError)
+            if (!cancelled) setMatchingIssuesByItem(prev => ({ ...prev, [item.id]: [] }))
+          })
+          .finally(() => {
+            if (!cancelled) setMatchingIssuesLoadingByItem(prev => ({ ...prev, [item.id]: false }))
+          })
       })
-      .catch(error => {
-        console.warn('Matching issue lookup failed:', error)
-        if (!cancelled) setMatchingIssues([])
-      })
-      .finally(() => {
-        if (!cancelled) setMatchingIssuesLoading(false)
-      })
+
     return () => { cancelled = true }
-  }, [answers, currentItem?.id, currentItem?.trackingId, isOffline, recurrenceEnabled, task?.locationId])
+  }, [answers, currentAreaItems, isOffline, recurrenceEnabled, task?.locationId])
+
+  useEffect(() => {
+    if (selectedAreaIndex < areaProgress.length) return
+    setSelectedAreaIndex(Math.max(areaProgress.length - 1, 0))
+  }, [areaProgress.length, selectedAreaIndex])
+
+  useEffect(() => {
+    const rail = railRef.current
+    if (!rail || typeof window === 'undefined') return undefined
+
+    const measureRail = () => {
+      setMobileRailHeight(window.innerWidth < 900 ? Math.ceil(rail.getBoundingClientRect().height) : 0)
+    }
+    measureRail()
+    window.addEventListener('resize', measureRail)
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measureRail) : null
+    observer?.observe(rail)
+
+    return () => {
+      window.removeEventListener('resize', measureRail)
+      observer?.disconnect()
+    }
+  }, [areaProgress.length, draftRestoredNotice, draftStatus, eocType, task?.id])
 
   const isRepairMissing = (itemId) => {
     const item = validationTemplate.find(candidate => candidate.id === itemId) || itemId
@@ -405,14 +440,27 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
     return null
   }
 
-  const openChecklistItem = (itemId, focusIssueDetails = false) => {
-    const nextIndex = activeTemplate.findIndex(item => item.id === itemId)
-    if (nextIndex < 0) return
-    setCurrentItemIndex(nextIndex)
+  const scrollPanelToTop = (behavior = 'smooth') => {
+    window.setTimeout(() => panelTopRef.current?.scrollIntoView({ behavior, block: 'start' }), 40)
+  }
+
+  const openArea = (areaIndex, { scroll = true } = {}) => {
+    if (areaProgress.length === 0) return
+    const nextIndex = (areaIndex + areaProgress.length) % areaProgress.length
+    setSelectedAreaIndex(nextIndex)
     setShowReview(false)
     setError('')
+    if (scroll) scrollPanelToTop()
+  }
+
+  const openChecklistItem = (itemId, focusIssueDetails = false) => {
+    const item = activeTemplate.find(candidate => candidate.id === itemId)
+    if (!item) return
+    const areaIndex = areaProgress.findIndex(area => area.category === item.category)
+    if (areaIndex < 0) return
+    openArea(areaIndex)
     if (focusIssueDetails) {
-      window.setTimeout(() => issueDetailInputRef.current?.focus(), 100)
+      window.setTimeout(() => issueDetailInputRefs.current.get(itemId)?.focus(), 100)
     }
   }
 
@@ -426,8 +474,11 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
       initialDraftSnapshotRef.current = false
       guidedPositionReadyRef.current = false
       setDraftStatus('idle')
-      setCurrentItemIndex(0)
+      setSelectedAreaIndex(0)
       setShowReview(false)
+      setMatchingIssuesByItem({})
+      setMatchingIssuesLoadingByItem({})
+      matchingIssueRequestsRef.current.clear()
 
       try {
         const localDraft = await getOfflineDraft(getEocDraftId(task.id, normalizedUserId)).catch(() => null)
@@ -462,15 +513,15 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
 
   useEffect(() => {
     if (!draftReady || activeTemplate.length === 0 || guidedPositionReadyRef.current) return
-    const firstIncompleteIndex = findFirstIncompleteEocItemIndex(validationTemplate, answers, repairDetails)
+    const firstIncompleteIndex = findFirstIncompleteEocAreaIndex(validationTemplate, answers, repairDetails)
     guidedPositionReadyRef.current = true
     if (firstIncompleteIndex < 0) {
-      setCurrentItemIndex(Math.max(activeTemplate.length - 1, 0))
+      setSelectedAreaIndex(Math.max(areaProgress.length - 1, 0))
       setShowReview(true)
       return
     }
-    setCurrentItemIndex(firstIncompleteIndex)
-  }, [activeTemplate, answers, draftReady, repairDetails, validationTemplate])
+    setSelectedAreaIndex(firstIncompleteIndex)
+  }, [activeTemplate, answers, areaProgress.length, draftReady, repairDetails, validationTemplate])
 
   useEffect(() => {
     if (!draftRestoredNotice) return undefined
@@ -557,50 +608,18 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
     }
   }, [answers, draftReady, eocType, isOffline, normalizedUserId, odometerReading, repairDetails, submitting, task?.id, task?.locationId, task?.shiftId, task?.templateScope, task?.templateId, task?.templateName, task?.templateVersion, task?.templateVersionId, task?.vanId, user?.name, vehicleId, vehicleName, vinNumber])
 
-  const moveForwardFrom = (itemIndex, nextAnswers = answers, nextRepairDetails = repairDetails) => {
-    const item = activeTemplate[itemIndex]
-    if (!item || !nextAnswers[item.id]) {
-      setError('Choose Looks good or Needs attention before continuing.')
-      return
-    }
-    const validationItem = validationTemplate.find(candidate => candidate.id === item.id) || item
-    if (isEocIssueDetailMissing(validationItem, nextAnswers, nextRepairDetails)) {
-      setError(validationItem.requiresPhotoOnIssue ? 'Add a photo or explain why one cannot be taken safely.' : 'Describe the issue before continuing.')
-      window.setTimeout(() => issueDetailInputRef.current?.focus(), 80)
-      return
-    }
-
-    if (itemIndex < activeTemplate.length - 1) {
-      setCurrentItemIndex(itemIndex + 1)
-      setError('')
-      return
-    }
-
-    const firstIncompleteIndex = findFirstIncompleteEocItemIndex(validationTemplate, nextAnswers, nextRepairDetails)
-    if (firstIncompleteIndex >= 0) {
-      setCurrentItemIndex(firstIncompleteIndex)
-      setError('Complete the remaining checklist item before review.')
-      return
-    }
-
-    setError('')
-    setShowReview(true)
-  }
-
   const setAnswer = (itemId, value) => {
     setError('')
-    const nextAnswers = { ...answers, [itemId]: value }
-    let nextRepairDetails = repairDetails
-    setAnswers(nextAnswers)
+    setAnswers(prev => ({ ...prev, [itemId]: value }))
 
     if (value === 'ok') {
-      nextRepairDetails = { ...repairDetails }
-      delete nextRepairDetails[itemId]
-      setRepairDetails(nextRepairDetails)
-      const itemIndex = activeTemplate.findIndex(item => item.id === itemId)
-      window.setTimeout(() => moveForwardFrom(itemIndex, nextAnswers, nextRepairDetails), 140)
+      setRepairDetails(prev => {
+        const next = { ...prev }
+        delete next[itemId]
+        return next
+      })
     } else {
-      window.setTimeout(() => issueDetailInputRef.current?.focus(), 80)
+      window.setTimeout(() => issueDetailInputRefs.current.get(itemId)?.focus(), 80)
     }
   }
 
@@ -627,6 +646,87 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
         ...(unableToTakePhoto ? { photos: [] } : {})
       }
     }))
+  }
+
+  const setUnablePhotoReason = (itemId, unableReason) => {
+    setError('')
+    setRepairDetails(prev => ({
+      ...prev,
+      [itemId]: { ...(prev[itemId] || {}), unableReason }
+    }))
+  }
+
+  const stepArea = (direction) => {
+    if (areaProgress.length < 2) return
+    openArea(selectedAreaIndex + direction)
+  }
+
+  const validateCurrentArea = () => {
+    if (!currentArea) return false
+
+    for (const itemId of currentArea.itemIds) {
+      if (!answers[itemId]) {
+        setError('Answer the remaining items in this area first.')
+        window.setTimeout(() => document.getElementById(`eoc-card-${itemId}`)?.focus(), 60)
+        return false
+      }
+
+      const validationItem = validationTemplate.find(item => item.id === itemId) || itemId
+      if (isEocIssueDetailMissing(validationItem, answers, repairDetails)) {
+        setError(validationItem?.requiresPhotoOnIssue
+          ? 'Add the required issue details and photo, or explain why a photo cannot be taken safely.'
+          : 'Describe the issue on the flagged item in this area.')
+        window.setTimeout(() => issueDetailInputRefs.current.get(itemId)?.focus(), 80)
+        return false
+      }
+    }
+
+    return true
+  }
+
+  const handleAreaFooter = () => {
+    if (!validateCurrentArea()) return
+    if (checklistProgress.remainingCount === 0) {
+      setError('')
+      setShowReview(true)
+      scrollPanelToTop()
+      return
+    }
+
+    const nextAreaIndex = findNextIncompleteEocAreaIndex(areaProgress, selectedAreaIndex)
+    if (nextAreaIndex >= 0) openArea(nextAreaIndex)
+  }
+
+  const handleAreaKeyDown = (event) => {
+    const targetTag = String(event.target?.tagName || '').toLowerCase()
+    const isEditing = targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || event.target?.isContentEditable
+    if (isEditing) return
+
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      stepArea(-1)
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      stepArea(1)
+    }
+  }
+
+  const handleTouchStart = (event) => {
+    const touch = event.touches?.[0]
+    if (touch) touchStartRef.current = { x: touch.clientX, y: touch.clientY }
+  }
+
+  const handleTouchEnd = (event) => {
+    const start = touchStartRef.current
+    const touch = event.changedTouches?.[0]
+    touchStartRef.current = null
+    if (!start || !touch || showReview) return
+
+    const dx = touch.clientX - start.x
+    const dy = touch.clientY - start.y
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.6) return
+    stepArea(dx < 0 ? 1 : -1)
   }
 
   const allReady = checklistProgress.remainingCount === 0
@@ -659,12 +759,18 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
       return
     }
 
+    if (draftTimerRef.current) {
+      window.clearTimeout(draftTimerRef.current)
+      draftTimerRef.current = null
+    }
+
     if (isOffline) {
       setSubmitting(true)
       try {
         const payload = buildSubmissionPayload()
         await saveOfflineDraft(getEocDraftId(task.id, normalizedUserId), 'eoc', payload)
         await queueEocSubmission(payload)
+        isDraftLoadedRef.current = false
         notifySuccess('EOC saved on this device. It will sync when internet returns.')
         onComplete()
       } catch (err) {
@@ -710,6 +816,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
           alert('The EOC was submitted, but this device could not retain a failed photo upload. Do not clear browser data and notify a supervisor.')
         }
       }
+      isDraftLoadedRef.current = false
       onComplete()
     } catch (err) {
       console.error('Error submitting EOC:', err)
@@ -737,12 +844,6 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
     if (!inTextInput && key === '2') {
       event.preventDefault()
       setAnswer(item.id, 'repair')
-      return
-    }
-
-    if (!inTextInput && key === 'Enter') {
-      event.preventDefault()
-      moveForwardFrom(currentItemIndex)
     }
   }
 
@@ -781,32 +882,24 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
   const totalItems = checklistProgress.totalCount
   const answeredCount = checklistProgress.readyCount
   const progressPercent = checklistProgress.percent
+  const areasRemaining = areaProgress.filter(area => !isEocAreaComplete(area)).length
+  const previousArea = areaProgress.length > 0
+    ? areaProgress[(selectedAreaIndex - 1 + areaProgress.length) % areaProgress.length]
+    : null
+  const nextArea = areaProgress.length > 0
+    ? areaProgress[(selectedAreaIndex + 1) % areaProgress.length]
+    : null
+  const nextIncompleteAreaIndex = findNextIncompleteEocAreaIndex(areaProgress, selectedAreaIndex)
+  const nextIncompleteArea = nextIncompleteAreaIndex >= 0 ? areaProgress[nextIncompleteAreaIndex] : null
+  const currentAreaComplete = isEocAreaComplete(currentArea)
+  const footerLabel = !currentAreaComplete
+    ? 'Finish this area to continue'
+    : allReady
+      ? 'Review EOC'
+      : `Next area: ${nextIncompleteArea?.shortLabel || 'Continue'}`
 
   return (
-    <div className="eoc-guided-page">
-      <header className="eoc-guided-header">
-        <div>
-          <h2>{eocType === 'van' ? 'Van EOC' : 'House EOC'}</h2>
-          <p>{locationLabel} | Due {formatDueLabel(task)}</p>
-        </div>
-        <div className="eoc-draft-state" data-state={draftStatus === 'error' ? 'error' : 'ready'}>
-          {draftRestoredNotice || draftStatusText}
-        </div>
-      </header>
-
-      <div className="eoc-guided-progress" aria-label={`${answeredCount} of ${totalItems} checklist items complete`}>
-        <div className="eoc-progress-header">
-          <span>{answeredCount} of {totalItems} complete</span>
-          <span>{progressPercent}%</span>
-        </div>
-        <div className="progress-bar-container">
-          <div
-            className={`progress-bar-fill ${progressPercent < 100 ? 'progress-bar-fill-warning' : ''}`}
-            style={{ width: `${progressPercent}%` }}
-          />
-        </div>
-      </div>
-
+    <div className="eoc-guided-page eoc-area-rail-page">
       {eocType === 'van' ? (
         <section className="eoc-vehicle-strip" aria-label="Vehicle information">
           <div className="eoc-vehicle-field">
@@ -836,216 +929,277 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
             <p className="eoc-vehicle-warning">Vehicle details are incomplete. Ask a supervisor to update them.</p>
           )}
         </section>
-      ) : (
-        <div className="eoc-guided-meta">
-          <span>House: <strong>{locationLabel}</strong></span>
-          <span>Completed by: <strong>{user?.name || 'Unknown'}</strong></span>
-        </div>
-      )}
-
-      {error && (
-        <div className="eoc-guided-error" role="alert">{error}</div>
-      )}
-
-      <nav className="eoc-section-nav" aria-label="Checklist sections">
-        {categoryProgress.map((category) => {
-          const isCurrent = !showReview && currentItem?.category === category.category
-          const isComplete = category.readyCount === category.totalCount
-          return (
-            <button
-              key={category.category}
-              type="button"
-              className={`eoc-section-button${isCurrent ? ' is-current' : ''}${isComplete ? ' is-complete' : ''}`}
-              onClick={() => {
-                setCurrentItemIndex(category.firstItemIndex)
-                setShowReview(false)
-                setError('')
-              }}
-              aria-current={isCurrent ? 'step' : undefined}
-            >
-              <span>{category.category}</span>
-              <small>{category.readyCount}/{category.totalCount}</small>
-            </button>
-          )
-        })}
-      </nav>
-
-      {showReview ? (
-        <main className="eoc-review-panel">
-          <div className="eoc-review-heading">
-            <div className="eoc-review-icon"><ClipboardCheck size={24} /></div>
-            <div><p>Final step</p><h3>Review EOC</h3></div>
-          </div>
-          <div className="eoc-review-summary">
-            <div><strong>{checklistProgress.completeCount}</strong><span>Looks good</span></div>
-            <div className={checklistProgress.attentionCount > 0 ? 'has-attention' : ''}>
-              <strong>{checklistProgress.attentionCount}</strong><span>Needs attention</span>
-            </div>
-          </div>
-          <div className="eoc-review-sections">
-            {categoryProgress.map((category) => (
-              <section key={category.category} className="eoc-review-section">
-                <div className="eoc-review-section-title">
-                  <span>{category.category}</span><span>{category.readyCount}/{category.totalCount}</span>
-                </div>
-                {activeTemplate.filter(item => item.category === category.category).map((item) => (
-                  <div key={item.id} className={`eoc-review-row ${answers[item.id] === 'repair' ? 'needs-attention' : ''}`}>
-                    <div className="eoc-review-status" aria-hidden="true">
-                      {answers[item.id] === 'repair' ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
-                    </div>
-                    <div className="eoc-review-copy">
-                      <strong>{item.label}</strong>
-                      <span>{answers[item.id] === 'repair' ? 'Needs attention' : 'Looks good'}</span>
-                      {answers[item.id] === 'repair' && <p>{repairDetails[item.id]?.description}</p>}
-                    </div>
-                    <button
-                      type="button"
-                      className="eoc-icon-button"
-                      onClick={() => openChecklistItem(item.id, answers[item.id] === 'repair')}
-                      aria-label={`Edit ${item.label}`}
-                      title="Edit item"
-                    >
-                      <Pencil size={17} />
-                    </button>
-                  </div>
-                ))}
-              </section>
-            ))}
-          </div>
-        </main>
-      ) : currentItem ? (
-        <main className="eoc-guided-item" tabIndex={0} onKeyDown={(event) => handleItemKeyDown(event, currentItem)}>
-          <div className="eoc-guided-item-meta">
-            <span>{currentItem.category}</span>
-            <span>Section item {currentCategoryPosition} of {currentCategoryItems.length}</span>
-          </div>
-          <div className="eoc-guided-item-number">Item {currentItemIndex + 1} of {totalItems}</div>
-          <h3>{currentItem.label}</h3>
-          {currentItem.helpText && <p className="eoc-guided-help">{currentItem.helpText}</p>}
-          <div className="eoc-guided-answers">
-            <button
-              type="button"
-              className={`eoc-answer-button is-good${answers[currentItem.id] === 'ok' ? ' is-selected' : ''}`}
-              onClick={() => setAnswer(currentItem.id, 'ok')}
-              aria-pressed={answers[currentItem.id] === 'ok'}
-            >
-              <Check size={22} /><span>Looks good</span>
-            </button>
-            <button
-              type="button"
-              className={`eoc-answer-button is-attention${answers[currentItem.id] === 'repair' ? ' is-selected' : ''}`}
-              onClick={() => setAnswer(currentItem.id, 'repair')}
-              aria-pressed={answers[currentItem.id] === 'repair'}
-            >
-              <AlertTriangle size={21} /><span>Needs attention</span>
-            </button>
-          </div>
-          {answers[currentItem.id] === 'repair' && (
-            <div className="eoc-guided-issue">
-              {recurrenceEnabled && (matchingIssuesLoading || matchingIssues.length > 0) && (
-                <div className="eoc-related-issues">
-                  <div className="eoc-related-heading">
-                    {matchingIssues.length > 0 ? 'Reported before' : 'Checking prior reports...'}
-                  </div>
-                  {matchingIssues.slice(0, 5).map(issue => (
-                    <button type="button" key={issue.id} onClick={() => onOpenIssue?.(issue.id)} disabled={!onOpenIssue}>
-                      <span>{issue.description || issue.label || 'Prior report'}</span>
-                      <strong>{String(issue.status || 'open').replace('_', ' ')}</strong>
-                    </button>
-                  ))}
-                  {matchingIssues.length > 0 && <p>Continue with this EOC observation. Prior reports are shown for context and are not merged automatically.</p>}
-                </div>
-              )}
-              <label htmlFor={`eoc-issue-${currentItem.id}`}>Describe the issue</label>
-              <p>Provide all relevant details that would help someone understand and address the issue.</p>
-              <textarea
-                id={`eoc-issue-${currentItem.id}`}
-                ref={issueDetailInputRef}
-                className={isRepairMissing(currentItem.id) ? 'input-warn' : ''}
-                rows={4}
-                value={repairDetails[currentItem.id]?.description || ''}
-                onChange={(event) => setRepairField(currentItem.id, event.target.value)}
-                placeholder="Describe what you observed and any details that may help."
-              />
-              {photosEnabled && (
-                <>
-                  <IssuePhotoPicker
-                    value={repairDetails[currentItem.id]?.photos || []}
-                    onChange={photos => setRepairPhotos(currentItem.id, photos)}
-                    disabled={submitting || repairDetails[currentItem.id]?.unableToTakePhoto === true}
-                  />
-                  {currentItem.requiresPhotoOnIssue && (
-                    <div className="eoc-photo-exception">
-                      <label>
-                        <input type="checkbox" checked={repairDetails[currentItem.id]?.unableToTakePhoto === true} onChange={event => setUnablePhoto(currentItem.id, event.target.checked)} />
-                        Unable to safely take a photo
-                      </label>
-                      {repairDetails[currentItem.id]?.unableToTakePhoto === true && (
-                        <textarea
-                          rows={2}
-                          value={repairDetails[currentItem.id]?.unableReason || ''}
-                          onChange={event => setRepairDetails(prev => ({ ...prev, [currentItem.id]: { ...(prev[currentItem.id] || {}), unableReason: event.target.value } }))}
-                          placeholder="Explain why a photo cannot be taken safely."
-                        />
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-          <div className="eoc-item-navigation">
-            <button
-              type="button"
-              className="eoc-secondary-action"
-              onClick={() => {
-                setCurrentItemIndex(index => Math.max(index - 1, 0))
-                setError('')
-              }}
-              disabled={currentItemIndex === 0}
-            >
-              <ArrowLeft size={18} /> Previous
-            </button>
-            <button
-              type="button"
-              className="eoc-primary-action"
-              onClick={() => moveForwardFrom(currentItemIndex)}
-              disabled={!answers[currentItem.id] || isRepairMissing(currentItem.id)}
-            >
-              {currentItemIndex === totalItems - 1 ? 'Review' : 'Continue'} <ArrowRight size={18} />
-            </button>
-          </div>
-        </main>
       ) : null}
 
-      {isOffline && (
-        <div className="eoc-guided-offline">
-          Offline: submission will stay on this device and sync when internet returns.
-        </div>
-      )}
+      <div className="eoc-area-shell">
+        <aside ref={railRef} className="eoc-area-rail">
+          <header className="eoc-area-rail-header">
+            <div>
+              <h2>{eocType === 'van' ? 'Van EOC' : 'House EOC'}</h2>
+              <p>{locationLabel} | Due {formatDueLabel(task)}</p>
+            </div>
+            <div className="eoc-draft-state" data-state={draftStatus === 'error' ? 'error' : 'ready'}>
+              {draftRestoredNotice || draftStatusText}
+            </div>
+          </header>
 
-      {showReview && (
-        <div className="eoc-sticky-actions eoc-review-actions">
-          <button
-            type="button"
-            className="eoc-secondary-action"
-            onClick={() => {
-              setShowReview(false)
-              setCurrentItemIndex(Math.max(activeTemplate.length - 1, 0))
-            }}
-          >
-            <ArrowLeft size={18} /> Back to checklist
-          </button>
-          <button
-            type="button"
-            className="eoc-primary-action"
-            onClick={handleSubmit}
-            disabled={submitting || !allReady}
-          >
-            <ClipboardCheck size={19} /> {submitting ? 'Submitting...' : 'Submit EOC'}
-          </button>
+          <div className="eoc-area-overall" aria-label={`${answeredCount} of ${totalItems} checklist items complete`}>
+            <div>
+              <span>{answeredCount} of {totalItems} complete</span>
+              <span>{areasRemaining === 0 ? 'All areas done' : `${areasRemaining} ${areasRemaining === 1 ? 'area' : 'areas'} left`}</span>
+            </div>
+            <div className="eoc-area-overall-track" aria-hidden="true">
+              <span style={{ width: `${progressPercent}%` }} />
+            </div>
+          </div>
+
+          <nav className="eoc-area-rail-list" aria-label="Checklist areas">
+            {areaProgress.map((area, areaIndex) => {
+              const isCurrent = !showReview && areaIndex === selectedAreaIndex
+              return (
+                <button
+                  key={area.category}
+                  type="button"
+                  className={`eoc-area-rail-button${isCurrent ? ' is-current' : ''}`}
+                  onClick={() => openArea(areaIndex)}
+                  aria-current={isCurrent ? 'step' : undefined}
+                  aria-label={`${area.shortLabel}, ${area.readyCount} of ${area.totalCount} complete${area.attentionCount > 0 ? ', needs attention' : ''}`}
+                >
+                  <span
+                    className="eoc-area-ring"
+                    style={{
+                      '--eoc-area-progress': `${area.percent}%`,
+                      '--eoc-area-ring-color': area.isComplete ? '#2F7D57' : '#1A4E78'
+                    }}
+                    aria-hidden="true"
+                  >
+                    <span className="eoc-area-ring-inner">
+                      {area.isComplete ? <Check size={16} /> : `${area.readyCount}/${area.totalCount}`}
+                    </span>
+                    {area.attentionCount > 0 && <span className="eoc-area-attention-dot" />}
+                  </span>
+                  <span className="eoc-area-label">{area.shortLabel}</span>
+                </button>
+              )
+            })}
+          </nav>
+        </aside>
+
+        <div className="eoc-area-workspace" style={{ '--eoc-mobile-rail-height': `${mobileRailHeight}px` }}>
+          <div ref={panelTopRef} className="eoc-panel-scroll-anchor" />
+
+          {error && <div className="eoc-guided-error" role="alert">{error}</div>}
+
+          {showReview ? (
+            <main className="eoc-review-panel">
+              <div className="eoc-review-heading">
+                <div className="eoc-review-icon"><ClipboardCheck size={24} /></div>
+                <div><p>Final step</p><h3>Review EOC</h3></div>
+              </div>
+              <div className="eoc-review-summary">
+                <div><strong>{checklistProgress.completeCount}</strong><span>Looks good</span></div>
+                <div className={checklistProgress.attentionCount > 0 ? 'has-attention' : ''}>
+                  <strong>{checklistProgress.attentionCount}</strong><span>Needs attention</span>
+                </div>
+              </div>
+              <div className="eoc-review-sections">
+                {areaProgress.map(area => (
+                  <section key={area.category} className="eoc-review-section">
+                    <div className="eoc-review-section-title">
+                      <span>{area.category}</span><span>{area.readyCount}/{area.totalCount}</span>
+                    </div>
+                    {activeTemplate.filter(item => item.category === area.category).map(item => (
+                      <div key={item.id} className={`eoc-review-row ${answers[item.id] === 'repair' ? 'needs-attention' : ''}`}>
+                        <div className="eoc-review-status" aria-hidden="true">
+                          {answers[item.id] === 'repair' ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
+                        </div>
+                        <div className="eoc-review-copy">
+                          <strong>{item.label}</strong>
+                          <span>{answers[item.id] === 'repair' ? 'Needs attention' : 'Looks good'}</span>
+                          {answers[item.id] === 'repair' && <p>{repairDetails[item.id]?.description}</p>}
+                        </div>
+                        <button
+                          type="button"
+                          className="eoc-icon-button"
+                          onClick={() => openChecklistItem(item.id, answers[item.id] === 'repair')}
+                          aria-label={`Edit ${item.label}`}
+                          title="Edit item"
+                        >
+                          <Pencil size={17} />
+                        </button>
+                      </div>
+                    ))}
+                  </section>
+                ))}
+              </div>
+            </main>
+          ) : currentArea ? (
+            <main
+              className="eoc-area-panel"
+              tabIndex={0}
+              onKeyDown={handleAreaKeyDown}
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
+            >
+              <div className="eoc-area-panel-nav">
+                <div className="eoc-area-panel-nav-row">
+                  <button type="button" onClick={() => stepArea(-1)} disabled={areaProgress.length < 2}>
+                    <ArrowLeft size={16} /><span>{previousArea?.shortLabel || 'Previous'}</span>
+                  </button>
+                  <div>
+                    <h3>{currentArea.category}</h3>
+                    <span className={currentAreaComplete ? 'is-complete' : ''}>{currentArea.readyCount}/{currentArea.totalCount} done</span>
+                  </div>
+                  <button type="button" onClick={() => stepArea(1)} disabled={areaProgress.length < 2}>
+                    <span>{nextArea?.shortLabel || 'Next'}</span><ArrowRight size={16} />
+                  </button>
+                </div>
+                <p>Swipe left or right to change area</p>
+              </div>
+
+              <div className="eoc-area-items">
+                {currentAreaItems.map(item => {
+                  const globalItemIndex = activeTemplate.findIndex(candidate => candidate.id === item.id)
+                  const validationItem = validationTemplate.find(candidate => candidate.id === item.id) || item
+                  const answer = answers[item.id]
+                  const matchingIssues = matchingIssuesByItem[item.id] || []
+                  const matchingIssuesLoading = matchingIssuesLoadingByItem[item.id] === true
+                  return (
+                    <section
+                      id={`eoc-card-${item.id}`}
+                      key={item.id}
+                      className={`eoc-area-item-card${answer === 'ok' ? ' is-good' : ''}${answer === 'repair' ? ' is-attention' : ''}`}
+                      tabIndex={0}
+                      onKeyDown={event => handleItemKeyDown(event, item)}
+                    >
+                      <h4>{globalItemIndex + 1}. {item.label}</h4>
+                      {item.helpText && <p className="eoc-guided-help">{item.helpText}</p>}
+                      <div className="eoc-area-answer-grid">
+                        <button
+                          type="button"
+                          className={`eoc-answer-button is-good${answer === 'ok' ? ' is-selected' : ''}`}
+                          onClick={() => setAnswer(item.id, 'ok')}
+                          aria-pressed={answer === 'ok'}
+                        >
+                          <Check size={20} /><span>Looks good</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`eoc-answer-button is-attention${answer === 'repair' ? ' is-selected' : ''}`}
+                          onClick={() => setAnswer(item.id, 'repair')}
+                          aria-pressed={answer === 'repair'}
+                        >
+                          <AlertTriangle size={19} /><span>Needs attention</span>
+                        </button>
+                      </div>
+
+                      {answer === 'repair' && (
+                        <div className="eoc-guided-issue">
+                          {recurrenceEnabled && (matchingIssuesLoading || matchingIssues.length > 0) && (
+                            <div className="eoc-related-issues">
+                              <div className="eoc-related-heading">
+                                {matchingIssues.length > 0 ? 'Reported before' : 'Checking prior reports...'}
+                              </div>
+                              {matchingIssues.slice(0, 5).map(issue => (
+                                <button type="button" key={issue.id} onClick={() => onOpenIssue?.(issue.id)} disabled={!onOpenIssue}>
+                                  <span>{issue.description || issue.label || 'Prior report'}</span>
+                                  <strong>{String(issue.status || 'open').replace('_', ' ')}</strong>
+                                </button>
+                              ))}
+                              {matchingIssues.length > 0 && <p>Continue with this EOC observation. Prior reports are shown for context and are not merged automatically.</p>}
+                            </div>
+                          )}
+                          <label htmlFor={`eoc-issue-${item.id}`}>Describe the issue</label>
+                          <p>Provide all relevant details that would help someone understand and address the issue.</p>
+                          <textarea
+                            id={`eoc-issue-${item.id}`}
+                            ref={node => {
+                              if (node) issueDetailInputRefs.current.set(item.id, node)
+                              else issueDetailInputRefs.current.delete(item.id)
+                            }}
+                            className={isRepairMissing(item.id) ? 'input-warn' : ''}
+                            rows={3}
+                            value={repairDetails[item.id]?.description || ''}
+                            onChange={event => setRepairField(item.id, event.target.value)}
+                            placeholder="Describe what you observed and any details that may help."
+                          />
+                          {photosEnabled && (
+                            <>
+                              <IssuePhotoPicker
+                                value={repairDetails[item.id]?.photos || []}
+                                onChange={photos => setRepairPhotos(item.id, photos)}
+                                disabled={submitting || repairDetails[item.id]?.unableToTakePhoto === true}
+                              />
+                              {validationItem.requiresPhotoOnIssue && (
+                                <div className="eoc-photo-exception">
+                                  <label>
+                                    <input
+                                      type="checkbox"
+                                      checked={repairDetails[item.id]?.unableToTakePhoto === true}
+                                      onChange={event => setUnablePhoto(item.id, event.target.checked)}
+                                    />
+                                    Unable to safely take a photo
+                                  </label>
+                                  {repairDetails[item.id]?.unableToTakePhoto === true && (
+                                    <textarea
+                                      rows={2}
+                                      value={repairDetails[item.id]?.unableReason || ''}
+                                      onChange={event => setUnablePhotoReason(item.id, event.target.value)}
+                                      placeholder="Explain why a photo cannot be taken safely."
+                                    />
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </section>
+                  )
+                })}
+              </div>
+
+              <button
+                type="button"
+                className={`eoc-area-footer-action${currentAreaComplete ? ' is-ready' : ''}`}
+                onClick={handleAreaFooter}
+              >
+                <span>{footerLabel}</span>{currentAreaComplete && <ArrowRight size={18} />}
+              </button>
+            </main>
+          ) : null}
+
+          {isOffline && (
+            <div className="eoc-guided-offline">
+              Offline: submission will stay on this device and sync when internet returns.
+            </div>
+          )}
+
+          {showReview && (
+            <div className="eoc-sticky-actions eoc-review-actions">
+              <button
+                type="button"
+                className="eoc-secondary-action"
+                onClick={() => {
+                  setShowReview(false)
+                  setError('')
+                  scrollPanelToTop()
+                }}
+              >
+                <ArrowLeft size={18} /> Back to checklist
+              </button>
+              <button
+                type="button"
+                className="eoc-primary-action"
+                onClick={handleSubmit}
+                disabled={submitting || !allReady}
+              >
+                <ClipboardCheck size={19} /> {submitting ? 'Submitting...' : 'Submit EOC'}
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   )
 }

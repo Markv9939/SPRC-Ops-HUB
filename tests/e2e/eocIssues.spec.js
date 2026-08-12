@@ -14,6 +14,33 @@ async function assertNoOverflow(page) {
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width + 1)
 }
 
+async function assertEocResponsiveLayout(page) {
+  await assertNoOverflow(page)
+  const layout = await page.evaluate(() => {
+    const rail = document.querySelector('.eoc-area-rail')?.getBoundingClientRect()
+    const nav = document.querySelector('.eoc-area-panel-nav')?.getBoundingClientRect()
+    const panel = document.querySelector('.eoc-area-panel')?.getBoundingClientRect()
+    const topbar = document.querySelector('.app-topbar')?.getBoundingClientRect()
+    return {
+      width: window.innerWidth,
+      topbarBottom: topbar?.bottom || 0,
+      railTop: rail?.top || 0,
+      railBottom: rail?.bottom || 0,
+      railRight: rail?.right || 0,
+      navTop: nav?.top || 0,
+      panelLeft: panel?.left || 0
+    }
+  })
+
+  expect(layout.railTop).toBeGreaterThanOrEqual(layout.topbarBottom - 2)
+  if (layout.width < 900) {
+    expect(layout.navTop).toBeGreaterThanOrEqual(layout.railBottom - 2)
+  } else {
+    expect(layout.navTop).toBeGreaterThanOrEqual(layout.topbarBottom - 2)
+    expect(layout.panelLeft).toBeGreaterThanOrEqual(layout.railRight)
+  }
+}
+
 async function addSyntheticPhoto(page, buffer, source = 'device') {
   await page.getByRole('button', { name: /Add photo/ }).click()
   const chooserPromise = page.waitForEvent('filechooser')
@@ -32,6 +59,8 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === 'tablet', 'Tablet coverage is handled by the focused EOC area-rail test.')
+
   const consoleErrors = []
   page.on('console', message => {
     if (message.type() === 'error' && !/ERR_INTERNET_DISCONNECTED|network-request-failed/i.test(message.text())) {
@@ -122,19 +151,24 @@ test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', asy
   await page.getByRole('button', { name: /House EOC/ }).first().click()
   await expect(page.getByRole('heading', { name: 'House EOC' })).toBeVisible()
   await expect(page.getByText('Draft ready')).toBeVisible()
-  const guidedItem = page.locator('.eoc-guided-item')
-  await page.getByRole('button', { name: /Kitchen 0\/1/ }).click()
+  await page.getByRole('button', { name: /Kitchen, 0 of 1 complete/ }).click()
   await expect(page.getByRole('heading', { name: 'Is the kitchen sink working without leaks?' })).toBeVisible()
-  await guidedItem.getByRole('button', { name: /Needs attention/ }).click()
+  const kitchenCard = page.locator('#eoc-card-phase3_kitchen_sink')
+  await kitchenCard.getByRole('button', { name: /Needs attention/ }).click()
   await page.getByLabel('Describe the issue').fill(`Sink leak observed during ${testInfo.project.name} test.`)
   await page.getByLabel('Unable to safely take a photo').check()
   await page.getByPlaceholder('Explain why a photo cannot be taken safely.').fill('Synthetic test verifies the required safety exception.')
-  await page.getByRole('button', { name: /Safety 0\/1/ }).click()
-  await guidedItem.getByRole('button', { name: /Looks good/ }).click()
+  await page.getByRole('button', { name: /Safety, 0 of 1 complete/ }).click()
+  const safetyCard = page.locator('#eoc-card-phase3_smoke_detectors')
+  await safetyCard.getByRole('button', { name: /Looks good/ }).click()
   await expect(page.getByLabel(/2 of 2 checklist items complete/)).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Is the kitchen sink working without leaks?' })).toBeVisible()
-  await page.getByRole('button', { name: /^Review/ }).click()
+  await expect(page.getByRole('heading', { name: 'Safety', exact: true })).toBeVisible()
+  await assertEocResponsiveLayout(page)
+  await page.getByRole('button', { name: /^Review EOC/ }).click()
   await expect(page.getByRole('heading', { name: 'Review EOC' })).toBeVisible()
+  await page.getByRole('button', { name: 'Edit Is the kitchen sink working without leaks?' }).click()
+  await expect(page.getByRole('heading', { name: 'Kitchen', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /^Review EOC/ }).click()
   await page.getByRole('button', { name: 'Submit EOC' }).click()
   await expect(page).toHaveURL(/\/home$/)
 
@@ -187,4 +221,62 @@ test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', asy
 
   await assertNoOverflow(page)
   expect(consoleErrors).toEqual([])
+})
+
+test('House and Van EOC area rail works at the project viewport', async ({ page }, testInfo) => {
+  const pin = testInfo.project.metadata.pin
+  const projectName = testInfo.project.name
+  const vanTaskId = projectName === 'desktop'
+    ? 'phase3_van_task_shift2'
+    : projectName === 'tablet'
+      ? 'phase3_van_task_tablet'
+      : 'phase3_van_task'
+
+  await login(page, pin)
+
+  if (projectName === 'tablet') {
+    await page.goto('/eoc/phase3_house_task_tablet')
+    await expect(page.getByRole('heading', { name: 'House EOC' })).toBeVisible()
+    await page.getByRole('button', { name: /Safety, 0 of 1 complete/ }).click()
+    await page.locator('#eoc-card-phase3_smoke_detectors').getByRole('button', { name: /Looks good/ }).click()
+    await page.getByRole('button', { name: /Kitchen, 0 of 1 complete/ }).click()
+    await page.locator('#eoc-card-phase3_kitchen_sink').getByRole('button', { name: /Looks good/ }).click()
+    await assertEocResponsiveLayout(page)
+    await page.getByRole('button', { name: /^Review EOC/ }).click()
+    await expect(page.getByRole('button', { name: 'Submit EOC' })).toBeEnabled()
+  }
+
+  await page.goto(`/eoc/${vanTaskId}`)
+  await expect(page.getByRole('heading', { name: 'Van EOC' })).toBeVisible()
+  await expect(page.locator('.eoc-vehicle-strip')).toContainText('Phase 3 Test Van')
+  await expect(page.locator('.eoc-vehicle-strip')).toContainText('TESTVIN0000000001')
+  await expect(page.getByRole('button', { name: /Engine Off Cri, 0 of 1 complete/ })).toBeVisible()
+  await page.locator('#eoc-card-phase3_van_tires').getByRole('button', { name: /Looks good/ }).click()
+
+  if (projectName === 'desktop') {
+    await page.locator('.eoc-area-panel').press('ArrowRight')
+  } else {
+    await page.locator('.eoc-area-panel').evaluate((panel) => {
+      const start = new Event('touchstart', { bubbles: true })
+      Object.defineProperty(start, 'touches', { value: [{ clientX: 310, clientY: 320 }] })
+      panel.dispatchEvent(start)
+      const end = new Event('touchend', { bubbles: true })
+      Object.defineProperty(end, 'changedTouches', { value: [{ clientX: 120, clientY: 322 }] })
+      panel.dispatchEvent(end)
+    })
+  }
+
+  await expect(page.getByRole('heading', { name: 'Engine On Criteria', exact: true })).toBeVisible()
+  await page.locator('#eoc-card-phase3_van_lights').getByRole('button', { name: /Looks good/ }).click()
+  await assertEocResponsiveLayout(page)
+  await page.getByRole('button', { name: /^Review EOC/ }).click()
+  if (projectName === 'tablet') {
+    await expect(page.getByRole('button', { name: 'Submit EOC' })).toBeEnabled()
+    return
+  }
+  await page.getByRole('button', { name: 'Submit EOC' }).click()
+  await expect(page.getByRole('alert')).toContainText('Enter the odometer reading before submitting.')
+  await page.getByLabel('Odometer reading').fill('45231')
+  await page.getByRole('button', { name: 'Submit EOC' }).click()
+  await expect(page).toHaveURL(/\/home$/)
 })
