@@ -1164,13 +1164,46 @@ test('house-scoped BHT can create and close an OTC transport', async () => {
     updatedAt: new Date()
   }))
 
+  const correctedDepartedAt = new Date(Date.now() - 10 * 60 * 1000)
   await assertSucceeds(updateDoc(transportRef, {
-    status: 'closed',
-    returnedAt: new Date(),
-    closedAt: new Date(),
-    dcPaperworkStatus: 'na',
+    departedAt: correctedDepartedAt,
+    timeCorrections: {
+      departedAt: {
+        originalValue: new Date().toISOString(),
+        correctedValue: correctedDepartedAt.toISOString(),
+        correctedAt: new Date().toISOString(),
+        correctedByUserId: 'bht_house_transport',
+        correctedByName: 'House Transport BHT'
+      }
+    },
     updatedAt: new Date(),
     version: 2
+  }))
+
+  const returnedAt = new Date(Date.now() - 2 * 60 * 1000)
+  await assertSucceeds(updateDoc(transportRef, {
+    status: 'closed',
+    returnedAt,
+    closedAt: new Date(),
+    dcPaperworkStatus: 'na',
+    timeCorrections: {
+      departedAt: {
+        originalValue: new Date().toISOString(),
+        correctedValue: correctedDepartedAt.toISOString(),
+        correctedAt: new Date().toISOString(),
+        correctedByUserId: 'bht_house_transport',
+        correctedByName: 'House Transport BHT'
+      },
+      returnedAt: {
+        originalValue: new Date().toISOString(),
+        correctedValue: returnedAt.toISOString(),
+        correctedAt: new Date().toISOString(),
+        correctedByUserId: 'bht_house_transport',
+        correctedByName: 'House Transport BHT'
+      }
+    },
+    updatedAt: new Date(),
+    version: 3
   }))
 })
 

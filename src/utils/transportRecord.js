@@ -14,6 +14,35 @@ export function toTransportRecordDate(value) {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
+export const TRANSPORT_TIME_FUTURE_TOLERANCE_MS = 2 * 60 * 1000
+
+function padDatePart(value) {
+  return String(value).padStart(2, '0')
+}
+
+export function formatTransportDateTimeInputValue(value) {
+  const date = toTransportRecordDate(value)
+  if (!date) return ''
+  return [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate())
+  ].join('-') + `T${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`
+}
+
+export function parseTransportDateTimeInputValue(value) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+export function transportDatesMatch(a, b) {
+  const first = toTransportRecordDate(a)
+  const second = toTransportRecordDate(b)
+  if (!first || !second) return false
+  return Math.abs(first.getTime() - second.getTime()) < 60000
+}
+
 export function normalizeTransportRecordStatus(status) {
   return String(status || '').trim().toLowerCase()
 }

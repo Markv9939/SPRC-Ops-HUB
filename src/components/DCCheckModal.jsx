@@ -1,10 +1,31 @@
 import { useState } from 'react'
 import AppModal from './AppModal'
 import { MODAL_CANCEL_BUTTON_STYLE } from './modalStyles'
+import {
+  TRANSPORT_TIME_FUTURE_TOLERANCE_MS,
+  formatTransportDateTimeInputValue,
+  parseTransportDateTimeInputValue,
+  toTransportRecordDate
+} from '../utils/transportRecord'
 
-function DCPaperworkModal({ onComplete, onCancel }) {
+function getFinishTimeError(finishAt, departedAt, latestAllowedAt) {
+  if (!finishAt) return 'Enter a finish time.'
+  if (latestAllowedAt && finishAt.getTime() > latestAllowedAt.getTime()) {
+    return 'Finish time cannot be in the future.'
+  }
+  if (departedAt && finishAt.getTime() < departedAt.getTime()) {
+    return 'Finish time cannot be before the start time.'
+  }
+  return ''
+}
+
+function DCPaperworkModal({ onComplete, onCancel, departedAt }) {
   const [selected, setSelected] = useState('')
   const [otherNote, setOtherNote] = useState('')
+  const [showFinishTimeEditor, setShowFinishTimeEditor] = useState(false)
+  const [finishTimeValue, setFinishTimeValue] = useState(() => formatTransportDateTimeInputValue(new Date()))
+  const [finishTimeChanged, setFinishTimeChanged] = useState(false)
+  const [latestAllowedFinishAt] = useState(() => new Date(Date.now() + TRANSPORT_TIME_FUTURE_TOLERANCE_MS))
 
   const options = [
     { value: 'collected', label: 'Collected' },
@@ -12,13 +33,18 @@ function DCPaperworkModal({ onComplete, onCancel }) {
     { value: 'other', label: 'Other' }
   ]
 
-  const isValid = selected && (selected !== 'other' || otherNote.trim())
+  const finishAt = parseTransportDateTimeInputValue(finishTimeValue)
+  const departedDate = toTransportRecordDate(departedAt)
+  const finishTimeError = getFinishTimeError(finishAt, departedDate, latestAllowedFinishAt)
+  const isValid = selected && (selected !== 'other' || otherNote.trim()) && !finishTimeError
 
   const handleContinue = () => {
     if (!isValid) return
     onComplete({
       status: selected,
-      otherNote: selected === 'other' ? otherNote.trim() : ''
+      otherNote: selected === 'other' ? otherNote.trim() : '',
+      returnedAt: finishTimeChanged ? finishAt : new Date(),
+      finishTimeChanged
     })
   }
 
@@ -119,6 +145,70 @@ function DCPaperworkModal({ onComplete, onCancel }) {
           />
         </div>
       )}
+
+      <div style={{
+        borderTop: '1px solid #E1E6EA',
+        paddingTop: '16px',
+        marginTop: selected === 'other' ? '0' : '4px'
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          marginBottom: showFinishTimeEditor ? '10px' : '0'
+        }}>
+          <div>
+            <div style={{ fontSize: '13px', color: '#5C6878', fontWeight: 700 }}>Finish time</div>
+            <div style={{ fontSize: '15px', color: '#1F2C3A', fontWeight: 700 }}>
+              {finishAt ? finishAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '--:--'}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowFinishTimeEditor(value => !value)}
+            style={{
+              padding: '8px 10px',
+              borderRadius: '8px',
+              border: '1px solid #C9D3DD',
+              background: '#FFFFFF',
+              color: '#1F2C3A',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+          >
+            {showFinishTimeEditor ? 'Hide' : 'Change'}
+          </button>
+        </div>
+        {showFinishTimeEditor && (
+          <input
+            type="datetime-local"
+            value={finishTimeValue}
+            max={formatTransportDateTimeInputValue(latestAllowedFinishAt)}
+            onChange={(event) => {
+              setFinishTimeValue(event.target.value)
+              setFinishTimeChanged(true)
+            }}
+            style={{
+              width: '100%',
+              padding: '12px',
+              border: finishTimeError ? '1px solid #C94A3F' : '1px solid #C9D3DD',
+              borderRadius: '8px',
+              fontSize: '15px',
+              outline: 'none',
+              boxSizing: 'border-box',
+              backgroundColor: '#FFFFFF',
+              color: '#1F2C3A'
+            }}
+          />
+        )}
+        {finishTimeError && (
+          <div style={{ color: '#9D362E', fontSize: '12px', fontWeight: 700, marginTop: '6px' }}>
+            {finishTimeError}
+          </div>
+        )}
+      </div>
     </AppModal>
   )
 }

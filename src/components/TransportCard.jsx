@@ -18,10 +18,17 @@ import {
 } from '../services/offlineSyncService'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { cloneRecord, formatConflictFields, isCollaborationConflict, makeConflictError, mergeRecordFields } from '../utils/collaboration'
-import { toTransportRecordDate } from '../utils/transportRecord'
+import {
+  TRANSPORT_TIME_FUTURE_TOLERANCE_MS,
+  formatTransportDateTimeInputValue,
+  parseTransportDateTimeInputValue,
+  toTransportRecordDate,
+  transportDatesMatch
+} from '../utils/transportRecord'
 
 const TRANSPORT_COLLAB_FIELDS = [
   { field: 'status', label: 'status' },
+  { field: 'departedAt', label: 'start time' },
   { field: 'clients', label: 'clients' },
   { field: 'reasons', label: 'reasons' },
   { field: 'stops', label: 'arrivals' },
@@ -34,6 +41,7 @@ const TRANSPORT_COLLAB_FIELDS = [
 function editableTransportRecord(data = {}) {
   return {
     status: String(data.status || 'open').trim().toLowerCase(),
+    departedAt: toTransportRecordDate(data.departedAt)?.toISOString() || '',
     clients: Array.isArray(data.clients) ? data.clients : [],
     reasons: Array.isArray(data.reasons) ? data.reasons : [],
     stops: Array.isArray(data.stops) ? data.stops : [],
@@ -45,7 +53,8 @@ function editableTransportRecord(data = {}) {
 }
 
 function getOfflineTransportUpdates(snapshot = {}) {
-  return {
+  const updates = {
+    departedAt: snapshot.departedAt,
     clients: Array.isArray(snapshot.clients) ? snapshot.clients : [],
     reasons: Array.isArray(snapshot.reasons) ? snapshot.reasons : [],
     stops: Array.isArray(snapshot.stops) ? snapshot.stops : [],
@@ -53,6 +62,42 @@ function getOfflineTransportUpdates(snapshot = {}) {
     notes: typeof snapshot.notes === 'string' ? snapshot.notes : '',
     dcPaperworkStatus: snapshot.dcPaperworkStatus || null,
     dcPaperworkOtherNote: snapshot.dcPaperworkOtherNote || ''
+  }
+  if (snapshot.returnedAt) updates.returnedAt = snapshot.returnedAt
+  if (snapshot.closedAt) updates.closedAt = snapshot.closedAt
+  if (snapshot.timeCorrections && typeof snapshot.timeCorrections === 'object') {
+    updates.timeCorrections = snapshot.timeCorrections
+  }
+  return updates
+}
+
+function getStartTimeError(nextStartAt) {
+  if (!nextStartAt) return 'Enter a start time.'
+  if (nextStartAt.getTime() > Date.now() + TRANSPORT_TIME_FUTURE_TOLERANCE_MS) {
+    return 'Start time cannot be in the future.'
+  }
+  return ''
+}
+
+function getFinishTimeError(finishAt, departedAt) {
+  if (!finishAt) return 'Enter a finish time.'
+  const startAt = toTransportRecordDate(departedAt)
+  if (finishAt.getTime() > Date.now() + TRANSPORT_TIME_FUTURE_TOLERANCE_MS) {
+    return 'Finish time cannot be in the future.'
+  }
+  if (startAt && finishAt.getTime() < startAt.getTime()) {
+    return 'Finish time cannot be before the start time.'
+  }
+  return ''
+}
+
+function buildTimeCorrection(originalValue, correctedValue, user) {
+  return {
+    originalValue: toTransportRecordDate(originalValue)?.toISOString() || '',
+    correctedValue: toTransportRecordDate(correctedValue)?.toISOString() || '',
+    correctedAt: new Date().toISOString(),
+    correctedByUserId: user?.id || '',
+    correctedByName: user?.name || ''
   }
 }
 
@@ -69,6 +114,9 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
   const [dcPaperworkStatus, setDcPaperworkStatus] = useState(null)
   const [dcPaperworkOtherNote, setDcPaperworkOtherNote] = useState('')
   const [showMore, setShowMore] = useState(false)
+  const [showStartTimeEditor, setShowStartTimeEditor] = useState(false)
+  const [startTimeDraft, setStartTimeDraft] = useState('')
+  const [latestAllowedStartInput] = useState(() => formatTransportDateTimeInputValue(new Date(Date.now() + TRANSPORT_TIME_FUTURE_TOLERANCE_MS)))
   const [version, setVersion] = useState(1)
   const [hasLocalDraft, setHasLocalDraft] = useState(false)
   const [transportMeta, setTransportMeta] = useState({})
@@ -119,6 +167,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
       createdByName: d.createdByName || '',
       createdAt: d.createdAt || null,
       updatedAt: d.updatedAt || null,
+      timeCorrections: d.timeCorrections && typeof d.timeCorrections === 'object' ? d.timeCorrections : null,
       localOnly: options.localOnly === true || d.localOnly === true || isLocalTransportId(transportId)
     })
     if (options.setBase !== false) {
@@ -232,6 +281,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     notes,
     dcPaperworkStatus,
     dcPaperworkOtherNote,
+    ...(transportMeta.timeCorrections ? { timeCorrections: transportMeta.timeCorrections } : {}),
     createdAt: transportMeta.createdAt || departedAt || new Date(),
     updatedAt: new Date(),
     localOnly: localOnlyTransport,
@@ -254,6 +304,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     transportMeta.createdByName,
     transportMeta.createdByUserId,
     transportMeta.site,
+    transportMeta.timeCorrections,
     user,
     version
   ])
@@ -561,20 +612,72 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     setShowDCPaperwork(true)
   }
 
+  const handleStartTimeChange = () => {
+    if (blockIfLocked()) return
+    setStartTimeDraft(formatTransportDateTimeInputValue(departedAt || new Date()))
+    setShowStartTimeEditor(true)
+  }
+
+  const handleStartTimeSave = async () => {
+    if (blockIfLocked()) return
+    const nextDepartedAt = parseTransportDateTimeInputValue(startTimeDraft)
+    const error = getStartTimeError(nextDepartedAt)
+    if (error) {
+      alert(error)
+      return
+    }
+    if (transportDatesMatch(departedAt, nextDepartedAt)) {
+      setShowStartTimeEditor(false)
+      return
+    }
+
+    const nextTimeCorrections = {
+      ...(transportMeta.timeCorrections || {}),
+      departedAt: buildTimeCorrection(departedAt, nextDepartedAt, user)
+    }
+    dirtyFieldsRef.current.add('departedAt')
+    dirtyFieldsRef.current.add('timeCorrections')
+    setDepartedAt(nextDepartedAt)
+    setTransportMeta(prev => ({ ...prev, timeCorrections: nextTimeCorrections }))
+    try {
+      await save({
+        departedAt: nextDepartedAt,
+        timeCorrections: nextTimeCorrections
+      })
+      setShowStartTimeEditor(false)
+      notifySuccess('Start time updated')
+    } catch {
+      // Error already handled in save()
+    }
+  }
+
   const handleDCPaperworkComplete = async (result) => {
     if (writeLocked) return
+    const submittedAt = new Date()
+    const returnedAt = toTransportRecordDate(result.returnedAt) || submittedAt
+    const finishTimeError = getFinishTimeError(returnedAt, departedAt)
+    if (finishTimeError) {
+      alert(finishTimeError)
+      return
+    }
     ;['status', 'destinations', 'dcPaperworkStatus', 'dcPaperworkOtherNote'].forEach(field => dirtyFieldsRef.current.add(field))
     setShowDCPaperwork(false)
     setDcPaperworkStatus(result.status)
     setDcPaperworkOtherNote(result.otherNote || '')
-    const closedAt = new Date()
+    const nextTimeCorrections = result.finishTimeChanged
+      ? {
+          ...(transportMeta.timeCorrections || {}),
+          returnedAt: buildTimeCorrection(submittedAt, returnedAt, user)
+        }
+      : transportMeta.timeCorrections
     const closeUpdates = {
       status: 'closed',
-      returnedAt: closedAt.toISOString(),
-      closedAt: closedAt.toISOString(),
+      returnedAt: returnedAt.toISOString(),
+      closedAt: submittedAt.toISOString(),
       destinations,
       dcPaperworkStatus: result.status,
-      dcPaperworkOtherNote: result.otherNote || ''
+      dcPaperworkOtherNote: result.otherNote || '',
+      ...(nextTimeCorrections ? { timeCorrections: nextTimeCorrections } : {})
     }
     const closedTransport = {
       id: transportId,
@@ -584,20 +687,21 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
       createdByName: transportMeta.createdByName || user?.name || '',
       status: 'closed',
       departedAt,
-      returnedAt: closedAt,
-      closedAt,
+      returnedAt,
+      closedAt: submittedAt,
       clients,
       reasons,
       stops,
       destinations,
       notes,
       dcPaperworkStatus: result.status,
-      dcPaperworkOtherNote: result.otherNote || ''
+      dcPaperworkOtherNote: result.otherNote || '',
+      ...(nextTimeCorrections ? { timeCorrections: nextTimeCorrections } : {})
     }
 
     if (localOnlyTransport) {
       setStatus('closed')
-      const snapshot = await buildMergedOfflineSnapshot({ ...closeUpdates, updatedAt: closedAt })
+      const snapshot = await buildMergedOfflineSnapshot({ ...closeUpdates, updatedAt: submittedAt })
       await saveOfflineDraft(getTransportDraftId(transportId), 'transport', {
         snapshot,
         expectedVersion: versionRef.current,
@@ -640,11 +744,12 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
     try {
       await save({
         status: 'closed',
-        returnedAt: serverTimestamp(),
+        returnedAt,
         closedAt: serverTimestamp(),
         destinations,
         dcPaperworkStatus: result.status,
-        dcPaperworkOtherNote: result.otherNote || ''
+        dcPaperworkOtherNote: result.otherNote || '',
+        ...(nextTimeCorrections ? { timeCorrections: nextTimeCorrections } : {})
       })
       setStatus('closed')
       onTransportClosed?.(closedTransport)
@@ -729,6 +834,61 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
             Departed {fmt(departedAt)}
           </div>
         </div>
+      </div>
+
+      <div className="glass-card" style={{ marginBottom: '16px', padding: '12px 14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+          <div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 700 }}>Start time</div>
+            <div style={{ fontSize: '16px', color: 'var(--text-primary)', fontWeight: 800 }}>{fmt(departedAt)}</div>
+          </div>
+          {activeTransport && !writeLocked && (
+            <button
+              type="button"
+              onClick={showStartTimeEditor ? () => setShowStartTimeEditor(false) : handleStartTimeChange}
+              style={{
+                padding: '8px 10px',
+                borderRadius: '8px',
+                border: '1px solid rgba(17,47,82,0.18)',
+                background: '#FFFFFF',
+                color: 'var(--text-primary)',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+            >
+              {showStartTimeEditor ? 'Cancel' : 'Change'}
+            </button>
+          )}
+        </div>
+        {showStartTimeEditor && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', alignItems: 'center', marginTop: '10px' }}>
+            <input
+              type="datetime-local"
+              className="input"
+              value={startTimeDraft}
+              max={latestAllowedStartInput}
+              onChange={(event) => setStartTimeDraft(event.target.value)}
+              style={{ minWidth: 0 }}
+            />
+            <button
+              type="button"
+              onClick={handleStartTimeSave}
+              style={{
+                padding: '11px 13px',
+                borderRadius: '8px',
+                border: 'none',
+                background: '#2F7D57',
+                color: '#FFFFFF',
+                fontSize: '13px',
+                fontWeight: 800,
+                cursor: 'pointer'
+              }}
+            >
+              Save
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Status messages */}
@@ -983,6 +1143,7 @@ function TransportCard({ transportId, user, onClose, onTransportClosed, onTransp
       {/* DC Paperwork Modal */}
       {showDCPaperwork && (
         <DCPaperworkModal
+          departedAt={departedAt}
           onComplete={handleDCPaperworkComplete}
           onCancel={() => setShowDCPaperwork(false)}
         />

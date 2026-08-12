@@ -555,6 +555,16 @@ function toTimestamp(value, fallback = new Date()) {
   return Timestamp.fromDate(toDate(value, fallback))
 }
 
+function normalizeTransportWriteUpdates(updates = {}) {
+  const data = { ...updates }
+  ;['departedAt', 'returnedAt', 'closedAt'].forEach((field) => {
+    if (field in data && data[field]) {
+      data[field] = toTimestamp(data[field])
+    }
+  })
+  return data
+}
+
 function normalizeTransportCreateData(payload) {
   const snapshot = payload?.snapshot || payload?.transport || {}
   const user = payload?.user || {}
@@ -578,7 +588,10 @@ function normalizeTransportCreateData(payload) {
     destinations: Array.isArray(snapshot.destinations) ? snapshot.destinations : [],
     notes: typeof snapshot.notes === 'string' ? snapshot.notes : '',
     createdAt: toTimestamp(snapshot.createdAt, createdAtDate),
-    updatedAt: toTimestamp(snapshot.updatedAt, updatedAtDate)
+    updatedAt: toTimestamp(snapshot.updatedAt, updatedAtDate),
+    ...(snapshot.timeCorrections && typeof snapshot.timeCorrections === 'object'
+      ? { timeCorrections: snapshot.timeCorrections }
+      : {})
   }
 
   if (status === 'closed' || status === 'returned') {
@@ -651,8 +664,9 @@ async function applyTransportUpdateOnline(payload) {
   if (latestVersion > expectedVersion && String(latest.status || '').toLowerCase() !== 'open') {
     throw new Error('Transport changed while offline and needs supervisor review.')
   }
+  const updates = normalizeTransportWriteUpdates(payload.updates || {})
   await updateDoc(doc(db, 'transports', transportId), {
-    ...(payload.updates || {}),
+    ...updates,
     version: increment(1),
     updatedAt: serverTimestamp()
   })
@@ -674,11 +688,12 @@ async function applyTransportCloseOnline(payload) {
     throw new Error('Transport was already closed while this device was offline.')
   }
 
+  const updates = normalizeTransportWriteUpdates(payload.updates || {})
   await updateDoc(doc(db, 'transports', transportId), {
-    ...(payload.updates || {}),
+    ...updates,
     status: 'closed',
-    returnedAt: serverTimestamp(),
-    closedAt: serverTimestamp(),
+    returnedAt: updates.returnedAt || serverTimestamp(),
+    closedAt: updates.closedAt || serverTimestamp(),
     version: increment(1),
     updatedAt: serverTimestamp()
   })
