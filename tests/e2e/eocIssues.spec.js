@@ -14,6 +14,19 @@ async function assertNoOverflow(page) {
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width + 1)
 }
 
+async function addSyntheticPhoto(page, buffer, source = 'device') {
+  await page.getByRole('button', { name: /Add photo/ }).click()
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: source === 'camera' ? 'Take photo' : 'Choose from device' }).click()
+  const chooser = await chooserPromise
+  expect(chooser.isMultiple()).toBe(source !== 'camera')
+  await chooser.setFiles({
+    name: `synthetic-${source}-problem.png`,
+    mimeType: 'image/png',
+    buffer
+  })
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('sprc_ops_onboarding_done', 'true'))
 })
@@ -57,12 +70,18 @@ test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', asy
   await page.locator('.location-report-modal select').first().selectOption('safety_concern')
   await expect(page.getByRole('alert')).toContainText('If anyone is in immediate danger, follow emergency procedures and contact a supervisor before submitting this report.')
   await page.locator('.location-report-modal textarea').fill(unique)
-  await page.getByRole('button', { name: /Add photos/ }).click()
+  await page.getByRole('button', { name: /Add photo/ }).click()
   await expect(page.getByRole('heading', { name: 'Protect client privacy' })).toBeVisible()
   await expect(page.getByText('Only photograph the problem.')).toBeVisible()
-  await page.getByRole('button', { name: 'Continue to Camera' }).click()
+  await expect(page.getByRole('button', { name: 'Take photo' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Choose from device' })).toBeVisible()
+  await expect(page.locator('.location-report-modal input[type=file][capture=environment]')).toHaveAttribute('accept', 'image/*')
+  const cameraChooserPromise = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Take photo' }).click()
+  const cameraChooser = await cameraChooserPromise
+  expect(cameraChooser.isMultiple()).toBe(false)
   const syntheticImage = await page.screenshot()
-  await page.locator('.location-report-modal input[type=file]').setInputFiles({
+  await cameraChooser.setFiles({
     name: 'synthetic-problem.png',
     mimeType: 'image/png',
     buffer: syntheticImage
@@ -82,9 +101,7 @@ test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', asy
   await page.getByRole('button', { name: /Report$/ }).click()
   await page.locator('.location-report-modal select').first().selectOption('other')
   await page.locator('.location-report-modal textarea').fill(retryDescription)
-  await page.getByRole('button', { name: /Add photos/ }).click()
-  await page.getByRole('button', { name: 'Continue to Camera' }).click()
-  await page.locator('.location-report-modal input[type=file]').setInputFiles({ name: 'synthetic-retry.png', mimeType: 'image/png', buffer: syntheticImage })
+  await addSyntheticPhoto(page, syntheticImage)
   await expect(page.locator('.issue-photo-preview img')).toBeVisible()
   await page.getByRole('button', { name: 'Submit Issue' }).click()
   await expect.poll(() => page.evaluate(async () => {
@@ -126,13 +143,7 @@ test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', asy
   await page.locator('.location-report-modal select').first().selectOption('other')
   const offlineDescription = `${testInfo.project.name} queued offline issue`
   await page.locator('.location-report-modal textarea').fill(offlineDescription)
-  await page.getByRole('button', { name: /Add photos/ }).click()
-  await page.getByRole('button', { name: 'Continue to Camera' }).click()
-  await page.locator('.location-report-modal input[type=file]').setInputFiles({
-    name: 'synthetic-offline-problem.png',
-    mimeType: 'image/png',
-    buffer: syntheticImage
-  })
+  await addSyntheticPhoto(page, syntheticImage)
   await expect(page.locator('.issue-photo-preview img')).toBeVisible()
   await expect(page.getByText(/Offline: this report will send/)).toBeVisible()
   await page.getByRole('button', { name: 'Submit Issue' }).click()

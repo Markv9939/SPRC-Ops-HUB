@@ -8,11 +8,12 @@ function revokePhoto(photo) {
   if (photo?.previewUrl) URL.revokeObjectURL(photo.previewUrl)
 }
 
-function IssuePhotoPicker({ value = [], onChange, disabled = false, label = 'Add photos' }) {
+function IssuePhotoPicker({ value = [], onChange, disabled = false, label = 'Add photo' }) {
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState('')
-  const inputRef = useRef(null)
+  const cameraInputRef = useRef(null)
+  const libraryInputRef = useRef(null)
   const latestPhotosRef = useRef(value)
   const previousPhotosRef = useRef(value)
 
@@ -75,7 +76,8 @@ function IssuePhotoPicker({ value = [], onChange, disabled = false, label = 'Add
         {processing ? 'Processing...' : `${label} (${value.length}/${MAX_PHOTOS_PER_KIND})`}
       </button>
       {error && <div className="location-report-error">{error}</div>}
-      <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={chooseFiles} />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" hidden onChange={chooseFiles} />
+      <input ref={libraryInputRef} type="file" accept="image/*" multiple hidden onChange={chooseFiles} />
 
       {privacyOpen && (
         <div className="modal-backdrop issue-photo-privacy-backdrop">
@@ -92,7 +94,8 @@ function IssuePhotoPicker({ value = [], onChange, disabled = false, label = 'Add
             <strong>Only photograph the problem.</strong>
             <div className="issue-photo-privacy-actions">
               <button type="button" onClick={() => setPrivacyOpen(false)}>Cancel</button>
-              <button type="button" onClick={() => { setPrivacyOpen(false); inputRef.current?.click() }}>Continue to Camera</button>
+              <button type="button" onClick={() => { setPrivacyOpen(false); cameraInputRef.current?.click() }}>Take photo</button>
+              <button type="button" onClick={() => { setPrivacyOpen(false); libraryInputRef.current?.click() }}>Choose from device</button>
             </div>
           </div>
         </div>
