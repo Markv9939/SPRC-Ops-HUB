@@ -723,7 +723,7 @@ async function applyTransportCloseOnline(payload) {
 }
 
 function needsReviewError(error) {
-  return /already|no longer|not eligible|version|changed while offline|needs supervisor review/i.test(String(error?.message || ''))
+  return /already|no longer|not eligible|assigned incoming|outgoing staff|version|changed while|needs .*review/i.test(String(error?.message || ''))
 }
 
 const SHIFT_DEBRIEF_ACTIONS = new Set([
@@ -755,7 +755,9 @@ async function processAction(action) {
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_EXTRA_NOTE) {
       await appendExtraDebriefNote(action.payload.debriefId, action.payload.extraNote)
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_CONFIRMATION) {
-      await saveDebriefConfirmation(action.payload.debriefId, action.payload.confirmation, action.payload.user)
+      await saveDebriefConfirmation(action.payload.debriefId, action.payload.confirmation, action.payload.user, {
+        expectedCorrectionCount: action.payload.expectedCorrectionCount
+      })
     } else if (action.type === OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT) {
       syncResult = await submitBhtIssueReportActionOnline(hydratedPayload)
     } else if (action.type === OFFLINE_ACTION_TYPES.ISSUE_ATTACHMENT_UPLOAD) {

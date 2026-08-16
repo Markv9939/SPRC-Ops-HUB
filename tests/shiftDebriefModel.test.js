@@ -4,8 +4,11 @@ import {
   CLIENT_NOTE_SECTIONS,
   DEBRIEF_SCHEMA_VERSION,
   GENERAL_HANDOFF_SECTIONS,
+  canUserConfirmDebrief,
+  getDebriefCorrectionCount,
   getQuickNoteMergeState,
   groupDebriefItemsForReadView,
+  hasValidIncomingSignoff,
   isCurrentDebriefPayload,
   mergeUniqueDebriefItems,
   sanitizeDebriefItems
@@ -96,4 +99,38 @@ test('offline action validation rejects V1 and accepts V2 payloads', () => {
   assert.equal(isCurrentDebriefPayload({ context: { schemaVersion: 1 } }), false)
   assert.equal(isCurrentDebriefPayload({ schemaVersion: 2 }), true)
   assert.equal(isCurrentDebriefPayload({ context: { schemaVersion: 2 } }), true)
+})
+
+test('only assigned incoming staff can confirm a submitted debrief', () => {
+  const debrief = {
+    submittedByUserId: 'outgoing_staff',
+    receivingUserIds: ['incoming_one', 'incoming_two']
+  }
+
+  assert.equal(canUserConfirmDebrief({ id: 'incoming_one' }, debrief), true)
+  assert.equal(canUserConfirmDebrief({ id: 'outgoing_staff' }, debrief), false)
+  assert.equal(canUserConfirmDebrief({ id: 'unassigned_staff' }, debrief), false)
+  assert.equal(canUserConfirmDebrief({ id: 'outgoing_staff' }, {
+    ...debrief,
+    receivingUserIds: ['outgoing_staff']
+  }), false)
+})
+
+test('the first valid incoming signoff closes corrections', () => {
+  const debrief = {
+    receivingUserIds: ['incoming_one', 'incoming_two'],
+    extraNotes: [{ id: 'correction_one' }],
+    confirmation: {
+      acknowledgments: {
+        outgoing_staff: { confirmed: true },
+        incoming_one: { confirmed: false }
+      }
+    },
+    confirmed: false
+  }
+
+  assert.equal(getDebriefCorrectionCount(debrief), 1)
+  assert.equal(hasValidIncomingSignoff(debrief), false)
+  debrief.confirmation.acknowledgments.incoming_one.confirmed = true
+  assert.equal(hasValidIncomingSignoff(debrief), true)
 })

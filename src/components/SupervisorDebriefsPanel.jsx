@@ -4,9 +4,13 @@ import { db } from '../firebase'
 import DebriefGroupedReadView from './DebriefGroupedReadView'
 import {
   CONFIRMATION_ITEMS,
-  DEBRIEFS_COLLECTION
+  DEBRIEFS_COLLECTION,
+  isDebriefClosedForCorrections,
+  listReceivingShiftUsers,
+  reassignShiftDebriefReceivers
 } from '../services/shiftDebriefService'
 import { getShiftLabel } from '../data/eocConstants'
+import { notifySuccess } from '../utils/toast'
 
 function dateKey(date) {
   return date.toISOString().slice(0, 10)
@@ -37,7 +41,126 @@ function locationLabel(locationId) {
   return locationId || '--'
 }
 
-function DebriefDetail({ debrief, nowMs }) {
+function DebriefReassignment({ debrief, user, isOffline }) {
+  const [open, setOpen] = useState(false)
+  const [candidates, setCandidates] = useState([])
+  const [selectedUserIds, setSelectedUserIds] = useState([])
+  const [reason, setReason] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const startReassignment = async () => {
+    setOpen(true)
+    setLoading(true)
+    try {
+      const rows = await listReceivingShiftUsers({
+        locationId: debrief.locationId,
+        shiftId: debrief.receivingShiftId,
+        submittedByUserId: debrief.submittedByUserId
+      })
+      const candidateIds = new Set(rows.map(row => row.id))
+      setCandidates(rows)
+      setSelectedUserIds((debrief.receivingUserIds || []).filter(userId => candidateIds.has(userId)))
+    } catch (error) {
+      alert(error?.message || 'Incoming shift staff could not be loaded.')
+      setOpen(false)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const toggleCandidate = (userId) => {
+    setSelectedUserIds(previous => (
+      previous.includes(userId)
+        ? previous.filter(value => value !== userId)
+        : [...previous, userId]
+    ))
+  }
+
+  const saveReassignment = async () => {
+    if (selectedUserIds.length === 0) {
+      alert('Select at least one incoming staff member.')
+      return
+    }
+    if (!reason.trim()) {
+      alert('Enter a reason for changing the incoming staff assignment.')
+      return
+    }
+    setSaving(true)
+    try {
+      await reassignShiftDebriefReceivers({
+        debriefId: debrief.id,
+        receivingUserIds: selectedUserIds,
+        reason,
+        actorUser: user
+      })
+      setOpen(false)
+      setReason('')
+      notifySuccess('Incoming staff assignment updated')
+    } catch (error) {
+      alert(error?.message || 'The incoming staff assignment could not be updated.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (isDebriefClosedForCorrections(debrief)) return null
+
+  return (
+    <div style={styles.reassignmentBox}>
+      {!open ? (
+        <button type="button" style={styles.reassignmentButton} onClick={startReassignment} disabled={isOffline}>
+          Correct Incoming Staff
+        </button>
+      ) : (
+        <div style={styles.reassignmentForm}>
+          <div style={styles.reassignmentTitle}>Correct incoming staff</div>
+          {loading ? (
+            <div style={styles.emptyText}>Loading assigned staff...</div>
+          ) : candidates.length === 0 ? (
+            <div style={styles.emptyText}>No active staff are assigned to this incoming shift.</div>
+          ) : (
+            <div style={styles.candidateList}>
+              {candidates.map(candidate => (
+                <label key={candidate.id} style={styles.candidateRow}>
+                  <input
+                    type="checkbox"
+                    checked={selectedUserIds.includes(candidate.id)}
+                    onChange={() => toggleCandidate(candidate.id)}
+                  />
+                  <span>{candidate.name || candidate.id}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <label style={styles.reasonLabel}>
+            Reason for correction
+            <textarea
+              className="input"
+              rows={2}
+              value={reason}
+              onChange={event => setReason(event.target.value)}
+              placeholder="Why is the incoming assignment being changed?"
+            />
+          </label>
+          <div style={styles.reassignmentActions}>
+            <button type="button" style={styles.cancelButton} onClick={() => setOpen(false)} disabled={saving}>Cancel</button>
+            <button
+              type="button"
+              style={styles.reassignmentButton}
+              onClick={saveReassignment}
+              disabled={saving || loading || candidates.length === 0 || selectedUserIds.length === 0 || !reason.trim()}
+            >
+              {saving ? 'Saving...' : 'Save Assignment'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DebriefDetail({ debrief, nowMs, user, isOffline }) {
   const items = Array.isArray(debrief.items) ? debrief.items : []
   const extraNotes = Array.isArray(debrief.extraNotes) ? debrief.extraNotes : []
   const confirmation = debrief.confirmation || {}
@@ -126,11 +249,13 @@ function DebriefDetail({ debrief, nowMs }) {
           })}
         </div>
       )}
+
+      <DebriefReassignment debrief={debrief} user={user} isOffline={isOffline} />
     </div>
   )
 }
 
-export default function SupervisorDebriefsPanel({ inEocScope, focusedDebriefId = null }) {
+export default function SupervisorDebriefsPanel({ user, isOffline = false, inEocScope, focusedDebriefId = null }) {
   const now = useMemo(() => new Date(), [])
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [startDate, setStartDate] = useState(() => dateKey(new Date(now.getFullYear(), now.getMonth(), 1)))
@@ -271,7 +396,7 @@ export default function SupervisorDebriefsPanel({ inEocScope, focusedDebriefId =
                     </span>
                   </div>
                 </button>
-                {currentExpandedId === debrief.id && <DebriefDetail debrief={debrief} nowMs={nowMs} />}
+                {currentExpandedId === debrief.id && <DebriefDetail debrief={debrief} nowMs={nowMs} user={user} isOffline={isOffline} />}
               </div>
               )
             })}
@@ -452,6 +577,73 @@ const styles = {
     marginTop: '10px',
     fontSize: '12px',
     color: 'var(--text-secondary)'
+  },
+  reassignmentBox: {
+    marginTop: '16px',
+    paddingTop: '14px',
+    borderTop: '1px solid rgba(17,47,82,0.14)'
+  },
+  reassignmentForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px'
+  },
+  reassignmentTitle: {
+    fontSize: '13px',
+    fontWeight: 800,
+    color: 'var(--text-primary)'
+  },
+  candidateList: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+    gap: '8px'
+  },
+  candidateRow: {
+    minHeight: '40px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 10px',
+    border: '1px solid rgba(17,47,82,0.14)',
+    borderRadius: '6px',
+    color: 'var(--text-primary)',
+    fontSize: '13px'
+  },
+  reasonLabel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '5px',
+    fontSize: '12px',
+    fontWeight: 700,
+    color: 'var(--text-secondary)'
+  },
+  reassignmentActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '8px',
+    flexWrap: 'wrap'
+  },
+  reassignmentButton: {
+    minHeight: '40px',
+    padding: '8px 12px',
+    border: '1px solid #315C88',
+    borderRadius: '6px',
+    backgroundColor: '#315C88',
+    color: '#FFFFFF',
+    fontSize: '12px',
+    fontWeight: 800,
+    cursor: 'pointer'
+  },
+  cancelButton: {
+    minHeight: '40px',
+    padding: '8px 12px',
+    border: '1px solid rgba(17,47,82,0.22)',
+    borderRadius: '6px',
+    backgroundColor: '#FFFFFF',
+    color: 'var(--text-primary)',
+    fontSize: '12px',
+    fontWeight: 800,
+    cursor: 'pointer'
   },
   emptyState: {
     textAlign: 'center',

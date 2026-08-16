@@ -102,6 +102,35 @@ export function removeDebriefRecordById(records, recordId) {
   return (Array.isArray(records) ? records : []).filter(row => row?.id !== recordId)
 }
 
+export function getDebriefReceivingUserIds(debrief) {
+  return [...new Set(
+    (Array.isArray(debrief?.receivingUserIds) ? debrief.receivingUserIds : [])
+      .map(cleanDebriefToken)
+      .filter(Boolean)
+  )]
+}
+
+export function canUserConfirmDebrief(user, debrief) {
+  const userId = cleanDebriefToken(user?.id)
+  const submittedByUserId = cleanDebriefToken(debrief?.submittedByUserId || debrief?.draftByUserId)
+  return Boolean(
+    userId
+    && userId !== submittedByUserId
+    && getDebriefReceivingUserIds(debrief).includes(userId)
+  )
+}
+
+export function hasValidIncomingSignoff(debrief) {
+  if (debrief?.confirmed === true) return true
+  const acknowledgments = debrief?.confirmation?.acknowledgments || {}
+  return getDebriefReceivingUserIds(debrief)
+    .some(userId => acknowledgments[userId]?.confirmed === true)
+}
+
+export function getDebriefCorrectionCount(debrief) {
+  return Array.isArray(debrief?.extraNotes) ? debrief.extraNotes.length : 0
+}
+
 export function mergeDebriefConfirmation(existingConfirmation, incomingConfirmation, options = {}) {
   const existing = existingConfirmation || {}
   const incoming = incomingConfirmation || {}

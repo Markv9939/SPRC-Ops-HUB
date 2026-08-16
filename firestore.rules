@@ -642,9 +642,51 @@ service cloud.firestore {
         && data.status == 'submitted'
         && data.submittedByUserId is string
         && data.submittedByName is string
+        && data.receivingUserIds is list
+        && !(data.submittedByUserId in data.receivingUserIds)
         && data.items is list
         && data.extraNotes is list
         && data.confirmation is map
+        && data.confirmation.acknowledgments is map
+        && data.confirmation.acknowledgments.keys().hasOnly(data.receivingUserIds)
+        && (
+          !('confirmedByUserId' in data.confirmation)
+          || data.confirmation.confirmedByUserId == null
+          || (
+            data.confirmation.confirmedByUserId is string
+            && data.confirmation.confirmedByUserId in data.receivingUserIds
+          )
+        )
+        && data.confirmed is bool;
+    }
+
+    function shiftDebriefSignoffStarted(data) {
+      return data.confirmed == true
+        || (
+          data.receivingUserIds is list
+          && data.confirmation is map
+          && ('confirmedByUserId' in data.confirmation)
+          && data.confirmation.confirmedByUserId is string
+          && data.confirmation.confirmedByUserId in data.receivingUserIds
+        );
+    }
+
+    function validSubmittedShiftDebriefUpdateData(data) {
+      return data.version is int
+        && data.receivingUserIds is list
+        && !(data.submittedByUserId in data.receivingUserIds)
+        && data.extraNotes is list
+        && data.confirmation is map
+        && data.confirmation.acknowledgments is map
+        && data.confirmation.acknowledgments.keys().hasOnly(data.receivingUserIds)
+        && (
+          !('confirmedByUserId' in data.confirmation)
+          || data.confirmation.confirmedByUserId == null
+          || (
+            data.confirmation.confirmedByUserId is string
+            && data.confirmation.confirmedByUserId in data.receivingUserIds
+          )
+        )
         && data.confirmed is bool;
     }
 
@@ -1000,15 +1042,7 @@ service cloud.firestore {
           || exactIssueLocationAllowed(request.resource.data.locationId)
         );
 
-      allow update: if validSubmittedShiftDebriefData(request.resource.data)
-        && (
-          authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
-          || exactIssueLocationAllowed(request.resource.data.locationId)
-          || (
-            resource.data.receivingUserIds is list
-            && authAppUserId() in resource.data.receivingUserIds
-          )
-        )
+      allow update: if validSubmittedShiftDebriefUpdateData(request.resource.data)
         && request.resource.data.status == resource.data.status
         && request.resource.data.items == resource.data.items
         && request.resource.data.submittedByUserId == resource.data.submittedByUserId
@@ -1017,20 +1051,80 @@ service cloud.firestore {
         && request.resource.data.shiftId == resource.data.shiftId
         && request.resource.data.dateKey == resource.data.dateKey
         && request.resource.data.mainLocation == resource.data.mainLocation
-        && request.resource.data
-          .diff(resource.data)
-          .affectedKeys()
-          .hasOnly(['extraNotes', 'confirmation', 'confirmed', 'updatedAt', 'version'])
-        && request.resource.data.extraNotes is list
         && (
-          request.resource.data.extraNotes == resource.data.extraNotes
-          || (
-            resource.data.confirmed != true
-            && request.resource.data.confirmed != true
+          request.resource.data.diff(resource.data).affectedKeys().hasAny(['extraNotes'])
+          ? (
+            request.resource.data
+              .diff(resource.data)
+              .affectedKeys()
+              .hasOnly(['extraNotes', 'updatedAt', 'version'])
+            && request.resource.data.confirmation == resource.data.confirmation
+            && request.resource.data.confirmed == resource.data.confirmed
+            && request.resource.data.receivingUserIds == resource.data.receivingUserIds
+            && (
+              hasLegacyAuthSession()
+              || authAppUserId() == resource.data.submittedByUserId
+              || authRoleAllowed(['supervisor', 'admin'])
+            )
+            && (
+              (!('receivingUserNames' in resource.data) && !('receivingUserNames' in request.resource.data))
+              || request.resource.data.receivingUserNames == resource.data.receivingUserNames
+            )
+            && !shiftDebriefSignoffStarted(resource.data)
+            && !shiftDebriefSignoffStarted(request.resource.data)
             && request.resource.data.extraNotes.size() >= resource.data.extraNotes.size()
           )
+          : (
+            request.resource.data.diff(resource.data).affectedKeys().hasAny([
+              'receivingUserIds', 'receivingUserNames',
+              'reassignedAt', 'reassignedByUserId', 'reassignedByName', 'reassignmentReason'
+            ])
+            ? (
+              request.resource.data
+                .diff(resource.data)
+                .affectedKeys()
+                .hasOnly([
+                  'receivingUserIds', 'receivingUserNames',
+                  'confirmation', 'confirmed',
+                  'reassignedAt', 'reassignedByUserId', 'reassignedByName',
+                  'reassignmentReason', 'updatedAt', 'version'
+                ])
+              && authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.locationId)
+              && (
+                hasLegacyAuthSession()
+                || request.resource.data.reassignedByUserId == authAppUserId()
+              )
+              && !shiftDebriefSignoffStarted(resource.data)
+              && request.resource.data.receivingUserIds.size() > 0
+              && request.resource.data.confirmation.acknowledgments.size() == 0
+              && request.resource.data.confirmed == false
+              && request.resource.data.extraNotes == resource.data.extraNotes
+            )
+            : (
+              request.resource.data
+                .diff(resource.data)
+                .affectedKeys()
+                .hasOnly(['confirmation', 'confirmed', 'updatedAt', 'version'])
+              && request.resource.data.extraNotes == resource.data.extraNotes
+              && request.resource.data.receivingUserIds == resource.data.receivingUserIds
+              && (
+                (!('receivingUserNames' in resource.data) && !('receivingUserNames' in request.resource.data))
+                || request.resource.data.receivingUserNames == resource.data.receivingUserNames
+              )
+              && (
+                hasLegacyAuthSession()
+                || (
+                  authAppUserId() != resource.data.submittedByUserId
+                  && authAppUserId() in resource.data.receivingUserIds
+                  && request.resource.data.confirmation.acknowledgments
+                    .diff(resource.data.confirmation.acknowledgments)
+                    .affectedKeys()
+                    .hasOnly([authAppUserId()])
+                )
+              )
+            )
+          )
         )
-        && request.resource.data.confirmation is map
         && createdAtUnchanged();
 
       allow delete: if false;

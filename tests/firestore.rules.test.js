@@ -646,16 +646,25 @@ test('Test House BHT can read own assignment and create EOC and debrief records'
     draftByName: 'Test House Workflow BHT',
     submittedByUserId: 'bht_test_house_workflows',
     submittedByName: 'Test House Workflow BHT',
+    receivingUserIds: [],
+    receivingUserNames: {},
     items: [],
     itemCount: 0,
     extraNotes: [],
     confirmation: {
-      keysAccountedFor: true,
-      sharpsRestrictedVerified: true,
-      clientRoundCompleted: true,
-      urgentIssuesCommunicated: true
+      keysAccountedFor: false,
+      sharpsRestrictedVerified: false,
+      clientRoundCompleted: false,
+      controlledMedicationLogReviewed: false,
+      questionsClarificationsAddressed: false,
+      incomingStaffInitials: '',
+      confirmed: false,
+      confirmedAt: null,
+      confirmedByUserId: null,
+      confirmedByName: null,
+      acknowledgments: {}
     },
-    confirmed: true,
+    confirmed: false,
     version: 1,
     createdAt: new Date(),
     updatedAt: new Date()
@@ -876,6 +885,25 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
     linkedBy: 'self_first_login',
     version: 1
   })
+  await seed('users/test_debrief_supervisor', {
+    name: 'Debrief Supervisor',
+    role: 'supervisor',
+    active: true,
+    email: 'debrief.supervisor@example.com',
+    site: 'OTC',
+    location: 'OTC',
+    authorizedLocations: ['OTC', 'TEST_HOUSE'],
+    issueLocationIds: ['test_house'],
+    version: 1
+  })
+  await seed('usersByAuthUid/test_debrief_supervisor_uid', {
+    userId: 'test_debrief_supervisor',
+    email: 'debrief.supervisor@example.com',
+    emailDomain: 'example.com',
+    linkedAt: new Date(),
+    linkedBy: 'self_first_login',
+    version: 1
+  })
   await seed('shiftAssignments/asg_test_1_rules', {
     bhtUserId: 'test_1_rules',
     bhtUserName: 'Test One',
@@ -1024,6 +1052,69 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
     updatedAt: new Date(),
     version: 2
   }))
+  await assertSucceeds(updateDoc(doc(bhtDb, 'shiftDebriefs/test_1_rules_2026-06-16_test_house_shift_1'), {
+    extraNotes: [{
+      id: 'correction_before_signoff',
+      note: 'Correction added before incoming signoff.',
+      createdByUserId: 'test_1_rules',
+      createdByName: 'Test One',
+      createdAtIso: '2026-06-16T12:30:00.000Z'
+    }],
+    updatedAt: new Date(),
+    version: 2
+  }))
+  await assertFails(updateDoc(doc(bhtDb, 'shiftDebriefs/test_1_rules_2026-06-16_test_house_shift_1'), {
+    confirmation: {
+      confirmed: true,
+      confirmedAt: new Date(),
+      confirmedByUserId: 'test_1_rules',
+      confirmedByName: 'Test One',
+      acknowledgments: {
+        test_1_rules: {
+          confirmed: true,
+          confirmedByUserId: 'test_1_rules'
+        }
+      }
+    },
+    confirmed: true,
+    updatedAt: new Date(),
+    version: 3
+  }))
+
+  await assertFails(updateDoc(doc(bhtDb, 'shiftDebriefs/test_1_rules_2026-06-16_test_house_shift_1'), {
+    reassignedAt: new Date(),
+    reassignedByUserId: 'test_1_rules',
+    reassignedByName: 'Test One',
+    reassignmentReason: 'Outgoing staff cannot reassign the handoff.',
+    updatedAt: new Date(),
+    version: 3
+  }))
+
+  const supervisorDb = authed('test_debrief_supervisor_uid', 'debrief.supervisor@example.com')
+  await assertSucceeds(updateDoc(doc(supervisorDb, 'shiftDebriefs/test_1_rules_2026-06-16_test_house_shift_1'), {
+    receivingUserIds: ['test_2_rules', 'test_3_rules'],
+    receivingUserNames: { test_2_rules: 'Test Two', test_3_rules: 'Test Three' },
+    confirmation: {
+      keysAccountedFor: false,
+      sharpsRestrictedVerified: false,
+      clientRoundCompleted: false,
+      controlledMedicationLogReviewed: false,
+      questionsClarificationsAddressed: false,
+      incomingStaffInitials: '',
+      confirmed: false,
+      confirmedAt: null,
+      confirmedByUserId: null,
+      confirmedByName: null,
+      acknowledgments: {}
+    },
+    confirmed: false,
+    reassignedAt: new Date(),
+    reassignedByUserId: 'test_debrief_supervisor',
+    reassignedByName: 'Debrief Supervisor',
+    reassignmentReason: 'Confirmed the correct incoming assignment.',
+    updatedAt: new Date(),
+    version: 3
+  }))
 
   const receivingBhtDb = authed('test_2_rules_uid', 'test2.rules@example.com')
   const submittedSnap = await assertSucceeds(getDoc(doc(receivingBhtDb, 'shiftDebriefs/test_1_rules_2026-06-16_test_house_shift_1')))
@@ -1037,8 +1128,8 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
       controlledMedicationLogReviewed: true,
       questionsClarificationsAddressed: true,
       incomingStaffInitials: 'T2',
-      confirmed: true,
-      confirmedAt: new Date(),
+      confirmed: false,
+      confirmedAt: null,
       confirmedByUserId: 'test_2_rules',
       confirmedByName: 'Test Two',
       acknowledgments: {
@@ -1056,9 +1147,30 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
         }
       }
     },
-    confirmed: true,
+    confirmed: false,
     updatedAt: new Date(),
-    version: 2
+    version: 4
+  }))
+
+  await assertFails(updateDoc(doc(bhtDb, 'shiftDebriefs/test_1_rules_2026-06-16_test_house_shift_1'), {
+    extraNotes: [
+      {
+        id: 'correction_before_signoff',
+        note: 'Correction added before incoming signoff.',
+        createdByUserId: 'test_1_rules',
+        createdByName: 'Test One',
+        createdAtIso: '2026-06-16T12:30:00.000Z'
+      },
+      {
+        id: 'correction_after_signoff',
+        note: 'This correction must be rejected.',
+        createdByUserId: 'test_1_rules',
+        createdByName: 'Test One',
+        createdAtIso: '2026-06-16T13:00:00.000Z'
+      }
+    ],
+    updatedAt: new Date(),
+    version: 5
   }))
 
   await assertSucceeds(updateDoc(doc(receivingBhtDb, 'alerts/test_debrief_bht_alert'), {

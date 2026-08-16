@@ -5115,6 +5115,42 @@ body {
   margin-bottom: 14px;
 }
 
+.debrief-latest-correction-warning {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 11px;
+  border: 1px solid #E4B95E;
+  border-radius: 8px;
+  background: #FFF7E6;
+  color: #6E4B08;
+}
+
+.debrief-latest-correction-warning div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.debrief-latest-correction-warning strong,
+.debrief-latest-correction-warning span {
+  font-size: 12px;
+}
+
+.debrief-latest-correction-warning button {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid #B8841E;
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: #6E4B08;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .debrief-confirmation-list label {
   min-height: 44px;
   display: grid;
@@ -5177,6 +5213,15 @@ body {
 
   .debrief-section-pills {
     grid-template-columns: 1fr;
+  }
+
+  .debrief-latest-correction-warning {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .debrief-latest-correction-warning button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .debrief-section-pills button {

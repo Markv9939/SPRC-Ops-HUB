@@ -30,7 +30,11 @@ import {
   GENERAL_HANDOFF_SECTIONS,
   cleanDebriefToken,
   appendUniqueDebriefRecord,
+  canUserConfirmDebrief,
+  getDebriefCorrectionCount,
+  getDebriefReceivingUserIds,
   getDebriefSectionLabel,
+  hasValidIncomingSignoff,
   mergeDebriefConfirmation,
   mergeUniqueDebriefItems,
   removeDebriefRecordById,
@@ -40,12 +44,16 @@ import {
 
 export {
   CLIENT_NOTE_SECTIONS,
+  canUserConfirmDebrief,
   DEBRIEF_READ_SECTION_ORDER,
   DEBRIEF_SCHEMA_VERSION,
   GENERAL_HANDOFF_SECTIONS,
+  getDebriefCorrectionCount,
+  getDebriefReceivingUserIds,
   getDebriefSectionLabel,
   getGeneralHandoffSection,
-  groupDebriefItemsForReadView
+  groupDebriefItemsForReadView,
+  hasValidIncomingSignoff
 } from './shiftDebriefModel'
 
 export const DEBRIEF_DRAFTS_COLLECTION = 'shiftDebriefDrafts'
@@ -273,7 +281,7 @@ export async function submitShiftDebrief(context, items, user) {
     ? getShiftTimingDetails(receivingShiftId, outgoingTiming?.shiftEndAt || new Date(), timingConfig)
     : null
   const receivingUsers = receivingShiftId
-    ? await getReceivingBhtUsers({ locationId: context.locationId, shiftId: receivingShiftId, submittedByUserId: user?.id })
+    ? await listReceivingShiftUsers({ locationId: context.locationId, shiftId: receivingShiftId, submittedByUserId: user?.id })
     : []
   const receivingUserNames = receivingUsers.reduce((acc, row) => {
     acc[row.id] = row.name || 'BHT'
@@ -376,6 +384,9 @@ export async function appendExtraDebriefNote(debriefId, extraNote) {
     if (!debriefSnap.exists()) throw new Error('Submitted debrief was not found.')
     const existing = debriefSnap.data()
     if (isDebriefClosedForCorrections(existing)) throw new Error(CLOSED_DEBRIEF_MESSAGE)
+    if (cleanToken(extraNote?.createdByUserId) !== cleanToken(existing.submittedByUserId || existing.draftByUserId)) {
+      throw new Error('Only the outgoing staff member who submitted this debrief can add a correction.')
+    }
 
     const extraNotes = Array.isArray(existing.extraNotes) ? existing.extraNotes : []
     if (extraNotes.some(note => note?.id === extraNote?.id)) return
@@ -387,19 +398,40 @@ export async function appendExtraDebriefNote(debriefId, extraNote) {
   })
 }
 
-export async function saveDebriefConfirmation(debriefId, confirmation, user) {
+export async function saveDebriefConfirmation(debriefId, confirmation, user, options = {}) {
   const debriefRef = doc(db, DEBRIEFS_COLLECTION, debriefId)
   const currentUserId = cleanToken(user?.id)
+  const expectedCorrectionCount = Number(options.expectedCorrectionCount)
+  if (!Number.isInteger(expectedCorrectionCount) || expectedCorrectionCount < 0) {
+    throw new Error('This confirmation needs review against the latest debrief before it can be saved.')
+  }
   let currentAcknowledged = false
   await runTransaction(db, async transaction => {
     const debriefSnap = await transaction.get(debriefRef)
     if (!debriefSnap.exists()) throw new Error('Submitted debrief was not found.')
 
     const debrief = debriefSnap.data()
-    const receivingUserIds = Array.isArray(debrief.receivingUserIds)
-      ? debrief.receivingUserIds.map(value => cleanToken(value))
-      : []
-    const merged = mergeDebriefConfirmation(debrief.confirmation, confirmation, {
+    if (!canUserConfirmDebrief(user, debrief)) {
+      throw new Error('Only assigned incoming shift staff can complete this confirmation.')
+    }
+    if (expectedCorrectionCount !== getDebriefCorrectionCount(debrief)) {
+      throw new Error('This debrief changed while you were reviewing it. Review the latest correction before signing off.')
+    }
+
+    const receivingUserIds = getDebriefReceivingUserIds(debrief)
+    const existingAcknowledgments = debrief.confirmation?.acknowledgments || {}
+    if (existingAcknowledgments[currentUserId]?.confirmed === true) {
+      throw new Error('Your incoming shift confirmation is already complete.')
+    }
+    const allowedAcknowledgments = Object.fromEntries(
+      receivingUserIds
+        .filter(userId => existingAcknowledgments[userId])
+        .map(userId => [userId, existingAcknowledgments[userId]])
+    )
+    const merged = mergeDebriefConfirmation({
+      ...(debrief.confirmation || {}),
+      acknowledgments: allowedAcknowledgments
+    }, confirmation, {
       userId: currentUserId,
       userName: user?.name,
       receivingUserIds,
@@ -446,6 +478,9 @@ export async function saveQuickDebriefNote(context, item, user) {
     if (submittedSnap.exists()) {
       const submitted = submittedSnap.data()
       if (isDebriefClosedForCorrections(submitted)) throw new Error(CLOSED_DEBRIEF_MESSAGE)
+      if (cleanToken(user?.id) !== cleanToken(submitted.submittedByUserId || submitted.draftByUserId)) {
+        throw new Error('Only the outgoing staff member who submitted this debrief can add a correction.')
+      }
       const extraNotes = Array.isArray(submitted.extraNotes) ? submitted.extraNotes : []
       if (!extraNotes.some(note => note?.id === extraNote.id)) {
         transaction.update(submittedRef, {
@@ -518,10 +553,10 @@ export async function undoQuickDebriefNote(context, item, saveResult) {
 }
 
 export function isDebriefClosedForCorrections(debrief) {
-  return debrief?.confirmed === true
+  return hasValidIncomingSignoff(debrief)
 }
 
-async function getReceivingBhtUsers({ locationId, shiftId, submittedByUserId }) {
+export async function listReceivingShiftUsers({ locationId, shiftId, submittedByUserId }) {
   const assignmentsSnap = await getDocs(query(
     collection(db, 'shiftAssignments'),
     where('locationId', '==', locationId),
@@ -535,6 +570,132 @@ async function getReceivingBhtUsers({ locationId, shiftId, submittedByUserId }) 
       name: row.bhtUserName || ''
     }))
     .filter(row => row.id && row.id !== submittedByUserId)
+}
+
+export async function reassignShiftDebriefReceivers({ debriefId, receivingUserIds, reason, actorUser }) {
+  if (!isSupervisorRole(actorUser?.role) && !isAdminRole(actorUser?.role)) {
+    throw new Error('Only a supervisor or administrator can correct incoming staff assignments.')
+  }
+
+  const normalizedReason = cleanToken(reason)
+  if (!normalizedReason) throw new Error('Enter a reason for changing the incoming staff assignment.')
+
+  const requestedUserIds = [...new Set(
+    (Array.isArray(receivingUserIds) ? receivingUserIds : [])
+      .map(cleanToken)
+      .filter(Boolean)
+  )]
+  if (requestedUserIds.length === 0) throw new Error('Select at least one incoming staff member.')
+
+  const debriefRef = doc(db, DEBRIEFS_COLLECTION, debriefId)
+  const initialSnap = await getDoc(debriefRef)
+  if (!initialSnap.exists()) throw new Error('Submitted debrief was not found.')
+  const initialDebrief = initialSnap.data()
+  if (isDebriefClosedForCorrections(initialDebrief)) {
+    throw new Error('Incoming staff have already signed off, so the assignment can no longer be changed.')
+  }
+
+  const receivingShiftId = cleanToken(initialDebrief.receivingShiftId || getNextShiftId(initialDebrief.shiftId))
+  const eligibleUsers = await listReceivingShiftUsers({
+    locationId: initialDebrief.locationId,
+    shiftId: receivingShiftId,
+    submittedByUserId: initialDebrief.submittedByUserId
+  })
+  const eligibleById = new Map(eligibleUsers.map(row => [cleanToken(row.id), row]))
+  const selectedUsers = requestedUserIds.map(userId => eligibleById.get(userId)).filter(Boolean)
+  if (selectedUsers.length !== requestedUserIds.length) {
+    throw new Error('One or more selected staff members are no longer assigned to the incoming shift.')
+  }
+
+  const previousAlertsSnap = await getDocs(query(
+    collection(db, 'alerts'),
+    where('audience', '==', 'bht'),
+    where('type', '==', 'shift_debrief_submitted'),
+    where('debriefId', '==', debriefId)
+  ))
+  const auditRef = doc(collection(db, 'auditLogs'))
+  const newAlertRefs = selectedUsers.map(() => doc(collection(db, 'alerts')))
+
+  await runTransaction(db, async transaction => {
+    const latestSnap = await transaction.get(debriefRef)
+    if (!latestSnap.exists()) throw new Error('Submitted debrief was not found.')
+    const latest = latestSnap.data()
+    if (isDebriefClosedForCorrections(latest)) {
+      throw new Error('Incoming staff have already signed off, so the assignment can no longer be changed.')
+    }
+    if (
+      cleanToken(latest.locationId) !== cleanToken(initialDebrief.locationId)
+      || cleanToken(latest.receivingShiftId || getNextShiftId(latest.shiftId)) !== receivingShiftId
+    ) {
+      throw new Error('The debrief assignment changed. Reload it and try again.')
+    }
+
+    const previousUserIds = getDebriefReceivingUserIds(latest)
+    const nextUserIds = selectedUsers.map(row => row.id)
+    const nextUserNames = Object.fromEntries(selectedUsers.map(row => [row.id, row.name || '']))
+    transaction.update(debriefRef, {
+      receivingUserIds: nextUserIds,
+      receivingUserNames: nextUserNames,
+      confirmation: createEmptyConfirmation(),
+      confirmed: false,
+      reassignedAt: serverTimestamp(),
+      reassignedByUserId: actorUser.id,
+      reassignedByName: actorUser.name,
+      reassignmentReason: normalizedReason,
+      updatedAt: serverTimestamp(),
+      version: getVersionNumber(latest) + 1
+    })
+
+    previousAlertsSnap.docs.forEach(alertDoc => {
+      transaction.update(alertDoc.ref, {
+        read: true,
+        readAt: serverTimestamp(),
+        readByUserId: actorUser.id,
+        readByName: actorUser.name,
+        handoffReassigned: true,
+        version: getVersionNumber(alertDoc.data()) + 1,
+        updatedAt: serverTimestamp()
+      })
+    })
+
+    selectedUsers.forEach((row, index) => {
+      transaction.set(newAlertRefs[index], {
+        type: 'shift_debrief_submitted',
+        debriefId,
+        locationId: latest.locationId,
+        shiftId: latest.shiftId,
+        receivingShiftId,
+        targetUserId: row.id,
+        targetUserName: row.name || null,
+        audience: 'bht',
+        severity: 'medium',
+        incomingAcknowledgmentLateAt: latest.incomingAcknowledgmentLateAt || null,
+        message: `${latest.submittedByName || 'BHT'} submitted ${latest.locationLabel || getDebriefLocationLabel(latest.locationId)} shift debrief. Incoming staff assignment was corrected.`,
+        bhtName: latest.submittedByName || null,
+        read: false,
+        version: 1,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      })
+    })
+
+    transaction.set(auditRef, {
+      action: 'shift_debrief_receivers_reassigned',
+      collectionPath: DEBRIEFS_COLLECTION,
+      documentId: debriefId,
+      performedByUserId: actorUser.id,
+      performedByName: actorUser.name,
+      reason: normalizedReason,
+      locationId: latest.locationId,
+      receivingShiftId,
+      previousReceivingUserIds: previousUserIds,
+      newReceivingUserIds: nextUserIds,
+      version: 1,
+      createdAt: serverTimestamp()
+    })
+  })
+
+  return selectedUsers
 }
 
 function queueAlert(batch, payload) {

@@ -1481,6 +1481,8 @@ function SupervisorDashboard({
       {/* Debriefs Tab */}
       {activeTab === 'debriefs' && (
         <SupervisorDebriefsPanel
+          user={user}
+          isOffline={isOffline}
           inEocScope={inEocScope}
           focusedDebriefId={focusedDebriefId}
         />
