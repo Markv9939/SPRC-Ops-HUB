@@ -141,6 +141,7 @@ export function mergeDebriefConfirmation(existingConfirmation, incomingConfirmat
   const receivingUserIds = (Array.isArray(options.receivingUserIds) ? options.receivingUserIds : [])
     .map(cleanDebriefToken)
     .filter(Boolean)
+  const reviewedIssues = sanitizeReviewedIssues(incoming.reviewedIssues)
   const currentAcknowledged = DEBRIEF_CONFIRMATION_FIELD_IDS.every(field => incoming[field] === true)
     && initials.length > 0
   const acknowledgments = {
@@ -153,7 +154,8 @@ export function mergeDebriefConfirmation(existingConfirmation, incomingConfirmat
             confirmed: currentAcknowledged,
             confirmedAt: currentAcknowledged ? acknowledgedAt : null,
             confirmedByUserId: currentAcknowledged ? userId : null,
-            confirmedByName: currentAcknowledged ? userName : null
+            confirmedByName: currentAcknowledged ? userName : null,
+            reviewedIssues
           }
         }
       : {})
@@ -177,6 +179,21 @@ export function mergeDebriefConfirmation(existingConfirmation, incomingConfirmat
     confirmed: allReceivingAcknowledged,
     currentAcknowledged
   }
+}
+
+export function sanitizeReviewedIssues(items) {
+  const unique = new Map()
+  ;(Array.isArray(items) ? items : []).slice(0, 50).forEach(item => {
+    const issueId = cleanDebriefToken(item?.issueId || item?.id)
+    const issueVersion = Number(item?.issueVersion ?? item?.version ?? 0)
+    if (!issueId || !Number.isInteger(issueVersion) || issueVersion < 1) return
+    unique.set(issueId, {
+      issueId,
+      issueVersion,
+      latestActivityId: cleanDebriefToken(item?.latestActivityId || item?.latestActivity?.id) || null
+    })
+  })
+  return Array.from(unique.values())
 }
 
 export function sanitizeDebriefItems(items) {

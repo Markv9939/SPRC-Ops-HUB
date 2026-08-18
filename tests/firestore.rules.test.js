@@ -2123,3 +2123,76 @@ test('Phase 4-8 metadata rules protect tracking, attachments, patterns, and miss
   await assertSucceeds(setDoc(doc(supervisorDb, 'eocTasks/upgrade_missed_task/missedNotes/supervisor_note'), { taskId: 'upgrade_missed_task', locationId: 'test_house', text: 'Supervisor reviewed the missed checklist.', authorUserId: 'upgrade_supervisor', authorName: 'Upgrade Supervisor', immutable: true, version: 1, createdAt: serverTimestamp() }))
   await assertFails(updateDoc(doc(supervisorDb, 'eocIssues/upgrade_issue'), { sourceTrackingId: 'changed', trackingId: 'changed', version: 2, updatedAt: serverTimestamp() }))
 })
+
+test('BHT can submit an active issue for supervisor review but cannot fully resolve it', async () => {
+  await seed('appSettings/authPolicy', { authScopeEnforced: true })
+  await seed('users/resolution_bht', { name: 'Resolution BHT', role: 'bht', active: true, issueLocationIds: ['test_house'], authorizedLocations: ['TEST_HOUSE'], locationId: 'test_house', version: 1 })
+  await seed('usersByAuthUid/resolution_bht_uid', { userId: 'resolution_bht', version: 1 })
+  await seed('users/resolution_supervisor', { name: 'Resolution Supervisor', role: 'supervisor', active: true, issueLocationIds: ['test_house'], authorizedLocations: ['OTC', 'TEST_HOUSE'], version: 1 })
+  await seed('usersByAuthUid/resolution_supervisor_uid', { userId: 'resolution_supervisor', version: 1 })
+  await seed('eocIssues/resolution_review_issue', {
+    locationId: 'test_house', status: 'open', eocType: 'house', label: 'Bathroom', description: 'Bathroom is dirty.', reportedByUserId: 'resolution_bht', version: 1, createdAt: new Date(), updatedAt: new Date()
+  })
+
+  const bhtDb = authed('resolution_bht_uid', 'resolution.bht@example.com')
+  const issueRef = doc(bhtDb, 'eocIssues/resolution_review_issue')
+  await assertFails(updateDoc(issueRef, {
+    status: 'resolved', resolvedNotes: 'Cleaned.', closedAt: serverTimestamp(), version: 2, updatedAt: serverTimestamp()
+  }))
+
+  const submitBatch = writeBatch(bhtDb)
+  submitBatch.update(issueRef, {
+    status: 'pending_supervisor_review',
+    version: 2,
+    latestActivity: { id: 'v2_resolution_submitted', eventType: 'resolution_submitted', label: 'Submitted for supervisor review', note: 'Bathroom cleaned and checked.', actorUserId: 'resolution_bht', actorName: 'Resolution BHT', createdAt: serverTimestamp() },
+    resolutionSubmittedNotes: 'Bathroom cleaned and checked.',
+    resolutionSubmittedAt: serverTimestamp(),
+    resolutionSubmittedByUserId: 'resolution_bht',
+    resolutionSubmittedByName: 'Resolution BHT',
+    updatedAt: serverTimestamp()
+  })
+  submitBatch.set(doc(bhtDb, 'eocIssues/resolution_review_issue/activity/v2_resolution_submitted'), {
+    issueId: 'resolution_review_issue', eventType: 'resolution_submitted', label: 'Submitted for supervisor review', status: 'pending_supervisor_review', note: 'Bathroom cleaned and checked.', actorUserId: 'resolution_bht', actorName: 'Resolution BHT', locationId: 'test_house', issueVersion: 2, immutable: true, version: 1, createdAt: serverTimestamp()
+  })
+  await assertSucceeds(submitBatch.commit())
+
+  const supervisorDb = authed('resolution_supervisor_uid', 'resolution.supervisor@example.com')
+  await assertSucceeds(updateDoc(doc(supervisorDb, 'eocIssues/resolution_review_issue'), {
+    status: 'resolved',
+    version: 3,
+    latestActivity: { id: 'v3_resolution_approved', eventType: 'resolution_approved', actorUserId: 'resolution_supervisor' },
+    resolutionReviewedAt: serverTimestamp(), resolutionReviewedByUserId: 'resolution_supervisor', resolutionReviewedByName: 'Resolution Supervisor', resolutionReviewDecision: 'approve', resolutionReviewNotes: '',
+    resolvedNotes: 'Bathroom cleaned and checked.', resolvedAt: serverTimestamp(), closedAt: serverTimestamp(), resolvedByUserId: 'resolution_supervisor', resolvedByName: 'Resolution Supervisor', photoDeletionDueAt: new Date(Date.now() + 86400000), updatedAt: serverTimestamp()
+  }))
+})
+
+test('app feedback is owned by the BHT and reviewable only by an admin', async () => {
+  await seed('appSettings/authPolicy', { authScopeEnforced: true })
+  await seed('users/feedback_bht', { name: 'Feedback BHT', role: 'bht', active: true, issueLocationIds: ['test_house'], authorizedLocations: ['TEST_HOUSE'], locationId: 'test_house', version: 1 })
+  await seed('usersByAuthUid/feedback_bht_uid', { userId: 'feedback_bht', version: 1 })
+  await seed('users/feedback_supervisor', { name: 'Feedback Supervisor', role: 'supervisor', active: true, issueLocationIds: ['test_house'], authorizedLocations: ['OTC'], version: 1 })
+  await seed('usersByAuthUid/feedback_supervisor_uid', { userId: 'feedback_supervisor', version: 1 })
+  await seed('users/feedback_admin', { name: 'Feedback Admin', role: 'admin', active: true, authorizedLocations: ['GLOBAL'], version: 1 })
+  await seed('usersByAuthUid/feedback_admin_uid', { userId: 'feedback_admin', version: 1 })
+
+  const bhtDb = authed('feedback_bht_uid', 'feedback.bht@example.com')
+  const feedbackRef = doc(bhtDb, 'appFeedback/feedback_test')
+  await assertSucceeds(setDoc(feedbackRef, {
+    schemaVersion: 1, feedbackType: 'app_feedback', originalText: 'The report button did not open.', submittedByUserId: 'feedback_bht', submittedByName: 'Feedback BHT', submittedByRole: 'bht', locationId: 'test_house', shiftId: 'shift_1', route: '/issues', appVersion: 'test', userAgent: 'rules test', localFeedbackId: null, status: 'new', adminNote: '', version: 1, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+  }))
+  await assertSucceeds(getDoc(feedbackRef))
+  await assertSucceeds(setDoc(feedbackRef, {
+    schemaVersion: 1, feedbackType: 'app_feedback', originalText: 'The report button did not open.', submittedByUserId: 'feedback_bht', submittedByName: 'Feedback BHT', submittedByRole: 'bht', locationId: 'test_house', shiftId: 'shift_1', route: '/issues', appVersion: 'test', userAgent: 'rules test', localFeedbackId: null, status: 'new', adminNote: '', version: 1, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+  }))
+  await assertFails(updateDoc(feedbackRef, { originalText: 'Changed employee text', version: 2, updatedAt: serverTimestamp() }))
+
+  const supervisorDb = authed('feedback_supervisor_uid', 'feedback.supervisor@example.com')
+  await assertFails(getDoc(doc(supervisorDb, 'appFeedback/feedback_test')))
+  await assertFails(getDocs(collection(supervisorDb, 'appFeedback')))
+
+  const adminDb = authed('feedback_admin_uid', 'feedback.admin@example.com')
+  await assertSucceeds(getDoc(doc(adminDb, 'appFeedback/feedback_test')))
+  await assertSucceeds(updateDoc(doc(adminDb, 'appFeedback/feedback_test'), {
+    status: 'reviewing', adminNote: 'Reviewing this report.', reviewedByUserId: 'feedback_admin', reviewedByName: 'Feedback Admin', reviewedAt: serverTimestamp(), updatedAt: serverTimestamp(), version: 2
+  }))
+})

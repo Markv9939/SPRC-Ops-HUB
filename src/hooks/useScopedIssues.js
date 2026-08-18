@@ -11,9 +11,10 @@ import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, orderBy, onSnapshot, limit } from 'firebase/firestore'
 import { isAdminRole } from '../utils/orgModel'
+import { ACTIVE_ISSUE_STATUSES, CLOSED_ISSUE_STATUSES } from '../utils/issueModel'
 
-const ACTIVE_STATUSES = ['open', 'in_progress']
-const RESOLVED_STATUSES = ['resolved', 'voided']
+const ACTIVE_STATUSES = ACTIVE_ISSUE_STATUSES
+const RESOLVED_STATUSES = CLOSED_ISSUE_STATUSES
 
 function chunk(values, size) {
   const chunks = []

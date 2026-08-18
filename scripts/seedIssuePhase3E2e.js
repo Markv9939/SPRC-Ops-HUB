@@ -23,7 +23,7 @@ const dueDateShift2 = getCurrentCycleDueDate(getShiftById('shift_2'))
 const writes = [
   ['appSettings/authPolicy', { authScopeEnforced: false, version: 1, updatedAt: now }],
   ['appSettings/eocIssueFeatures', {
-    flags: { recurrence: true, photos: true, offlinePhotos: true, supervisorTools: true, retention: true, strictAuthentication: false },
+    flags: { recurrence: true, photos: true, offlinePhotos: true, supervisorTools: true, issueWorkflowV2: true, retention: true, strictAuthentication: false },
     enabledLocationIds: ['test_house'],
     canaryLabel: 'Synthetic Test House',
     version: 1,
@@ -478,6 +478,12 @@ const writes = [
   }],
   ['eocIssues/phase3_active_issue/activity/v1_reported', {
     issueId: 'phase3_active_issue', eventType: 'reported', label: 'Reported', status: 'open', note: 'Dryer is running but not producing heat.', actorUserId: 'phase3_same_house_bht', actorName: 'Same House Test BHT', locationId: 'test_house', issueVersion: 1, version: 1, immutable: true, createdAt: now
+  }],
+  ['eocIssues/phase3_resolution_mobile', {
+    schemaVersion: 3, source: 'quick_report', issueType: 'house_property', issueTypeLabel: 'House/property', eocType: 'house', locationId: 'test_house', shiftId: 'shift_1', label: 'Mobile resolution review', category: 'Staff report', description: 'Mobile bathroom needs cleaning.', status: 'open', reportedByUserId: 'phase3_bht', reportedByName: 'Phase 3 Test BHT', version: 1, latestActivity: { id: 'v1_reported', eventType: 'reported', label: 'Reported', note: 'Mobile bathroom needs cleaning.', actorUserId: 'phase3_bht', actorName: 'Phase 3 Test BHT', createdAt: now }, createdAt: now, updatedAt: now
+  }],
+  ['eocIssues/phase3_resolution_desktop', {
+    schemaVersion: 3, source: 'quick_report', issueType: 'house_property', issueTypeLabel: 'House/property', eocType: 'house', locationId: 'test_house', shiftId: 'shift_2', label: 'Desktop resolution review', category: 'Staff report', description: 'Desktop bathroom needs cleaning.', status: 'open', reportedByUserId: 'phase3_same_house_bht', reportedByName: 'Same House Test BHT', version: 1, latestActivity: { id: 'v1_reported', eventType: 'reported', label: 'Reported', note: 'Desktop bathroom needs cleaning.', actorUserId: 'phase3_same_house_bht', actorName: 'Same House Test BHT', createdAt: now }, createdAt: now, updatedAt: now
   }],
   ['eocIssues/phase3_resolved_issue', {
     schemaVersion: 2,

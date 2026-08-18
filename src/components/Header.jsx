@@ -11,6 +11,7 @@ import {
   KeyRound,
   LogOut,
   Menu,
+  MessageSquare,
   Radio,
   ReceiptText,
   ShieldCheck,
@@ -31,6 +32,7 @@ const MANAGEMENT_NAV = [
   { id: 'properties', label: 'Properties', icon: Building2 },
   { id: 'fleet', label: 'Fleet', icon: Truck },
   { id: 'cintas', label: 'Cintas', icon: Shirt },
+  { id: 'feedback', label: 'App Feedback', icon: MessageSquare, adminOnly: true },
   { id: 'audit', label: 'Audit', icon: ReceiptText, adminOnly: true }
 ]
 

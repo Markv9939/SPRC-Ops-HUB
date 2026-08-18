@@ -39,6 +39,7 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
   const [debriefAlerts, setDebriefAlerts] = useState([])
   const [issueUpdates, setIssueUpdates] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [unreadIssueUpdateCount, setUnreadIssueUpdateCount] = useState(0)
 
   // Supervisor/admin: scoped eoc + fleet alerts
   useEffect(() => {
@@ -101,6 +102,7 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
           return acc
         }, 0)
         setUnreadCount(count)
+        setUnreadIssueUpdateCount(0)
       },
       (err) => {
         console.error('Scoped supervisor alert listener failed:', err)
@@ -108,6 +110,7 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
         setFleetAlerts([])
         setDebriefAlerts([])
         setUnreadCount(0)
+        setUnreadIssueUpdateCount(0)
       }
     )
 
@@ -133,7 +136,9 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
           .map(d => ({ id: d.id, ...d.data() }))
           .filter(item => item.type === 'eoc_issue_update' || item.type === 'shift_debrief_submitted')
         rows.sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt))
-        setIssueUpdates(rows.filter(item => item.type === 'eoc_issue_update').slice(0, 8))
+        const issueRows = rows.filter(item => item.type === 'eoc_issue_update')
+        setIssueUpdates(issueRows.slice(0, 8))
+        setUnreadIssueUpdateCount(issueRows.length)
         setDebriefAlerts(rows.filter(item => item.type === 'shift_debrief_submitted'))
         setUnreadCount(rows.length)
       },
@@ -142,6 +147,7 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
         setIssueUpdates([])
         setDebriefAlerts([])
         setUnreadCount(0)
+        setUnreadIssueUpdateCount(0)
       }
     )
 
@@ -153,6 +159,7 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
     fleetAlerts,
     debriefAlerts,
     issueUpdates,
-    unreadCount
+    unreadCount,
+    unreadIssueUpdateCount
   }
 }

@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import { RECURRENCE_WINDOW_MS } from '../utils/issueRecurrence'
+import { ACTIVE_ISSUE_STATUSES, ISSUE_STATUS } from '../utils/issueModel'
 
 export async function getMatchingChecklistIssues({ locationId, trackingId, maximum = 5, nowMs = Date.now() }) {
   if (!locationId || !trackingId) return []
@@ -32,7 +33,7 @@ export async function getRelationshipCandidates({ issue, maximum = 12 }) {
   const snap = await getDocs(query(
     collection(db, 'eocIssues'),
     where('locationId', '==', issue.locationId),
-    where('status', 'in', ['open', 'in_progress', 'resolved']),
+    where('status', 'in', [...ACTIVE_ISSUE_STATUSES, ISSUE_STATUS.RESOLVED]),
     orderBy('createdAt', 'desc'),
     limit(Math.max(1, Math.min(20, Number(maximum) || 12)))
   ))

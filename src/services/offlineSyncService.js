@@ -41,6 +41,7 @@ import { toTransportRecordDate } from '../utils/transportRecord'
 import { buildIssueRecord } from '../utils/issueModel'
 import { addPatternObservation, buildIssuePatternId } from '../utils/issueRecurrence'
 import { uploadIssuePhotos } from './issueAttachmentService'
+import { submitAppFeedbackOnline } from './appFeedbackService'
 
 export const OFFLINE_ACTION_TYPES = {
   EOC_SUBMISSION: 'eocSubmission',
@@ -49,6 +50,7 @@ export const OFFLINE_ACTION_TYPES = {
   SHIFT_DEBRIEF_EXTRA_NOTE: 'shiftDebriefExtraNote',
   SHIFT_DEBRIEF_CONFIRMATION: 'shiftDebriefConfirmation',
   BHT_ISSUE_REPORT: 'bhtIssueReport',
+  APP_FEEDBACK: 'appFeedback',
   ISSUE_ATTACHMENT_UPLOAD: 'issueAttachmentUpload',
   TRANSPORT_CREATE: 'transportCreate',
   TRANSPORT_UPDATE: 'transportUpdate',
@@ -137,6 +139,22 @@ export function queueBhtIssueReport(payload) {
   const payloadWithId = { ...payload, localReportId }
   const { cleanPayload, attachments } = detachPayloadPhotos(OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT, payloadWithId, actionId)
   return queueOfflineActionWithAttachments({ id: actionId, type: OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT, payload: cleanPayload, attachments })
+}
+
+export function makeLocalAppFeedbackId() {
+  const suffix = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}_${Math.random().toString(16).slice(2)}`
+  return `local_app_feedback_${suffix}`
+}
+
+export function queueAppFeedback(payload) {
+  const localFeedbackId = payload?.localFeedbackId || makeLocalAppFeedbackId()
+  return queueOfflineAction({
+    id: `app-feedback:${localFeedbackId}`,
+    type: OFFLINE_ACTION_TYPES.APP_FEEDBACK,
+    payload: { ...payload, localFeedbackId }
+  })
 }
 
 export function queueIssuePhotoRetry({ issueId, locationId, photos, kind = 'report', user }) {
@@ -760,6 +778,9 @@ async function processAction(action) {
       })
     } else if (action.type === OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT) {
       syncResult = await submitBhtIssueReportActionOnline(hydratedPayload)
+    } else if (action.type === OFFLINE_ACTION_TYPES.APP_FEEDBACK) {
+      const feedbackResult = await submitAppFeedbackOnline(action.payload)
+      syncResult = { syncedDocumentId: feedbackResult?.feedbackId || '' }
     } else if (action.type === OFFLINE_ACTION_TYPES.ISSUE_ATTACHMENT_UPLOAD) {
       const photoResults = await uploadIssuePhotos({
         issueId: hydratedPayload.issueId,

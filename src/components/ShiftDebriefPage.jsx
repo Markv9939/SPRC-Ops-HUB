@@ -47,6 +47,8 @@ import {
   queueShiftDebriefExtraNote,
   queueShiftDebriefSubmission
 } from '../services/offlineSyncService'
+import useHandoffIssues from '../hooks/useHandoffIssues'
+import { getIssueStatusLabel } from '../utils/issueModel'
 import { cloneRecord, formatConflictFields, mergeRecordFields } from '../utils/collaboration'
 import { showConfirmDialog } from '../utils/dialogs'
 import { formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
@@ -134,6 +136,15 @@ function SubmittedDebriefView({ debrief, user, isOffline, onOpenIssue }) {
   const hasNewCorrections = correctionCount > reviewedCorrectionCount
   const currentUserConfirmation = getCurrentUserConfirmation(debrief, user)
   const confirmationComplete = currentUserConfirmation?.confirmed === true
+  const { issues: liveHandoffIssues, loading: issuesLoading, error: issuesError } = useHandoffIssues(debrief?.locationId, Boolean(debrief?.locationId))
+  const handoffIssues = (!issuesLoading && !issuesError)
+    ? liveHandoffIssues
+    : (debrief.issueSnapshot || []).map(issue => ({ id: issue.issueId, ...issue }))
+  const reviewedIssueMarkers = handoffIssues.slice(0, 50).map(issue => ({
+    issueId: issue.id || issue.issueId,
+    issueVersion: Number(issue.version || 1),
+    latestActivityId: issue.latestActivity?.id || issue.latestActivityId || null
+  }))
 
   useEffect(() => {
     const viewKey = `${debrief.id || ''}:${user?.id || ''}`
@@ -213,15 +224,16 @@ function SubmittedDebriefView({ debrief, user, isOffline, onOpenIssue }) {
     }
     setSavingConfirmation(true)
     try {
+      const confirmationWithIssueReview = { ...confirmation, reviewedIssues: reviewedIssueMarkers }
       if (isOffline) {
         await queueShiftDebriefConfirmation({
           debriefId: debrief.id,
-          confirmation,
+          confirmation: confirmationWithIssueReview,
           user,
           expectedCorrectionCount: reviewedCorrectionCount
         })
       } else {
-        await saveDebriefConfirmation(debrief.id, confirmation, user, {
+        await saveDebriefConfirmation(debrief.id, confirmationWithIssueReview, user, {
           expectedCorrectionCount: reviewedCorrectionCount
         })
         setConfirmationDirty(false)
@@ -256,17 +268,19 @@ function SubmittedDebriefView({ debrief, user, isOffline, onOpenIssue }) {
         <DebriefGroupedReadView items={debrief.items} emptyText="No notes in this debrief." />
       </section>
 
-      {(debrief.issueSnapshot || []).length > 0 && (
+      {handoffIssues.length > 0 && (
         <section className="debrief-document-card debrief-submitted-panel">
-          <div className="debrief-document-header">House Issues at Handoff</div>
+          <div className="debrief-document-header">Current & Recently Resolved Issues</div>
           <div className="debrief-submitted-body debrief-issue-snapshot">
-            {debrief.issueSnapshot.map(issue => (
-              <button type="button" key={issue.issueId} onClick={() => onOpenIssue?.(issue.issueId)} disabled={!onOpenIssue}>
+            {handoffIssues.map(issue => (
+              <button type="button" key={issue.id || issue.issueId} onClick={() => onOpenIssue?.(issue.id || issue.issueId)} disabled={!onOpenIssue}>
                 <span><strong>{issue.label}</strong><small>{issue.description}</small></span>
-                <b>{String(issue.status || '').replace('_', ' ')}</b>
+                <b>{getIssueStatusLabel(issue.status)}</b>
+                {issue.latestActivity?.note && <small className="debrief-issue-latest">Latest: {issue.latestActivity.note}</small>}
               </button>
             ))}
           </div>
+          <div className="debrief-pending-note">Signing this handoff marks only the issue versions shown here as reviewed. New updates will still appear as new.</div>
         </section>
       )}
 

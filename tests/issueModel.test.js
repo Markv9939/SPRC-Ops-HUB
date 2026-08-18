@@ -4,6 +4,8 @@ import {
   buildIssueRecord,
   hasPendingProblemReturned,
   inferIssueType,
+  getIssueStatusLabel,
+  isActiveIssueStatus,
   ISSUE_SCHEMA_VERSION,
   ISSUE_TYPES
 } from '../src/utils/issueModel.js'
@@ -80,4 +82,10 @@ test('problem returned stays pending until a supervisor reopens or closes again'
     { eventType: 'problem_returned' },
     { eventType: 'resolved' }
   ]), false)
+})
+
+test('pending supervisor review remains active until a supervisor closes it', () => {
+  assert.equal(isActiveIssueStatus('pending_supervisor_review'), true)
+  assert.equal(getIssueStatusLabel('pending_supervisor_review'), 'Pending supervisor review')
+  assert.equal(isActiveIssueStatus('resolved'), false)
 })

@@ -129,7 +129,10 @@ export function buildIssueAlertPayload({
     reopened_with_follow_up: `${actorName} reopened "${issueLabel}" and added a follow-up.`,
     checklist_classified: `${actorName} linked "${issueLabel}" to a checklist item.`,
     relationship_unlinked: `${actorName} removed a relationship from "${issueLabel}".`,
-    problem_returned: `${actorName} reported that "${issueLabel}" returned.`
+    problem_returned: `${actorName} reported that "${issueLabel}" returned.`,
+    resolution_submitted: `${actorName} completed "${issueLabel}" and submitted it for supervisor review.`,
+    resolution_approved: `${actorName} approved the resolution for "${issueLabel}".`,
+    resolution_returned: `${actorName} returned "${issueLabel}" to active work.`
   }
 
   return {
@@ -187,6 +190,48 @@ export async function fanOutIssueAlerts({ issue, activity, eventType, actorUser 
 
   if (written > 0) await batch.commit()
   return { written }
+}
+
+export async function markIssueAlertsReadThrough({ userId, reviewedIssues, userName = '' }) {
+  const normalizedUserId = trimOrNull(userId)
+  const reviewedByIssueId = new Map((Array.isArray(reviewedIssues) ? reviewedIssues : [])
+    .map(item => [String(item?.issueId || item?.id || '').trim(), {
+      version: Number(item?.issueVersion ?? item?.version ?? 0),
+      latestActivityId: String(item?.latestActivityId || item?.latestActivity?.id || '').trim()
+    }])
+    .filter(([issueId, marker]) => issueId && Number.isFinite(marker.version) && marker.version > 0))
+  if (!normalizedUserId || reviewedByIssueId.size === 0) return { updated: 0 }
+
+  const snap = await getDocs(query(
+    collection(db, 'alerts'),
+    where('audience', '==', 'bht'),
+    where('targetUserId', '==', normalizedUserId),
+    where('read', '==', false)
+  ))
+  const batch = writeBatch(db)
+  let updated = 0
+  snap.docs.forEach(row => {
+    const alert = row.data()
+    if (alert.type !== 'eoc_issue_update') return
+    const reviewed = reviewedByIssueId.get(String(alert.issueId || '').trim())
+    const alertVersion = Number(alert.issueVersion || 1)
+    if (!reviewed || alertVersion > reviewed.version) return
+    if (alertVersion === reviewed.version) {
+      const alertActivityId = String(alert.activityId || '').trim()
+      if (alertActivityId && alertActivityId !== reviewed.latestActivityId) return
+    }
+    batch.update(row.ref, {
+      read: true,
+      readAt: serverTimestamp(),
+      readByUserId: normalizedUserId,
+      readByName: trimOrNull(userName),
+      updatedAt: serverTimestamp(),
+      version: Number(alert.version || 1) + 1
+    })
+    updated += 1
+  })
+  if (updated > 0) await batch.commit()
+  return { updated }
 }
 
 // ---------------------------------------------------------------------------

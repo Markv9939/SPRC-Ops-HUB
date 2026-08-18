@@ -3,7 +3,7 @@ import { AlertTriangle, ChevronRight, Download, Search } from 'lucide-react'
 import { LOCATIONS, VANS } from '../data/eocConstants'
 import useScopedIssues from '../hooks/useScopedIssues'
 import useUserScope from '../hooks/useUserScope'
-import { getIssueSourceLabel, getIssueTypeMeta, inferIssueType, ISSUE_TYPES } from '../utils/issueModel'
+import { getIssueSourceLabel, getIssueStatusLabel, getIssueTypeMeta, inferIssueType, isActiveIssueStatus, isClosedIssueStatus, ISSUE_TYPES } from '../utils/issueModel'
 import EocTemplateManager from './EocTemplateManager'
 import useOfflinePhotoQueue from '../hooks/useOfflinePhotoQueue'
 import useSupervisorEocOverview from '../hooks/useSupervisorEocOverview'
@@ -13,11 +13,7 @@ import usePhotoRetentionMetrics from '../hooks/usePhotoRetentionMetrics'
 import { isAdminRole } from '../utils/orgModel'
 
 function statusLabel(status) {
-  const normalized = String(status || 'open').toLowerCase()
-  if (normalized === 'in_progress') return 'IN PROGRESS'
-  if (normalized === 'resolved') return 'RESOLVED'
-  if (normalized === 'voided') return 'VOIDED'
-  return 'OPEN'
+  return getIssueStatusLabel(status).toUpperCase()
 }
 
 function SupervisorEocPanel({
@@ -84,8 +80,8 @@ function SupervisorEocPanel({
       const inferredType = inferIssueType(issue)
       if (filterLocation !== 'all' && issue.locationId !== filterLocation) return false
       if (filterType !== 'all' && inferredType !== filterType) return false
-      if (filterStatus === 'active' && !['open', 'in_progress'].includes(status)) return false
-      if (filterStatus === 'resolved' && !['resolved', 'voided'].includes(status)) return false
+      if (filterStatus === 'active' && !isActiveIssueStatus(status)) return false
+      if (filterStatus === 'resolved' && !isClosedIssueStatus(status)) return false
       if (filterSource !== 'all' && issue.source !== filterSource) return false
       if (filterRecurrence === 'recurring' && issue.recurringIssue !== true) return false
       if (filterRecurrence === 'reported_before' && issue.reportedBefore !== true) return false

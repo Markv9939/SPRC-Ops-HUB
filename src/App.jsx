@@ -27,17 +27,20 @@ import {
   getTransportDraftId,
   isLocalTransportId,
   makeLocalTransportId,
+  queueAppFeedback,
   queueBhtIssueReport,
   queueIssuePhotoRetry,
   queueTransportCreate,
   syncOfflineOutbox
 } from './services/offlineSyncService'
 import { submitBhtIssueReportOnline } from './services/bhtIssueReportService'
+import { submitAppFeedbackOnline } from './services/appFeedbackService'
 import { requireOnline } from './utils/networkGuard'
 import { notifySuccess } from './utils/toast'
 import Onboarding from './components/Onboarding'
 import { installAlertDialogBridge, showPromptDialog } from './utils/dialogs'
 import NotificationCenter from './components/NotificationCenter'
+import ReportIssueModal from './components/ReportIssueModal'
 import useUserScope from './hooks/useUserScope'
 import useScopedAlerts from './hooks/useScopedAlerts'
 import { shouldShowOnboarding } from './utils/onboarding'
@@ -66,6 +69,7 @@ const DASHBOARD_TABS = new Set([
   'properties',
   'fleet',
   'cintas',
+  'feedback',
   'audit'
 ])
 
@@ -284,7 +288,7 @@ function App() {
   const [bhtDebriefSummary, setBhtDebriefSummary] = useState({ available: false, status: 'none', itemCount: 0, pendingQuickItemCount: 0 })
   // Alert count and issue updates from shared hooks
   const { inEocScope, inComplianceScope, exactIssueLocationIds, inIssueScope } = useUserScope(user)
-  const { eocAlerts, fleetAlerts, debriefAlerts, unreadCount: alertCount, issueUpdates } = useScopedAlerts({
+  const { eocAlerts, fleetAlerts, debriefAlerts, unreadCount: alertCount, issueUpdates, unreadIssueUpdateCount } = useScopedAlerts({
     user,
     inEocScope,
     inComplianceScope,
@@ -299,9 +303,9 @@ function App() {
   const [pendingEocTaskIds, setPendingEocTaskIds] = useState([])
   const [isChangePinOpen, setIsChangePinOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
+  const [isReportIssueOpen, setIsReportIssueOpen] = useState(false)
   const [dashboardNavigationTarget, setDashboardNavigationTarget] = useState(null)
   const dashboardTab = activeRoute.dashboardTab || 'dashboard'
-  const [focusedIssueUpdateId, setFocusedIssueUpdateId] = useState(null)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const bhtHeaderSubtitle = buildBhtHeaderSubtitle(user)
   const pendingSyncCount = offlineOutboxSummary.pending + offlineOutboxSummary.syncing + offlineOutboxSummary.failed
@@ -879,6 +883,26 @@ function App() {
     notifySuccess('Issue reported')
   }
 
+  async function handleSubmitAppFeedback(report) {
+    const payload = {
+      user,
+      assignment: report?.assignment || bhtDebriefAssignment,
+      description: report?.description || '',
+      context: {
+        route: `${window.location.pathname}${window.location.search}`,
+        appVersion: import.meta.env.VITE_APP_VERSION || '',
+        userAgent: navigator.userAgent
+      }
+    }
+    if (isOffline) {
+      await queueAppFeedback(payload)
+      notifySuccess('Feedback saved on this device')
+      return
+    }
+    await submitAppFeedbackOnline(payload)
+    notifySuccess('Feedback submitted')
+  }
+
   function handleEocComplete() {
     navigateHome()
   }
@@ -1057,7 +1081,6 @@ function App() {
       return
     }
 
-    setFocusedIssueUpdateId(alert?.id || null)
     if (alert?.issueId) {
       navigate(`/issues/${encodeURIComponent(alert.issueId)}`)
       return
@@ -1139,6 +1162,20 @@ function App() {
         onNavigateToFleet={handleNavigateToFleet}
         onNavigateToDebrief={handleNavigateToDebrief}
       />
+      {isBhtRole(user?.role) && (
+        <ReportIssueModal
+          isOpen={isReportIssueOpen}
+          onClose={() => setIsReportIssueOpen(false)}
+          user={user}
+          assignment={bhtDebriefAssignment}
+          locationIds={exactIssueLocationIds}
+          inIssueScope={inIssueScope}
+          isOffline={isOffline}
+          onSubmitIssue={handleReportIssue}
+          onSubmitFeedback={handleSubmitAppFeedback}
+          onNavigateToIssues={() => navigate('/issues')}
+        />
+      )}
       <DialogHost />
       <ToastHost />
     </>
@@ -1216,7 +1253,7 @@ function App() {
         isOffline={isOffline}
         onBack={() => navigateHome()}
         onOpenIssue={(issueId) => navigate(`/issues/${encodeURIComponent(issueId)}`)}
-        onReportIssue={handleReportIssue}
+        onOpenReportIssue={() => setIsReportIssueOpen(true)}
         assignment={bhtDebriefAssignment}
       />,
       { title: 'Issues', showBack: true, onBack: () => navigateHome() }
@@ -1272,12 +1309,11 @@ function App() {
         user={user}
         transports={transports}
         isOffline={isOffline}
-        issueUpdates={issueUpdates}
-        focusedIssueUpdateId={focusedIssueUpdateId}
+        unseenIssueCount={unreadIssueUpdateCount}
         onNewTransport={handleNewTransport}
         onContinueTransport={handleContinueTransport}
         onStartEoc={handleStartEoc}
-        onReportIssue={handleReportIssue}
+        onOpenReportIssue={() => setIsReportIssueOpen(true)}
         onAddDebriefNote={handleAddDebriefNote}
         onEditDebrief={handleEditDebrief}
         onDebriefAssignmentChange={setBhtDebriefAssignment}

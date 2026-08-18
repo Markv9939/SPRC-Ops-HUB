@@ -17,6 +17,7 @@ const payload = {
     photos: false,
     offlinePhotos: false,
     supervisorTools: false,
+    issueWorkflowV2: false,
     retention: false,
     strictAuthentication: false
   },

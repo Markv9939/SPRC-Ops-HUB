@@ -21,7 +21,7 @@
     "test:eoc:supervisor": "node --test tests/supervisorEocModel.test.js",
     "test:function-models": "node --test functions/tests/retentionModel.test.js",
     "test:functions:emulator": "firebase emulators:exec --project demo-sprc-functions --only firestore,auth,storage,functions \"node --test functions/tests/retention.emulator.test.js\"",
-    "test:issues": "node --test tests/issueModel.test.js tests/issueRecurrence.test.js tests/featureFlags.test.js tests/photoModel.test.js",
+    "test:issues": "node --test tests/issueModel.test.js tests/issueRecurrence.test.js tests/featureFlags.test.js tests/photoModel.test.js tests/appFeedbackModel.test.js",
     "test:issues:seed": "node scripts/seedIssuePhase3E2e.js",
     "test:issues:e2e:verify": "node scripts/verifyIssuePhase3E2e.js",
     "test:eoc-issues:browser": "firebase emulators:exec --project sprc-ops-hub-phase3-e2e --only firestore,auth,storage \"node scripts/seedIssuePhase3E2e.js && playwright test\"",

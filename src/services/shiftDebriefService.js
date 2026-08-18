@@ -39,8 +39,11 @@ import {
   mergeUniqueDebriefItems,
   removeDebriefRecordById,
   sanitizeDebriefItems,
+  sanitizeReviewedIssues,
   normalizeDebriefClientName
 } from './shiftDebriefModel'
+import { ACTIVE_ISSUE_STATUSES } from '../utils/issueModel'
+import { markIssueAlertsReadThrough } from './notificationService'
 
 export {
   CLIENT_NOTE_SECTIONS,
@@ -293,7 +296,7 @@ export async function submitShiftDebrief(context, items, user) {
       getDocs(query(
         collection(db, 'eocIssues'),
         where('locationId', '==', context.locationId),
-        where('status', 'in', ['open', 'in_progress']),
+        where('status', 'in', ACTIVE_ISSUE_STATUSES),
         orderBy('createdAt', 'desc'),
         limit(25)
       )),
@@ -316,7 +319,11 @@ export async function submitShiftDebrief(context, items, user) {
         issueType: issue.issueType || '',
         reportedByName: issue.reportedByName || '',
         createdAt: issue.createdAt || null,
-        closedAt: issue.closedAt || null
+        closedAt: issue.closedAt || null,
+        version: Number(issue.version || 1),
+        latestActivityId: issue.latestActivity?.id || null,
+        latestActivity: issue.latestActivity || null,
+        updatedAt: issue.updatedAt || null
       }
     })
   } catch (error) {
@@ -406,6 +413,7 @@ export async function saveDebriefConfirmation(debriefId, confirmation, user, opt
     throw new Error('This confirmation needs review against the latest debrief before it can be saved.')
   }
   let currentAcknowledged = false
+  const reviewedIssues = sanitizeReviewedIssues(confirmation?.reviewedIssues)
   await runTransaction(db, async transaction => {
     const debriefSnap = await transaction.get(debriefRef)
     if (!debriefSnap.exists()) throw new Error('Submitted debrief was not found.')
@@ -449,6 +457,7 @@ export async function saveDebriefConfirmation(debriefId, confirmation, user, opt
 
   if (currentAcknowledged && currentUserId) {
     await markCurrentUserHandoffAlertsRead({ debriefId, userId: currentUserId })
+    await markIssueAlertsReadThrough({ userId: currentUserId, userName: user?.name, reviewedIssues })
     await setDoc(doc(db, 'userHomeState', currentUserId), {
       reviewedDebriefIds: arrayUnion(debriefId),
       lastReviewedDebriefId: debriefId,

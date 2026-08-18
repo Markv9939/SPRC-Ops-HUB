@@ -3,9 +3,9 @@ import { doc, collection, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { ArrowLeft, CheckCircle2, Clock, Link2, RotateCcw, ShieldAlert, Unlink } from 'lucide-react'
 import { db } from '../firebase'
 import { LOCATIONS, VANS } from '../data/eocConstants'
-import { addBhtIssueFollowUp, addIssueNote, requestIssueReopen, updateIssueStatus } from '../services/issueStatusService'
-import { isAdminRole, isSupervisorRole } from '../utils/orgModel'
-import { getIssueSourceLabel, getIssueTypeMeta, hasPendingProblemReturned, inferIssueType } from '../utils/issueModel'
+import { addBhtIssueFollowUp, addIssueNote, requestIssueReopen, reviewIssueResolution, submitIssueResolutionForReview, updateIssueStatus } from '../services/issueStatusService'
+import { isAdminRole, isBhtRole, isSupervisorRole } from '../utils/orgModel'
+import { getIssueSourceLabel, getIssueStatusLabel, getIssueTypeMeta, hasPendingProblemReturned, inferIssueType, ISSUE_STATUS } from '../utils/issueModel'
 import useEocIssueFeatures from '../hooks/useEocIssueFeatures'
 import { getChecklistChoicesForLocation, getRelationshipCandidates } from '../services/issueRecurrenceService'
 import { classifyQuickReport, keepIssueSeparate, linkIssueAsFollowUp, unlinkIssueRelationship } from '../services/issueRelationshipService'
@@ -13,6 +13,7 @@ import IssuePhotoPicker from './IssuePhotoPicker'
 import IssuePhotoGallery from './IssuePhotoGallery'
 import { uploadIssuePhotos } from '../services/issueAttachmentService'
 import { queueIssuePhotoRetry } from '../services/offlineSyncService'
+import { markIssueAlertsReadThrough } from '../services/notificationService'
 
 function toDate(value) {
   if (!value) return null
@@ -33,11 +34,7 @@ function relativeTime(value) {
 }
 
 function statusLabel(status) {
-  const normalized = String(status || 'open').toLowerCase()
-  if (normalized === 'in_progress') return 'IN PROGRESS'
-  if (normalized === 'resolved') return 'RESOLVED'
-  if (normalized === 'voided') return 'VOIDED'
-  return 'OPEN'
+  return getIssueStatusLabel(status).toUpperCase()
 }
 
 function locationLabel(locationId) {
@@ -63,6 +60,10 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
   const [relationshipReason, setRelationshipReason] = useState('')
   const [savingRelationship, setSavingRelationship] = useState(false)
   const [resolutionPhotos, setResolutionPhotos] = useState([])
+  const [resolutionSubmitNote, setResolutionSubmitNote] = useState('')
+  const [submittingResolution, setSubmittingResolution] = useState(false)
+  const [reviewNote, setReviewNote] = useState('')
+  const [reviewingResolution, setReviewingResolution] = useState(false)
   const [returnPhotos, setReturnPhotos] = useState([])
   const { enabledForLocation } = useEocIssueFeatures()
 
@@ -111,9 +112,21 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
 
   const canManage = useMemo(() => isSupervisorRole(user?.role) || isAdminRole(user?.role), [user?.role])
   const isClosed = ['resolved', 'voided'].includes(String(issue?.status || '').toLowerCase())
+  const isPendingSupervisorReview = String(issue?.status || '').toLowerCase() === ISSUE_STATUS.PENDING_SUPERVISOR_REVIEW
+  const workflowV2Enabled = enabledForLocation('issueWorkflowV2', issue?.locationId)
   const canReportReturned = !canManage && issue?.status === 'resolved'
   const returnAlreadyRequested = hasPendingProblemReturned(activities)
-  const canAddFollowUp = !canManage && !isClosed
+  const canAddFollowUp = !canManage && !isClosed && !isPendingSupervisorReview
+  const canSubmitResolution = workflowV2Enabled && isBhtRole(user?.role) && [ISSUE_STATUS.OPEN, ISSUE_STATUS.IN_PROGRESS].includes(String(issue?.status || '').toLowerCase())
+
+  useEffect(() => {
+    if (!issue?.id || !isBhtRole(user?.role) || isOffline) return
+    markIssueAlertsReadThrough({
+      userId: user.id,
+      userName: user.name,
+      reviewedIssues: [{ issueId: issue.id, issueVersion: issue.version || 1 }]
+    }).catch(error => console.warn('Issue alert review marker failed:', error))
+  }, [isOffline, issue?.id, issue?.version, user?.id, user?.name, user?.role])
 
   const retainFailedPhotos = async ({ photos, results, kind }) => {
     const failedIds = new Set((results || []).filter(item => item.state !== 'uploaded').map(item => item.attachmentId))
@@ -238,6 +251,57 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
     }
   }
 
+  const submitResolutionForReview = async event => {
+    event?.preventDefault()
+    if (!issue || !resolutionSubmitNote.trim()) return
+    if (isOffline) {
+      alert('Submitting a resolution for supervisor review requires an internet connection.')
+      return
+    }
+    setSubmittingResolution(true)
+    try {
+      await submitIssueResolutionForReview({
+        issueId: issue.id,
+        expectedIssue: issue,
+        note: resolutionSubmitNote,
+        actorUser: user
+      })
+      if (resolutionPhotos.length > 0) {
+        const results = await uploadIssuePhotos({ issueId: issue.id, locationId: issue.locationId, photos: resolutionPhotos, kind: 'resolution', uploader: user })
+        if (await retainFailedPhotos({ photos: resolutionPhotos, results, kind: 'resolution' })) {
+          alert('The issue was submitted for review. A failed photo will retry automatically from this device.')
+        }
+      }
+      setResolutionSubmitNote('')
+      setResolutionPhotos([])
+    } catch (error) {
+      alert(error?.message || 'The issue could not be submitted for supervisor review.')
+    } finally {
+      setSubmittingResolution(false)
+    }
+  }
+
+  const reviewResolution = async decision => {
+    if (!issue || reviewingResolution) return
+    if (isOffline) {
+      alert('Supervisor review requires an internet connection.')
+      return
+    }
+    if (decision === 'return' && !reviewNote.trim()) {
+      alert('Explain why this issue is being returned to active work.')
+      return
+    }
+    setReviewingResolution(true)
+    try {
+      await reviewIssueResolution({ issueId: issue.id, expectedIssue: issue, decision, note: reviewNote, actorUser: user })
+      setReviewNote('')
+    } catch (error) {
+      alert(error?.message || 'The resolution review could not be saved.')
+    } finally {
+      setReviewingResolution(false)
+    }
+  }
+
   const runRelationshipAction = async (actionName) => {
     if (!issue || isOffline) {
       alert('Relationship updates require an internet connection.')
@@ -337,9 +401,9 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
           <select value={action} onChange={(event) => setAction(event.target.value)}>
             <option value="">Choose action</option>
             <option value="note_added">Add note</option>
-            {!isClosed && issue.status === 'open' && <option value="in_progress">Mark in progress</option>}
-            {!isClosed && <option value="resolved">Resolve</option>}
-            {!isClosed && <option value="voided">Void</option>}
+            {!isClosed && !isPendingSupervisorReview && issue.status === 'open' && <option value="in_progress">Mark in progress</option>}
+            {!isClosed && !isPendingSupervisorReview && <option value="resolved">Resolve</option>}
+            {!isClosed && !isPendingSupervisorReview && <option value="voided">Void</option>}
             {isClosed && <option value="open">Reopen</option>}
           </select>
           <textarea
@@ -351,6 +415,18 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
           {photosEnabled && action === 'resolved' && <IssuePhotoPicker value={resolutionPhotos} onChange={setResolutionPhotos} disabled={saving} label="Add resolution photos" />}
           <button type="submit" disabled={!action || !note.trim() || saving}>{saving ? 'Saving...' : 'Save update'}</button>
         </form>
+      )}
+
+      {canManage && isPendingSupervisorReview && (
+        <section className="issue-resolution-review">
+          <h2>Resolution awaiting supervisor review</h2>
+          <p><strong>Staff completion note:</strong> {issue.resolutionSubmittedNotes || 'No completion note available.'}</p>
+          <textarea rows={3} value={reviewNote} onChange={event => setReviewNote(event.target.value)} placeholder="Optional approval note, or required reason when returning to active work." />
+          <div>
+            <button type="button" onClick={() => reviewResolution('return')} disabled={reviewingResolution || !reviewNote.trim()}>Return to active</button>
+            <button type="button" onClick={() => reviewResolution('approve')} disabled={reviewingResolution}>{reviewingResolution ? 'Saving...' : 'Approve & fully resolve'}</button>
+          </div>
+        </section>
       )}
 
       {canManage && recurrenceEnabled && (
@@ -397,6 +473,26 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
             {savingFollowUp ? 'Adding...' : 'Add follow-up'}
           </button>
         </form>
+      )}
+
+      {canSubmitResolution && (
+        <form className="issue-detail-actions issue-resolution-submit" onSubmit={submitResolutionForReview}>
+          <div className="issue-follow-up-heading">Work completed?</div>
+          <textarea
+            rows={3}
+            value={resolutionSubmitNote}
+            onChange={event => setResolutionSubmitNote(event.target.value)}
+            placeholder="Describe what you completed and anything the supervisor should verify."
+          />
+          {photosEnabled && <IssuePhotoPicker value={resolutionPhotos} onChange={setResolutionPhotos} disabled={submittingResolution} label="Add resolution photo (optional)" />}
+          <button type="submit" disabled={!resolutionSubmitNote.trim() || submittingResolution}>
+            {submittingResolution ? 'Submitting...' : 'Mark issue resolved & submit for supervisor review'}
+          </button>
+        </form>
+      )}
+
+      {!canManage && isPendingSupervisorReview && (
+        <div className="issue-returned-status"><Clock size={17} /> Submitted for supervisor review. A supervisor must approve it before it is fully resolved.</div>
       )}
 
       {canReportReturned && returnAlreadyRequested && (

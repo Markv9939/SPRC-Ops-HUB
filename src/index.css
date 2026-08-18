@@ -298,6 +298,155 @@
   color: #8A5B18;
 }
 
+.location-issue-pill-pending_supervisor_review {
+  background: #fff4d6;
+  color: #815500;
+  border-color: #e9c46a;
+}
+
+.hub-action-row-unseen {
+  box-shadow: inset 4px 0 0 #c94a3f;
+}
+
+.shared-report-form {
+  display: grid;
+  gap: 10px;
+}
+
+.shared-report-form label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.shared-report-form textarea,
+.shared-report-form select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.shared-report-existing-note,
+.shared-report-existing-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.shared-report-existing-note {
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(176, 122, 40, 0.08);
+  font-size: 13px;
+}
+
+.shared-report-existing-note button,
+.shared-report-existing-actions button,
+.my-app-feedback-toggle {
+  border: 0;
+  background: transparent;
+  color: #174c75;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.app-feedback-privacy-note {
+  padding: 10px;
+  border-radius: 8px;
+  background: #eef5fa;
+  color: #26485f;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.issue-resolution-review,
+.my-app-feedback,
+.admin-feedback-panel {
+  margin-top: 18px;
+}
+
+.issue-resolution-review {
+  padding: 16px;
+  border: 1px solid #e2bf65;
+  border-radius: 12px;
+  background: #fff9e8;
+}
+
+.issue-resolution-review textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 10px 0;
+}
+
+.issue-resolution-review > div {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.my-app-feedback {
+  border-top: 1px solid rgba(17, 47, 82, 0.12);
+  padding-top: 12px;
+}
+
+.my-app-feedback-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.my-app-feedback-toggle svg.is-open { transform: rotate(90deg); }
+
+.my-app-feedback-list,
+.admin-feedback-list {
+  display: grid;
+  gap: 12px;
+}
+
+.my-app-feedback-list article,
+.admin-feedback-list article {
+  border: 1px solid rgba(17, 47, 82, 0.14);
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+}
+
+.my-app-feedback-list article > span {
+  font-size: 12px;
+  font-weight: 800;
+  color: #815500;
+}
+
+.admin-feedback-header,
+.admin-feedback-list article header,
+.admin-feedback-controls {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-feedback-controls {
+  align-items: stretch;
+  margin-top: 12px;
+}
+
+.admin-feedback-controls textarea { flex: 1; }
+
+.debrief-issue-latest {
+  grid-column: 1 / -1;
+  text-align: left;
+}
+
+@media (max-width: 700px) {
+  .admin-feedback-header,
+  .admin-feedback-controls,
+  .issue-resolution-review > div {
+    flex-direction: column;
+  }
+}
+
 .location-issue-pill-resolved {
   background: #E3F2E4;
   color: var(--color-success);

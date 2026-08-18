@@ -96,6 +96,12 @@ test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', asy
   await page.getByRole('button', { name: /^Active/ }).click()
 
   await page.getByRole('button', { name: /Report$/ }).click()
+  expect(await page.locator('.location-report-modal option').allTextContents()).toEqual([
+    'House/property', 'Van/vehicle', 'Safety concern', 'App bug or suggestion', 'Other'
+  ])
+  await page.locator('.location-report-modal select').first().selectOption('app_feedback')
+  await expect(page.getByText(/Do not include client names/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /Add photo/ })).toHaveCount(0)
   await page.locator('.location-report-modal select').first().selectOption('safety_concern')
   await expect(page.getByRole('alert')).toContainText('If anyone is in immediate danger, follow emergency procedures and contact a supervisor before submitting this report.')
   await page.locator('.location-report-modal textarea').fill(unique)
@@ -279,4 +285,27 @@ test('House and Van EOC area rail works at the project viewport', async ({ page 
   await page.getByLabel('Odometer reading').fill('45231')
   await page.getByRole('button', { name: 'Submit EOC' }).click()
   await expect(page).toHaveURL(/\/home$/)
+})
+
+test('BHT resolution requires supervisor approval', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === 'tablet', 'Resolution review is covered at mobile and desktop sizes.')
+  const issueId = testInfo.project.name === 'desktop' ? 'phase3_resolution_desktop' : 'phase3_resolution_mobile'
+  await login(page, testInfo.project.metadata.pin)
+  await page.goto(`/issues/${issueId}`)
+  await expect(page.getByRole('button', { name: 'Mark issue resolved & submit for supervisor review' })).toBeVisible()
+  await page.getByPlaceholder(/Describe what you completed/).fill('Bathroom cleaned, supplies restocked, and area checked.')
+  await page.getByRole('button', { name: 'Mark issue resolved & submit for supervisor review' }).click()
+  await expect(page.getByText(/Submitted for supervisor review. A supervisor must approve/)).toBeVisible()
+  await expect(page.locator('.location-issue-pill-pending_supervisor_review')).toContainText('PENDING SUPERVISOR REVIEW')
+
+  await page.evaluate(() => {
+    sessionStorage.clear()
+    localStorage.removeItem('lastActivity')
+  })
+  await login(page, '222222')
+  await page.goto(`/issues/${issueId}`)
+  await expect(page.getByRole('heading', { name: 'Resolution awaiting supervisor review' })).toBeVisible()
+  await page.getByRole('button', { name: 'Approve & fully resolve' }).click()
+  await expect(page.locator('.location-issue-pill-resolved')).toContainText('RESOLVED')
+  await assertNoOverflow(page)
 })

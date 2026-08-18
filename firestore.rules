@@ -1142,46 +1142,56 @@ service cloud.firestore {
         && authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
         && validVersionField(request.resource.data);
 
-      allow update: if request.resource.data.status in ['open', 'in_progress', 'resolved', 'voided']
-        && authRoleAllowed(['supervisor', 'admin'])
-        && exactIssueLocationAllowed(request.resource.data.locationId)
-        && validVersionField(request.resource.data)
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'source', 'sourceTrackingId', 'trackingId', 'recurrenceEligible'
-        ])
-        && (
-          !(
-            ('parentIssueId' in resource.data)
-            && resource.data.parentIssueId != null
-            && request.resource.data.parentIssueId == null
+      allow update: if (
+          (
+            validBhtResolutionTransition(resource.data, request.resource.data)
+            && (hasLegacyAuthSession() || strictBhtIssueActor(request.resource.data))
+            && createdAtUnchanged()
           )
-          || authRoleAllowed(['admin'])
-        )
-        && (
-          !(
-            ('linkedTrackingId' in resource.data)
-            && resource.data.linkedTrackingId != null
-            && request.resource.data.linkedTrackingId == null
-          )
-          || authRoleAllowed(['admin'])
-        )
-        && (
-          !(request.resource.data.status in ['resolved', 'voided'])
           || (
-            request.resource.data.closedAt != null
+            request.resource.data.status in ['open', 'in_progress', 'pending_supervisor_review', 'resolved', 'voided']
+            && authRoleAllowed(['supervisor', 'admin'])
+            && exactIssueLocationAllowed(request.resource.data.locationId)
+            && request.resource.data.locationId == resource.data.locationId
+            && validVersionField(request.resource.data)
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+              'source', 'sourceTrackingId', 'trackingId', 'recurrenceEligible'
+            ])
             && (
-              (request.resource.data.status == 'resolved'
-                && request.resource.data.keys().hasAny(['resolvedNotes'])
-                && request.resource.data.resolvedNotes is string
-                && request.resource.data.resolvedNotes.size() > 0)
-              || (request.resource.data.status == 'voided'
-                && request.resource.data.keys().hasAny(['voidReason'])
-                && request.resource.data.voidReason is string
-                && request.resource.data.voidReason.size() > 0)
+              !(
+                ('parentIssueId' in resource.data)
+                && resource.data.parentIssueId != null
+                && request.resource.data.parentIssueId == null
+              )
+              || authRoleAllowed(['admin'])
             )
+            && (
+              !(
+                ('linkedTrackingId' in resource.data)
+                && resource.data.linkedTrackingId != null
+                && request.resource.data.linkedTrackingId == null
+              )
+              || authRoleAllowed(['admin'])
+            )
+            && (
+              !(request.resource.data.status in ['resolved', 'voided'])
+              || (
+                request.resource.data.closedAt != null
+                && (
+                  (request.resource.data.status == 'resolved'
+                    && request.resource.data.keys().hasAny(['resolvedNotes'])
+                    && request.resource.data.resolvedNotes is string
+                    && request.resource.data.resolvedNotes.size() > 0)
+                  || (request.resource.data.status == 'voided'
+                    && request.resource.data.keys().hasAny(['voidReason'])
+                    && request.resource.data.voidReason is string
+                    && request.resource.data.voidReason.size() > 0)
+                )
+              )
+            )
+            && createdAtUnchanged()
           )
-        )
-        && createdAtUnchanged();
+        );
       allow delete: if false;
 
       match /activity/{activityId} {
@@ -1191,10 +1201,10 @@ service cloud.firestore {
           && exactIssueLocationAllowed(request.resource.data.locationId)
           && request.resource.data.immutable == true
           && (
-            !(request.resource.data.eventType in ['problem_returned', 'bht_follow_up'])
+            !(request.resource.data.eventType in ['problem_returned', 'bht_follow_up', 'resolution_submitted'])
             || hasLegacyAuthSession()
             || (
-              authRoleAllowed(['bht', 'tech'])
+              authProfile().role in ['bht', 'tech']
               && request.resource.data.actorUserId == authAppUserId()
             )
           )
@@ -1257,6 +1267,76 @@ service cloud.firestore {
           && validVersionField(request.resource.data);
         allow update, delete: if false;
       }
+    }
+
+    function validBhtResolutionTransition(before, after) {
+      return before.status in ['open', 'in_progress']
+        && after.status == 'pending_supervisor_review'
+        && after.locationId == before.locationId
+        && after.version == before.version + 1
+        && after.latestActivity.eventType == 'resolution_submitted'
+        && after.latestActivity.actorUserId == after.resolutionSubmittedByUserId
+        && after.resolutionSubmittedNotes is string
+        && after.resolutionSubmittedNotes.size() > 0
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'version', 'latestActivity',
+          'resolutionSubmittedNotes', 'resolutionSubmittedAt',
+          'resolutionSubmittedByUserId', 'resolutionSubmittedByName', 'updatedAt'
+        ]);
+    }
+
+    function strictBhtIssueActor(data) {
+      let userId = authAppUserId();
+      let profile = get(/databases/$(database)/documents/users/$(userId)).data;
+      return signedIn()
+        && userId != ''
+        && profile.active == true
+        && profile.role in ['bht', 'tech']
+        && profile.issueLocationIds is list
+        && data.locationId in profile.issueLocationIds
+        && data.resolutionSubmittedByUserId == userId;
+    }
+
+    // App feedback is intentionally separate from operational EOC issues.
+    match /appFeedback/{docId} {
+      allow read: if hasLegacyAuthSession()
+        || authRoleAllowed(['admin'])
+        || (
+          authRoleAllowed(['bht', 'tech'])
+          && resource.data.submittedByUserId == authAppUserId()
+        );
+
+      allow create: if (hasLegacyAuthSession() || authRoleAllowed(['bht', 'tech']))
+        && (hasLegacyAuthSession() || request.resource.data.submittedByUserId == authAppUserId())
+        && request.resource.data.feedbackType == 'app_feedback'
+        && request.resource.data.originalText is string
+        && request.resource.data.originalText.size() > 0
+        && request.resource.data.status == 'new'
+        && validVersionField(request.resource.data);
+
+      allow update: if (
+          authRoleAllowed(['admin'])
+          && request.resource.data.originalText == resource.data.originalText
+          && request.resource.data.submittedByUserId == resource.data.submittedByUserId
+          && request.resource.data.feedbackType == resource.data.feedbackType
+          && request.resource.data.status in ['new', 'reviewing', 'planned', 'completed', 'duplicate', 'not_actionable']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'adminNote', 'reviewedByUserId', 'reviewedByName',
+            'reviewedAt', 'updatedAt', 'version'
+          ])
+          && validVersionField(request.resource.data)
+          && createdAtUnchanged()
+        )
+        || (
+          (hasLegacyAuthSession() || authRoleAllowed(['bht', 'tech']))
+          && (hasLegacyAuthSession() || resource.data.submittedByUserId == authAppUserId())
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['createdAt', 'updatedAt'])
+          && request.resource.data.originalText == resource.data.originalText
+          && request.resource.data.status == 'new'
+          && request.resource.data.version == resource.data.version
+        );
+
+      allow delete: if false;
     }
 
     // Supervisor Alerts

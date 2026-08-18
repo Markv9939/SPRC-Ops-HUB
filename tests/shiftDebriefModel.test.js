@@ -11,7 +11,8 @@ import {
   hasValidIncomingSignoff,
   isCurrentDebriefPayload,
   mergeUniqueDebriefItems,
-  sanitizeDebriefItems
+  sanitizeDebriefItems,
+  sanitizeReviewedIssues
 } from '../src/services/shiftDebriefModel.js'
 
 const item = (overrides = {}) => ({
@@ -37,6 +38,15 @@ test('V2 exposes only the six approved sections in document order', () => {
     'urgent_time_sensitive_task',
     'maintenance_van_facility_operational'
   ])
+})
+
+test('handoff issue review markers retain exact versions and remove invalid duplicates', () => {
+  assert.deepEqual(sanitizeReviewedIssues([
+    { issueId: 'bathroom', issueVersion: 2, latestActivityId: 'v2' },
+    { issueId: 'bathroom', issueVersion: 3, latestActivityId: 'v3' },
+    { issueId: '', issueVersion: 1 },
+    { issueId: 'invalid', issueVersion: 0 }
+  ]), [{ issueId: 'bathroom', issueVersion: 3, latestActivityId: 'v3' }])
 })
 
 test('read grouping combines client names case-insensitively within a section', () => {

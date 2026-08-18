@@ -10,6 +10,7 @@ import FleetPanel from './FleetPanel'
 import CintasPanel from './CintasPanel'
 import AccessGrantPanel from './AccessGrantPanel'
 import SupervisorDebriefsPanel from './SupervisorDebriefsPanel'
+import AppFeedbackPanel from './AppFeedbackPanel'
 import TransportDetailsDrawer from './TransportDetailsDrawer'
 import TransportRecordPage from './TransportRecordPage'
 import { LOCATIONS, VANS, getShiftLabel, getShiftOptionsForMainLocation, isShiftAllowedForMainLocation } from '../data/eocConstants'
@@ -227,7 +228,7 @@ function SupervisorDashboard({
   }, [])
 
   useEffect(() => {
-    if (!isAdmin && activeTab === 'audit') {
+    if (!isAdmin && ['audit', 'feedback'].includes(activeTab)) {
       setActiveTab('dashboard')
     }
   }, [activeTab, isAdmin, setActiveTab])
@@ -1573,6 +1574,7 @@ function SupervisorDashboard({
           </div>
         </div>
       )}
+      {activeTab === 'feedback' && isAdmin && <AppFeedbackPanel user={user} isOffline={isOffline} />}
       {/* User Management Tab */}
       {activeTab === 'users' && (
         <div>

@@ -3,6 +3,7 @@ export const EOC_ISSUE_FEATURE_DEFAULTS = Object.freeze({
   photos: false,
   offlinePhotos: false,
   supervisorTools: false,
+  issueWorkflowV2: false,
   retention: false,
   strictAuthentication: false
 })

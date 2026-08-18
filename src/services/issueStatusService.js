@@ -3,8 +3,9 @@ import { db } from '../firebase'
 import { assertExpectedVersion, getVersionNumber } from './versioning'
 import { fanOutIssueAlerts, writeAuditLog } from './notificationService'
 import { addPatternObservation, buildIssuePatternId, removePatternObservation } from '../utils/issueRecurrence'
+import { CLOSED_ISSUE_STATUSES, ISSUE_STATUS } from '../utils/issueModel'
 
-const TERMINAL_STATUSES = new Set(['resolved', 'voided'])
+const TERMINAL_STATUSES = new Set(CLOSED_ISSUE_STATUSES)
 const PHOTO_RETENTION_MS = 90 * 24 * 60 * 60 * 1000
 
 function trim(value) {
@@ -20,6 +21,9 @@ function activityLabel(eventType) {
   if (eventType === 'note_added') return 'Note added'
   if (eventType === 'bht_follow_up') return 'Staff follow-up'
   if (eventType === 'problem_returned') return 'Problem returned'
+  if (eventType === 'resolution_submitted') return 'Submitted for supervisor review'
+  if (eventType === 'resolution_approved') return 'Resolution approved'
+  if (eventType === 'resolution_returned') return 'Returned to active'
   return 'Update'
 }
 
@@ -426,4 +430,172 @@ export async function requestIssueReopen({ issueId, issue, note, actorUser }) {
   })
 
   return { activityId: activityRef.id }
+}
+
+export async function submitIssueResolutionForReview({ issueId, expectedIssue, note, actorUser }) {
+  const trimmedNote = trim(note)
+  if (!issueId) throw new Error('Issue ID is required.')
+  if (!trimmedNote) throw new Error('Describe what was completed before submitting for review.')
+
+  let updatedIssue = null
+  let activity = null
+  let activityId = ''
+
+  await runTransaction(db, async (transaction) => {
+    const issueRef = doc(db, 'eocIssues', issueId)
+    const issueSnap = await transaction.get(issueRef)
+    if (!issueSnap.exists()) throw new Error('Issue no longer exists.')
+    const latest = issueSnap.data()
+    const currentStatus = String(latest.status || ISSUE_STATUS.OPEN).toLowerCase()
+    if (![ISSUE_STATUS.OPEN, ISSUE_STATUS.IN_PROGRESS].includes(currentStatus)) {
+      throw new Error(currentStatus === ISSUE_STATUS.PENDING_SUPERVISOR_REVIEW
+        ? 'This issue is already pending supervisor review.'
+        : 'Only an active issue can be submitted for supervisor review.')
+    }
+    const { nextVersion } = assertExpectedVersion({
+      expectedVersion: getVersionNumber(expectedIssue || latest),
+      currentVersion: getVersionNumber(latest),
+      documentId: issueId,
+      recordLabel: 'EOC Issue'
+    })
+    activityId = `v${nextVersion}_resolution_submitted`
+    activity = buildActivity({
+      eventType: 'resolution_submitted',
+      issueId,
+      issue: { id: issueId, ...latest },
+      actorUser,
+      note: trimmedNote,
+      nextStatus: ISSUE_STATUS.PENDING_SUPERVISOR_REVIEW,
+      nextVersion
+    })
+    const latestActivity = {
+      id: activityId,
+      eventType: 'resolution_submitted',
+      label: activity.label,
+      note: trimmedNote,
+      actorUserId: activity.actorUserId,
+      actorName: activity.actorName,
+      createdAt: serverTimestamp()
+    }
+    const updatePayload = {
+      status: ISSUE_STATUS.PENDING_SUPERVISOR_REVIEW,
+      version: nextVersion,
+      latestActivity,
+      resolutionSubmittedNotes: trimmedNote,
+      resolutionSubmittedAt: serverTimestamp(),
+      resolutionSubmittedByUserId: trim(actorUser?.id),
+      resolutionSubmittedByName: trim(actorUser?.name),
+      updatedAt: serverTimestamp()
+    }
+    transaction.update(issueRef, updatePayload)
+    transaction.set(doc(db, 'eocIssues', issueId, 'activity', activityId), activity)
+    updatedIssue = { id: issueId, ...latest, ...updatePayload, version: nextVersion }
+  })
+
+  await fanOutIssueAlerts({ issue: updatedIssue, activity: { id: activityId, ...activity }, eventType: 'resolution_submitted', actorUser })
+  await writeAuditLog({
+    action: 'issue_resolution_submitted',
+    collectionPath: 'eocIssues',
+    documentId: issueId,
+    reason: trimmedNote,
+    actorUser,
+    extra: { locationId: updatedIssue?.locationId || null, activityId }
+  })
+  return { issue: updatedIssue, activityId }
+}
+
+export async function reviewIssueResolution({ issueId, expectedIssue, decision, note, actorUser }) {
+  const normalizedDecision = trim(decision).toLowerCase()
+  const trimmedNote = trim(note)
+  if (!issueId) throw new Error('Issue ID is required.')
+  if (!['approve', 'return'].includes(normalizedDecision)) throw new Error('Choose approve or return to active.')
+  if (normalizedDecision === 'return' && !trimmedNote) throw new Error('Explain why this issue is being returned to active.')
+
+  let updatedIssue = null
+  let activity = null
+  let activityId = ''
+
+  await runTransaction(db, async (transaction) => {
+    const issueRef = doc(db, 'eocIssues', issueId)
+    const issueSnap = await transaction.get(issueRef)
+    if (!issueSnap.exists()) throw new Error('Issue no longer exists.')
+    const latest = issueSnap.data()
+    if (String(latest.status || '').toLowerCase() !== ISSUE_STATUS.PENDING_SUPERVISOR_REVIEW) {
+      throw new Error('This issue is no longer pending supervisor review.')
+    }
+    const { nextVersion } = assertExpectedVersion({
+      expectedVersion: getVersionNumber(expectedIssue || latest),
+      currentVersion: getVersionNumber(latest),
+      documentId: issueId,
+      recordLabel: 'EOC Issue'
+    })
+    const approved = normalizedDecision === 'approve'
+    const eventType = approved ? 'resolution_approved' : 'resolution_returned'
+    const nextStatus = approved ? ISSUE_STATUS.RESOLVED : ISSUE_STATUS.IN_PROGRESS
+    const activityNote = trimmedNote || trim(latest.resolutionSubmittedNotes) || 'Resolution reviewed and approved.'
+    activityId = `v${nextVersion}_${eventType}`
+    activity = buildActivity({
+      eventType,
+      issueId,
+      issue: { id: issueId, ...latest },
+      actorUser,
+      note: activityNote,
+      nextStatus,
+      nextVersion
+    })
+    const latestActivity = {
+      id: activityId,
+      eventType,
+      label: activity.label,
+      note: activityNote,
+      actorUserId: activity.actorUserId,
+      actorName: activity.actorName,
+      createdAt: serverTimestamp()
+    }
+    const updatePayload = {
+      status: nextStatus,
+      version: nextVersion,
+      latestActivity,
+      resolutionReviewedAt: serverTimestamp(),
+      resolutionReviewedByUserId: trim(actorUser?.id),
+      resolutionReviewedByName: trim(actorUser?.name),
+      resolutionReviewDecision: normalizedDecision,
+      resolutionReviewNotes: trimmedNote || null,
+      updatedAt: serverTimestamp()
+    }
+    if (approved) {
+      updatePayload.resolvedNotes = trim(latest.resolutionSubmittedNotes) || activityNote
+      updatePayload.resolvedAt = serverTimestamp()
+      updatePayload.closedAt = serverTimestamp()
+      updatePayload.resolvedByUserId = trim(actorUser?.id)
+      updatePayload.resolvedByName = trim(actorUser?.name)
+      updatePayload.photoDeletionDueAt = Timestamp.fromMillis(Date.now() + PHOTO_RETENTION_MS)
+    } else {
+      updatePayload.inProgressNotes = trimmedNote
+      updatePayload.inProgressAt = serverTimestamp()
+      updatePayload.inProgressByUserId = trim(actorUser?.id)
+      updatePayload.inProgressByName = trim(actorUser?.name)
+      updatePayload.closedAt = null
+      updatePayload.photoDeletionDueAt = null
+    }
+    transaction.update(issueRef, updatePayload)
+    transaction.set(doc(db, 'eocIssues', issueId, 'activity', activityId), activity)
+    updatedIssue = { id: issueId, ...latest, ...updatePayload, version: nextVersion }
+  })
+
+  await fanOutIssueAlerts({
+    issue: updatedIssue,
+    activity: { id: activityId, ...activity },
+    eventType: normalizedDecision === 'approve' ? 'resolution_approved' : 'resolution_returned',
+    actorUser
+  })
+  await writeAuditLog({
+    action: normalizedDecision === 'approve' ? 'issue_resolution_approved' : 'issue_resolution_returned',
+    collectionPath: 'eocIssues',
+    documentId: issueId,
+    reason: trimmedNote || trim(updatedIssue?.resolutionSubmittedNotes),
+    actorUser,
+    extra: { locationId: updatedIssue?.locationId || null, activityId }
+  })
+  return { issue: updatedIssue, activityId }
 }

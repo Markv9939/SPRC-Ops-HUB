@@ -152,6 +152,14 @@
       ]
     },
     {
+      "collectionGroup": "appFeedback",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "submittedByUserId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "alerts",
       "queryScope": "COLLECTION",
       "fields": [
