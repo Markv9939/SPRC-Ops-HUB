@@ -363,30 +363,55 @@ service cloud.firestore {
         ));
     }
 
-    function eocRoleAndLocationAllowed(roles, locationId) {
+    function activeEocProfileAllowed(profile, profileId, roles, locationId) {
       let normalizedLocation = locationScopeAlias(locationId);
-      let locations = activeAuthProfileLocations();
-      let issueLocations = hasActiveAuthProfile() && authProfile().issueLocationIds is list
-        ? authProfile().issueLocationIds
+      let locations = 'authorizedLocations' in profile && profile.authorizedLocations is list
+        ? profile.authorizedLocations
+        : [];
+      let issueLocations = 'issueLocationIds' in profile && profile.issueLocationIds is list
+        ? profile.issueLocationIds
         : [];
       let legacyLocationAllowed = (
         (normalizedLocation == 'OTC' && ('PHP' in locations || 'RTC' in locations))
         || (normalizedLocation == 'RES' && ('PHP' in locations))
       );
-      return hasLegacyAuthSession() || (hasActiveAuthProfile()
-        && authProfile().role in roles
+      return profile.active == true
+        && (!('deleted' in profile) || profile.deleted != true)
+        && profile.role in roles
         && (
-          authProfile().role == 'admin'
+          profile.role == 'admin'
           || locationId in locations
           || normalizedLocation in locations
           || legacyLocationAllowed
           || locationId in issueLocations
           || (
-            exists(/databases/$(database)/documents/issueAccess/$(authAppUserId()))
-            && get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.active == true
-            && locationId in get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.locationIds
+            exists(/databases/$(database)/documents/issueAccess/$(profileId))
+            && get(/databases/$(database)/documents/issueAccess/$(profileId)).data.active == true
+            && locationId in get(/databases/$(database)/documents/issueAccess/$(profileId)).data.locationIds
           )
-        ));
+        );
+    }
+
+    function mappedEocRoleAndLocationAllowed(roles, locationId) {
+      let profileId = get(/databases/$(database)/documents/usersByAuthUid/$(request.auth.uid)).data.userId;
+      return profileId is string
+        && profileId != ''
+        && exists(/databases/$(database)/documents/users/$(profileId))
+        && activeEocProfileAllowed(
+          get(/databases/$(database)/documents/users/$(profileId)).data,
+          profileId,
+          roles,
+          locationId
+        );
+    }
+
+    function eocRoleAndLocationAllowed(roles, locationId) {
+      return hasLegacyAuthSession()
+        || (
+          signedIn()
+          && exists(/databases/$(database)/documents/usersByAuthUid/$(request.auth.uid))
+          && mappedEocRoleAndLocationAllowed(roles, locationId)
+        );
     }
 
     function validUserWriteData(data) {
@@ -958,6 +983,38 @@ service cloud.firestore {
         && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
       allow delete: if authRoleAndLocationAllowed(['admin'], resource.data.locationId);
+
+      match /attachments/{attachmentId} {
+        allow read: if exactIssueLocationAllowed(
+          get(/databases/$(database)/documents/eocSubmissions/$(docId)).data.locationId
+        );
+        allow create: if exists(/databases/$(database)/documents/eocSubmissions/$(docId))
+          && request.resource.data.attachmentId == attachmentId
+          && request.resource.data.submissionId == docId
+          && request.resource.data.locationId == get(/databases/$(database)/documents/eocSubmissions/$(docId)).data.locationId
+          && request.resource.data.itemId is string
+          && request.resource.data.kind == 'response'
+          && request.resource.data.mimeType == 'image/jpeg'
+          && request.resource.data.sizeBytes is int
+          && request.resource.data.sizeBytes > 0
+          && request.resource.data.sizeBytes <= 2 * 1024 * 1024
+          && request.resource.data.state in ['waiting', 'uploading', 'uploaded', 'failed']
+          && exactIssueLocationAllowed(request.resource.data.locationId)
+          && authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
+          && validVersionField(request.resource.data);
+        allow update: if request.resource.data.attachmentId == resource.data.attachmentId
+          && request.resource.data.submissionId == resource.data.submissionId
+          && request.resource.data.locationId == resource.data.locationId
+          && request.resource.data.itemId == resource.data.itemId
+          && request.resource.data.storagePath == resource.data.storagePath
+          && request.resource.data.mimeType == 'image/jpeg'
+          && request.resource.data.state in ['waiting', 'uploading', 'uploaded', 'failed']
+          && exactIssueLocationAllowed(resource.data.locationId)
+          && authRoleAllowed(['bht', 'tech', 'supervisor', 'admin'])
+          && validVersionField(request.resource.data)
+          && createdAtUnchanged();
+        allow delete: if false;
+      }
     }
 
     // EOC Submission Drafts (autosave while checklist is in progress)
@@ -1371,38 +1428,14 @@ service cloud.firestore {
 
     // EOC Template Library (named templates used by location+shift defaults)
     match /eocTemplateLibrary/{docId} {
-      allow read: if true;
-
-      allow create: if validTemplateLibraryData(request.resource.data)
-        && templateCreateAllowed()
-        && validVersionField(request.resource.data);
-
-      allow update: if validTemplateLibraryData(request.resource.data)
-        && templateUpdateAllowed()
-        && validVersionField(request.resource.data)
-        && createdAtUnchanged();
-
-      allow delete: if authRoleAllowed(['admin'])
-        || (
-          resource.data.status in ['open', 'arrived']
-          && authRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], resource.data.site)
-        );
+      allow read: if signedIn() && authRoleAllowed(['bht', 'tech', 'supervisor', 'admin']);
+      allow create, update, delete: if false;
     }
 
     // EOC Template Assignments (default template per location+shift+type)
     match /eocTemplateAssignments/{docId} {
-      allow read: if true;
-
-      allow create: if validTemplateAssignmentData(request.resource.data)
-        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
-        && validVersionField(request.resource.data);
-
-      allow update: if validTemplateAssignmentData(request.resource.data)
-        && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
-        && validVersionField(request.resource.data)
-        && createdAtUnchanged();
-
-      allow delete: if authRoleAllowed(['admin']);
+      allow read: if signedIn() && authRoleAllowed(['bht', 'tech', 'supervisor', 'admin']);
+      allow create, update, delete: if false;
     }
 
     // Legacy EOC Checklist Template
@@ -1413,17 +1446,49 @@ service cloud.firestore {
 
     // EOC Template Drafts (Draft -> Diff -> Publish workflow)
     match /eocTemplateDrafts/{docId} {
-      allow read: if true;
-      allow write: if authRoleAllowed(['admin']);
+      allow read: if signedIn()
+        && authRoleAllowed(['supervisor', 'admin'])
+        && (authRoleAllowed(['admin']) || resource.data.ownerAuthUid == request.auth.uid);
+      allow create: if signedIn()
+        && authRoleAllowed(['supervisor', 'admin'])
+        && request.resource.data.ownerAuthUid == request.auth.uid
+        && request.resource.data.ownerUserId == authAppUserId()
+        && validVersionField(request.resource.data);
+      allow update: if signedIn()
+        && authRoleAllowed(['supervisor', 'admin'])
+        && resource.data.ownerAuthUid == request.auth.uid
+        && request.resource.data.ownerAuthUid == resource.data.ownerAuthUid
+        && request.resource.data.ownerUserId == resource.data.ownerUserId
+        && validVersionField(request.resource.data)
+        && createdAtUnchanged();
+      allow delete: if signedIn()
+        && authRoleAllowed(['supervisor', 'admin'])
+        && (authRoleAllowed(['admin']) || resource.data.ownerAuthUid == request.auth.uid);
     }
 
     // EOC Template Version History
     match /eocTemplateVersions/{docId} {
-      allow read: if true;
-      allow create: if validTemplateVersionData(request.resource.data)
-        && templateVersionCreateAllowed()
-        && validVersionField(request.resource.data);
-      allow update, delete: if false;
+      allow read: if signedIn() && authRoleAllowed(['bht', 'tech', 'supervisor', 'admin']);
+      allow create, update, delete: if false;
+    }
+
+    match /eocSectionLibrary/{docId} {
+      allow read: if signedIn() && authRoleAllowed(['supervisor', 'admin']);
+      allow create, update, delete: if false;
+    }
+
+    match /eocSectionVersions/{docId} {
+      allow read: if signedIn() && authRoleAllowed(['supervisor', 'admin']);
+      allow create, update, delete: if false;
+    }
+
+    match /eocTemplateOperations/{docId} {
+      allow read, write: if false;
+    }
+
+    match /eocTemplateArchiveRequests/{docId} {
+      allow read: if signedIn() && authRoleAllowed(['admin']);
+      allow create, update, delete: if false;
     }
 
     match /eocIssuePatterns/{patternId} {

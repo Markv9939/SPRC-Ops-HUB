@@ -26,6 +26,14 @@ export function buildAttachmentStoragePath({ locationId, issueId, attachmentId }
   return `issueAttachments/${location}/${issue}/${attachment}.jpg`
 }
 
+export function buildEocResponseAttachmentStoragePath({ locationId, submissionId, attachmentId }) {
+  const location = safePart(locationId)
+  const submission = safePart(submissionId)
+  const attachment = safePart(attachmentId)
+  if (!location || !submission || !attachment) throw new Error('Location, submission, and attachment IDs are required.')
+  return `eocSubmissionAttachments/${location}/${submission}/${attachment}.jpg`
+}
+
 export function validateProcessedPhoto({ size, type, width, height }) {
   if (type !== 'image/jpeg') throw new Error('Photo processing must produce a JPEG image.')
   if (!Number.isFinite(size) || size <= 0) throw new Error('The processed photo is empty.')
@@ -54,6 +62,37 @@ export function buildAttachmentMetadata({ attachmentId, issueId, locationId, kin
     storagePath: buildAttachmentStoragePath({ attachmentId, issueId, locationId }),
     visibility: 'location',
     hiddenFromBht: false,
+    retentionDays: PHOTO_RETENTION_DAYS,
+    version: 1
+  }
+}
+
+export function buildEocResponseAttachmentMetadata({
+  attachmentId,
+  submissionId,
+  locationId,
+  itemId,
+  processed,
+  uploader,
+  state = 'waiting'
+}) {
+  validateProcessedPhoto(processed)
+  return {
+    schemaVersion: 1,
+    attachmentId,
+    submissionId,
+    locationId,
+    itemId: trim(itemId),
+    kind: 'response',
+    state,
+    width: processed.width,
+    height: processed.height,
+    sizeBytes: processed.size,
+    mimeType: 'image/jpeg',
+    uploaderProfileId: trim(uploader?.id),
+    uploaderName: trim(uploader?.name),
+    storagePath: buildEocResponseAttachmentStoragePath({ attachmentId, submissionId, locationId }),
+    visibility: 'location',
     retentionDays: PHOTO_RETENTION_DAYS,
     version: 1
   }

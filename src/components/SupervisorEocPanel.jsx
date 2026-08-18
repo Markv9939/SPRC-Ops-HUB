@@ -135,7 +135,7 @@ function SupervisorEocPanel({
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+      <div className="eoc-supervisor-tabs">
         <button style={tabBtnStyle(subTab === 'template')} onClick={() => setSubTab('template')}>
           Template
         </button>

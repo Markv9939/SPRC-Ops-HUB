@@ -63,6 +63,20 @@ service firebase.storage {
       allow delete: if false;
     }
 
+    match /eocSubmissionAttachments/{locationId}/{submissionId}/{fileName} {
+      allow get: if locationAllowed(locationId);
+      allow list: if false;
+      allow create, update: if locationAllowed(locationId)
+        && request.resource.size > 0
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType == 'image/jpeg'
+        && request.resource.metadata.locationId == locationId
+        && request.resource.metadata.submissionId == submissionId
+        && request.resource.metadata.kind == 'response'
+        && fileName == request.resource.metadata.attachmentId + '.jpg';
+      allow delete: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

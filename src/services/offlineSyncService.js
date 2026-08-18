@@ -41,6 +41,7 @@ import { toTransportRecordDate } from '../utils/transportRecord'
 import { buildIssueRecord } from '../utils/issueModel'
 import { addPatternObservation, buildIssuePatternId } from '../utils/issueRecurrence'
 import { uploadIssuePhotos } from './issueAttachmentService'
+import { uploadEocResponsePhotos } from './eocSubmissionAttachmentService'
 
 export const OFFLINE_ACTION_TYPES = {
   EOC_SUBMISSION: 'eocSubmission',
@@ -165,7 +166,7 @@ function photoDescriptor(photo) {
   return { id: photo.id, width: photo.width, height: photo.height, size: photo.size, type: 'image/jpeg', state: 'waiting' }
 }
 
-function attachmentRecord(photo, { actionId, ownerProfileId, itemId = '', kind = 'report', locationId = '', issueId = '' }) {
+function attachmentRecord(photo, { actionId, ownerProfileId, itemId = '', kind = 'report', locationId = '', issueId = '', attachmentScope = 'issue' }) {
   return {
     id: photo.id,
     actionId,
@@ -174,6 +175,7 @@ function attachmentRecord(photo, { actionId, ownerProfileId, itemId = '', kind =
     kind,
     locationId,
     issueId,
+    attachmentScope,
     width: photo.width,
     height: photo.height,
     size: photo.size,
@@ -199,7 +201,19 @@ function detachPayloadPhotos(type, payload, actionId) {
     photos.forEach(photo => attachments.push(attachmentRecord(photo, { actionId, ownerProfileId, itemId, locationId })))
     return [itemId, { ...details, photos: photos.map(photoDescriptor) }]
   }))
-  return { cleanPayload: { ...payload, repairDetails }, attachments }
+  const responseDetails = Object.fromEntries(Object.entries(payload?.responseDetails || {}).map(([itemId, details]) => {
+    const photos = Array.isArray(details?.photos) ? details.photos : []
+    photos.forEach(photo => attachments.push(attachmentRecord(photo, {
+      actionId,
+      ownerProfileId,
+      itemId,
+      kind: 'response',
+      locationId,
+      attachmentScope: 'submission'
+    })))
+    return [itemId, { ...details, photos: photos.map(photoDescriptor) }]
+  }))
+  return { cleanPayload: { ...payload, repairDetails, responseDetails }, attachments }
 }
 
 function hydratePayloadPhotos(type, payload, records) {
@@ -210,9 +224,13 @@ function hydratePayloadPhotos(type, payload, records) {
   if (type !== OFFLINE_ACTION_TYPES.EOC_SUBMISSION) return payload
   const repairDetails = Object.fromEntries(Object.entries(payload?.repairDetails || {}).map(([itemId, details]) => [
     itemId,
-    { ...details, photos: records.filter(record => record.itemId === itemId).map(toPhoto) }
+    { ...details, photos: records.filter(record => record.itemId === itemId && record.attachmentScope !== 'submission').map(toPhoto) }
   ]))
-  return { ...payload, repairDetails }
+  const responseDetails = Object.fromEntries(Object.entries(payload?.responseDetails || {}).map(([itemId, details]) => [
+    itemId,
+    { ...details, photos: records.filter(record => record.itemId === itemId && record.attachmentScope === 'submission').map(toPhoto) }
+  ]))
+  return { ...payload, repairDetails, responseDetails }
 }
 
 export function queueTransportCreate(payload) {
@@ -243,15 +261,20 @@ function getDraftDocId(taskId, userId) {
   return `${String(taskId || '').trim()}__${String(userId || '').trim()}`
 }
 
-function buildEocAnswersData(templateItems, answers, repairDetails) {
+function buildEocAnswersData(templateItems, answers, repairDetails, responseDetails) {
   return (Array.isArray(templateItems) ? templateItems : []).map(item => ({
     itemId: item.id,
     trackingId: item.trackingId || item.id,
     label: item.label,
     category: item.category,
+    sectionId: item.sectionId || null,
+    questionType: item.questionType || 'pass_issue',
+    required: item.required !== false,
     helpText: item.helpText || '',
     requiresPhotoOnIssue: item.requiresPhotoOnIssue === true,
     status: answers?.[item.id],
+    value: answers?.[item.id] ?? null,
+    responsePhotoAttachmentIds: (responseDetails?.[item.id]?.photos || []).map(photo => photo.id),
     ...(answers?.[item.id] === 'repair'
       ? {
           description: repairDetails?.[item.id]?.description || '',
@@ -271,6 +294,7 @@ export async function submitEocSubmissionOnline(payload) {
   const activeTemplate = Array.isArray(payload?.activeTemplate) ? payload.activeTemplate : []
   const answers = payload?.answers || {}
   const repairDetails = payload?.repairDetails || {}
+  const responseDetails = payload?.responseDetails || {}
   const vehicleId = payload?.vehicleId || ''
   const vehicleName = String(payload?.vehicleName || '').trim()
   const vinNumber = String(payload?.vinNumber || '').trim()
@@ -284,8 +308,15 @@ export async function submitEocSubmissionOnline(payload) {
     throw new Error('Odometer reading must be a valid number.')
   }
 
-  const answersData = buildEocAnswersData(activeTemplate, answers, repairDetails)
+  const answersData = buildEocAnswersData(activeTemplate, answers, repairDetails, responseDetails)
   const issueItems = answersData.filter(a => a.status === 'repair')
+  const responsePhotoPlans = activeTemplate
+    .filter(item => item.questionType === 'photo')
+    .map(item => ({
+      itemId: item.id,
+      photos: Array.isArray(responseDetails?.[item.id]?.photos) ? responseDetails[item.id].photos : []
+    }))
+    .filter(plan => plan.photos.length > 0)
   const observedAtMs = Date.now()
   const issuePlans = issueItems.map(issue => {
     const issueRef = doc(db, 'eocIssues', `eoc_${safeIdPart(task?.id)}_${safeIdPart(issue.trackingId)}`)
@@ -358,6 +389,11 @@ export async function submitEocSubmissionOnline(payload) {
       odometerMileage: normalizedOdometerMileage,
       answers: answersData,
       issueCount: issueItems.length,
+      totalQuestionCount: answersData.length,
+      answeredQuestionCount: answersData.filter(answer => answer.status !== null && answer.status !== undefined && String(answer.status).trim() !== '').length
+        + answersData.filter(answer => answer.questionType === 'photo' && answer.responsePhotoAttachmentIds.length > 0).length,
+      photoCount: answersData.reduce((count, answer) => count + answer.responsePhotoAttachmentIds.length + (answer.photoAttachmentIds?.length || 0), 0),
+      issueSectionNames: [...new Set(issueItems.map(issue => issue.category).filter(Boolean))],
       submittedByUserId: normalizedUserId,
       submittedByName: user?.name || '',
       version: 1,
@@ -492,6 +528,16 @@ export async function submitEocSubmissionOnline(payload) {
       photoResults.push(...results)
     }
   }
+  for (const plan of responsePhotoPlans) {
+    const results = await uploadEocResponsePhotos({
+      submissionId: submittedEocSubmissionId,
+      locationId: task.locationId,
+      itemId: plan.itemId,
+      photos: plan.photos,
+      uploader: user
+    })
+    photoResults.push(...results)
+  }
 
   if (eocType === 'van' && submittedEocSubmissionId) {
     try {
@@ -593,7 +639,6 @@ function normalizeTransportCreateData(payload) {
       ? { timeCorrections: snapshot.timeCorrections }
       : {})
   }
-
   if (status === 'closed' || status === 'returned') {
     data.returnedAt = toTimestamp(snapshot.returnedAt || snapshot.closedAt, updatedAtDate)
     data.closedAt = toTimestamp(snapshot.closedAt || snapshot.returnedAt, updatedAtDate)

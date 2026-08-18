@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  EOC_QUESTION_TYPES,
+  convertEocItemsToSections,
   createEmptyEocTemplateItem,
+  createEmptyEocTemplateQuestion,
+  createEmptyEocTemplateSection,
+  findDuplicateEocQuestionTrackingIds,
   findDuplicateEocTrackingIds,
-  normalizeEocTemplateItems
+  flattenEocTemplateSections,
+  normalizeEocTemplateDefinition,
+  normalizeEocTemplateItems,
+  validateEocTemplateDefinition
 } from '../src/utils/eocTemplateModel.js'
 
 test('template normalization preserves permanent tracking IDs and approved metadata', () => {
@@ -59,5 +67,65 @@ test('duplicate tracking IDs are detected before publishing', () => {
   ])
 
   assert.deepEqual(duplicates, ['same_item'])
+})
+
+test('legacy flat items convert to editable sections without changing tracking IDs', () => {
+  const sections = convertEocItemsToSections([
+    { trackingId: 'kitchen_sink', category: 'Kitchen', label: 'Does the sink drain?', order: 1 },
+    { trackingId: 'kitchen_fridge', category: 'Kitchen', label: 'Is the refrigerator cold?', order: 2 },
+    { trackingId: 'exit_light', category: 'Safety', label: 'Is the exit light on?', order: 3 }
+  ])
+
+  assert.equal(sections.length, 2)
+  assert.deepEqual(sections[0].questions.map(question => question.trackingId), ['kitchen_sink', 'kitchen_fridge'])
+  assert.equal(sections[1].questions[0].trackingId, 'exit_light')
+})
+
+test('v3 template definitions support all approved question types and flatten for the runtime', () => {
+  const questionTypes = Object.values(EOC_QUESTION_TYPES)
+  const sections = [{
+    id: 'section_operations',
+    title: 'Operations',
+    questions: questionTypes.map((questionType, index) => ({
+      trackingId: `question_${index + 1}`,
+      label: `Question ${index + 1}`,
+      questionType,
+      options: questionType === EOC_QUESTION_TYPES.MULTIPLE_CHOICE ? ['Yes', 'No'] : [],
+      order: index + 1
+    }))
+  }]
+  const normalized = normalizeEocTemplateDefinition({ name: 'Custom EOC', eocType: 'house', sections })
+  const flattened = flattenEocTemplateSections(normalized.sections)
+
+  assert.deepEqual(flattened.map(question => question.questionType), questionTypes)
+  assert.ok(flattened.every(question => question.category === 'Operations'))
+  assert.equal(validateEocTemplateDefinition(normalized).valid, true)
+})
+
+test('renaming or moving a v3 question preserves identity while duplication uses a new identity', () => {
+  const original = createEmptyEocTemplateQuestion(1)
+  const moved = normalizeEocTemplateDefinition({
+    name: 'Moved',
+    sections: [{ id: 'section_two', title: 'New section', questions: [{ ...original, label: 'Renamed question' }] }]
+  })
+  const duplicate = createEmptyEocTemplateQuestion(2)
+
+  assert.equal(moved.sections[0].questions[0].trackingId, original.trackingId)
+  assert.notEqual(duplicate.trackingId, original.trackingId)
+})
+
+test('v3 validation rejects incomplete choices and duplicate recurrence identities', () => {
+  const sections = [createEmptyEocTemplateSection(1)]
+  sections[0].title = 'Safety'
+  sections[0].questions = [
+    { trackingId: 'duplicate', label: 'Choose one', questionType: EOC_QUESTION_TYPES.MULTIPLE_CHOICE, options: ['Only one'] },
+    { trackingId: 'duplicate', label: 'Second question', questionType: EOC_QUESTION_TYPES.PASS_ISSUE }
+  ]
+  const result = validateEocTemplateDefinition({ name: 'Invalid', sections })
+
+  assert.equal(result.valid, false)
+  assert.equal(findDuplicateEocQuestionTrackingIds(sections).length, 1)
+  assert.ok(result.errors.some(error => error.includes('at least two choices')))
+  assert.ok(result.errors.some(error => error.includes('tracking IDs')))
 })
 

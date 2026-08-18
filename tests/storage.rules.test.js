@@ -26,6 +26,10 @@ function metadata(locationId = 'test_house', issueId = 'issue_1', attachmentId =
   return { contentType, customMetadata: { locationId, issueId, attachmentId, kind: 'report' } }
 }
 
+function responseMetadata(locationId = 'test_house', submissionId = 'submission_1', attachmentId = 'photo_1', contentType = 'image/jpeg') {
+  return { contentType, customMetadata: { locationId, submissionId, attachmentId, itemId: 'question_photo', kind: 'response' } }
+}
+
 test('compatibility rules require auth and validate JPEG path metadata size', async () => {
   await seed('appSettings/authPolicy', { authScopeEnforced: false })
   const path = 'issueAttachments/test_house/issue_1/photo_1.jpg'
@@ -57,4 +61,17 @@ test('strict rules enforce location and hide management-only photos from BHT', a
   const supervisorMetadata = await assertSucceeds(storageFor('strict_supervisor_uid').ref('issueAttachments/test_house/strict_issue/strict_photo.jpg').getMetadata())
   assert.equal(supervisorMetadata.contentType, 'image/jpeg')
   await assertFails(storageFor('strict_bht_uid').ref('issueAttachments/mesquite/strict_issue/strict_photo.jpg').getMetadata())
+})
+
+test('photo question files are private and restricted to the submission location', async () => {
+  await seed('appSettings/authPolicy', { authScopeEnforced: true })
+  await seed('users/response_bht', { role: 'bht', active: true, issueLocationIds: ['test_house'] })
+  await seed('usersByAuthUid/response_bht_uid', { userId: 'response_bht' })
+  const allowedPath = 'eocSubmissionAttachments/test_house/submission_1/photo_1.jpg'
+  const wrongLocationPath = 'eocSubmissionAttachments/mesquite/submission_1/photo_1.jpg'
+
+  await assertFails(storageFor().ref(allowedPath).put(new Uint8Array([1]), responseMetadata()))
+  await assertSucceeds(storageFor('response_bht_uid').ref(allowedPath).put(new Uint8Array([1, 2, 3]), responseMetadata()))
+  await assertFails(storageFor('response_bht_uid').ref(wrongLocationPath).put(new Uint8Array([1]), responseMetadata('mesquite')))
+  await assertFails(storageFor('response_bht_uid').ref(allowedPath).delete())
 })

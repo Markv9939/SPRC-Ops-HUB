@@ -8,9 +8,11 @@ import {
   getEocAreaShortLabel,
   getEocCategoryProgress,
   getEocChecklistProgress,
+  hasEocQuestionAnswer,
   isEocAreaComplete,
   isEocIssueDetailMissing
 } from '../src/utils/eocGuidedFlow.js'
+import { EOC_QUESTION_TYPES } from '../src/utils/eocTemplateModel.js'
 
 const items = [
   { id: 'lock', category: 'Safety', label: 'Front lock' },
@@ -126,4 +128,29 @@ test('area routing finds and wraps to incomplete areas', () => {
   assert.equal(findNextIncompleteEocAreaIndex(areas, 0), 1)
   assert.equal(findNextIncompleteEocAreaIndex(areas, 1), 2)
   assert.equal(findNextIncompleteEocAreaIndex(areas, 2), 1)
+})
+
+test('custom question types use type-appropriate completion rules', () => {
+  assert.equal(hasEocQuestionAnswer({ questionType: EOC_QUESTION_TYPES.SHORT_TEXT }, '  note  '), true)
+  assert.equal(hasEocQuestionAnswer({ questionType: EOC_QUESTION_TYPES.NUMBER }, '12.5'), true)
+  assert.equal(hasEocQuestionAnswer({ questionType: EOC_QUESTION_TYPES.NUMBER }, 'twelve'), false)
+  assert.equal(hasEocQuestionAnswer({ questionType: EOC_QUESTION_TYPES.MULTIPLE_CHOICE, options: ['Yes', 'No'] }, 'Maybe'), false)
+  assert.equal(hasEocQuestionAnswer({ questionType: EOC_QUESTION_TYPES.DATE_TIME }, '2026-08-15T18:30'), true)
+  assert.equal(hasEocQuestionAnswer(
+    { questionType: EOC_QUESTION_TYPES.PHOTO },
+    null,
+    { photos: [{ state: 'ready' }] }
+  ), true)
+})
+
+test('optional custom questions are ready when left blank', () => {
+  const customItems = [
+    { id: 'required_text', questionType: EOC_QUESTION_TYPES.SHORT_TEXT, required: true },
+    { id: 'optional_text', questionType: EOC_QUESTION_TYPES.SHORT_TEXT, required: false }
+  ]
+  const progress = getEocChecklistProgress(customItems, { required_text: 'Complete' }, {}, {})
+
+  assert.equal(progress.totalCount, 2)
+  assert.equal(progress.readyCount, 2)
+  assert.equal(progress.answeredCount, 1)
 })

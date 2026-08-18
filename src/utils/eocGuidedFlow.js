@@ -1,4 +1,39 @@
 import { requiredPhotoSatisfied } from './photoModel.js'
+import { EOC_QUESTION_TYPES } from './eocTemplateModel.js'
+
+function questionType(item) {
+  return item?.questionType || EOC_QUESTION_TYPES.PASS_ISSUE
+}
+
+export function hasEocQuestionAnswer(item, answer, responseDetails = {}) {
+  const type = questionType(item)
+  if (type === EOC_QUESTION_TYPES.PHOTO) {
+    return (Array.isArray(responseDetails?.photos) ? responseDetails.photos : [])
+      .some(photo => ['waiting', 'uploading', 'uploaded', 'ready'].includes(photo?.state))
+  }
+  if (type === EOC_QUESTION_TYPES.NUMBER) {
+    return String(answer ?? '').trim() !== '' && Number.isFinite(Number(answer))
+  }
+  if (type === EOC_QUESTION_TYPES.DATE_TIME) {
+    const value = String(answer ?? '').trim()
+    return value !== '' && !Number.isNaN(new Date(value).getTime())
+  }
+  if (type === EOC_QUESTION_TYPES.MULTIPLE_CHOICE) {
+    const value = String(answer ?? '').trim()
+    const options = Array.isArray(item?.options) ? item.options : []
+    return value !== '' && (options.length === 0 || options.includes(value))
+  }
+  if (type === EOC_QUESTION_TYPES.SHORT_TEXT) return String(answer ?? '').trim() !== ''
+  return answer === 'ok' || answer === 'repair'
+}
+
+export function isEocQuestionReady(item, answers, issueDetails, responseDetails) {
+  const answer = answers?.[item?.id]
+  const response = responseDetails?.[item?.id] || {}
+  if (item?.required === false && !hasEocQuestionAnswer(item, answer, response)) return true
+  return hasEocQuestionAnswer(item, answer, response)
+    && !isEocIssueDetailMissing(item, answers, issueDetails)
+}
 
 export function isEocIssueDetailMissing(itemOrId, answers, issueDetails) {
   const itemId = typeof itemOrId === 'object' ? itemOrId?.id : itemOrId
@@ -15,7 +50,7 @@ export function isEocIssueDetailMissing(itemOrId, answers, issueDetails) {
   return false
 }
 
-export function getEocChecklistProgress(items, answers, issueDetails) {
+export function getEocChecklistProgress(items, answers, issueDetails, responseDetails) {
   const normalizedItems = Array.isArray(items) ? items : []
   let answeredCount = 0
   let completeCount = 0
@@ -23,15 +58,12 @@ export function getEocChecklistProgress(items, answers, issueDetails) {
 
   normalizedItems.forEach((item) => {
     const answer = answers?.[item.id]
-    if (answer) answeredCount += 1
+    if (hasEocQuestionAnswer(item, answer, responseDetails?.[item.id])) answeredCount += 1
     if (answer === 'ok') completeCount += 1
     if (answer === 'repair') attentionCount += 1
   })
 
-  const readyCount = normalizedItems.filter(item => (
-    Boolean(answers?.[item.id])
-    && !isEocIssueDetailMissing(item, answers, issueDetails)
-  )).length
+  const readyCount = normalizedItems.filter(item => isEocQuestionReady(item, answers, issueDetails, responseDetails)).length
 
   return {
     totalCount: normalizedItems.length,
@@ -46,15 +78,14 @@ export function getEocChecklistProgress(items, answers, issueDetails) {
   }
 }
 
-export function findFirstIncompleteEocItemIndex(items, answers, issueDetails) {
+export function findFirstIncompleteEocItemIndex(items, answers, issueDetails, responseDetails) {
   const normalizedItems = Array.isArray(items) ? items : []
   return normalizedItems.findIndex(item => (
-    !answers?.[item.id]
-    || isEocIssueDetailMissing(item, answers, issueDetails)
+    !isEocQuestionReady(item, answers, issueDetails, responseDetails)
   ))
 }
 
-export function getEocCategoryProgress(items, answers, issueDetails) {
+export function getEocCategoryProgress(items, answers, issueDetails, responseDetails) {
   const groups = new Map()
 
   ;(Array.isArray(items) ? items : []).forEach((item, index) => {
@@ -68,7 +99,7 @@ export function getEocCategoryProgress(items, answers, issueDetails) {
     }
     existing.totalCount += 1
     if (answers?.[item.id] === 'repair') existing.attentionCount += 1
-    if (answers?.[item.id] && !isEocIssueDetailMissing(item, answers, issueDetails)) {
+    if (isEocQuestionReady(item, answers, issueDetails, responseDetails)) {
       existing.readyCount += 1
     }
     groups.set(category, existing)
@@ -107,7 +138,7 @@ export function isEocAreaComplete(area) {
     && Number(area?.readyCount || 0) === Number(area?.totalCount || 0)
 }
 
-export function getEocAreaProgress(items, answers, issueDetails) {
+export function getEocAreaProgress(items, answers, issueDetails, responseDetails) {
   const groups = new Map()
 
   ;(Array.isArray(items) ? items : []).forEach((item, index) => {
@@ -127,7 +158,7 @@ export function getEocAreaProgress(items, answers, issueDetails) {
     existing.itemIds.push(item.id)
     existing.totalCount += 1
     if (answers?.[item.id] === 'repair') existing.attentionCount += 1
-    if (answers?.[item.id] && !isEocIssueDetailMissing(item, answers, issueDetails)) {
+    if (isEocQuestionReady(item, answers, issueDetails, responseDetails)) {
       existing.readyCount += 1
     }
     groups.set(category, existing)
@@ -140,8 +171,8 @@ export function getEocAreaProgress(items, answers, issueDetails) {
   }))
 }
 
-export function findFirstIncompleteEocAreaIndex(items, answers, issueDetails) {
-  return getEocAreaProgress(items, answers, issueDetails)
+export function findFirstIncompleteEocAreaIndex(items, answers, issueDetails, responseDetails) {
+  return getEocAreaProgress(items, answers, issueDetails, responseDetails)
     .findIndex(area => !isEocAreaComplete(area))
 }
 

@@ -1,21 +1,16 @@
-import { db } from '../firebase'
+import { db, functions } from '../firebase'
 import {
   collection,
   doc,
   getDoc,
   getDocs,
   query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where,
-  writeBatch
+  where
 } from 'firebase/firestore'
+import { httpsCallable } from 'firebase/functions'
 import { getVersionNumber } from './versioning'
 import {
-  EOC_TEMPLATE_ITEM_SCHEMA_VERSION,
-  findDuplicateEocTrackingIds,
-  normalizeEocTemplateItems
+  normalizeEocTemplateDefinition
 } from '../utils/eocTemplateModel'
 
 const ACTIONABLE_STATUSES = ['pending', 'overdue']
@@ -88,96 +83,29 @@ export function buildTemplateVersionDocId(templateId, versionNumber) {
   return `${String(templateId || '').trim()}__v${Number(versionNumber || 0)}`
 }
 
+function makeOperationId(prefix) {
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}_${Math.random().toString(16).slice(2)}`
+  return `${prefix}_${suffix}`
+}
+
 export async function savePublishedTemplateVersion({
-  actor,
   templateId = '',
   existingTemplate = null,
   payload,
   cloneMeta = null
 }) {
-  const normalizedItems = normalizeEocTemplateItems(payload?.items)
-  if (!String(payload?.name || '').trim()) throw new Error('Template name is required.')
-  if (normalizedItems.length === 0) throw new Error('Add at least one valid template item.')
-  if (findDuplicateEocTrackingIds(normalizedItems).length > 0) {
-    throw new Error('Template item tracking IDs must be unique.')
-  }
-
-  const templateRef = String(templateId || '').trim()
-    ? doc(db, 'eocTemplateLibrary', String(templateId || '').trim())
-    : doc(collection(db, 'eocTemplateLibrary'))
-  const versionNumber = existingTemplate ? getVersionNumber(existingTemplate) + 1 : 1
-  const versionId = buildTemplateVersionDocId(templateRef.id, versionNumber)
-  const versionRef = doc(db, 'eocTemplateVersions', versionId)
-  const ownerUserId = existingTemplate?.ownerUserId ?? actor?.id ?? null
-  const ownerName = existingTemplate?.ownerName ?? actor?.name ?? null
-  const ownerAuthUid = existingTemplate?.ownerAuthUid ?? actor?.authUid ?? null
-  const ownerRole = existingTemplate?.ownerRole ?? actor?.role ?? null
-  const normalizedType = String(payload?.eocType || 'house').trim() === 'van' ? 'van' : 'house'
-  const normalizedStatus = String(payload?.status || 'active').trim() === 'archived' ? 'archived' : 'active'
-
-  const libraryData = {
-    name: String(payload.name || '').trim(),
-    eocType: normalizedType,
-    status: normalizedStatus,
-    items: normalizedItems,
-    itemSchemaVersion: EOC_TEMPLATE_ITEM_SCHEMA_VERSION,
-    publishedVersion: versionNumber,
-    publishedVersionId: versionId,
-    ownerUserId,
-    ownerName,
-    ownerAuthUid,
-    ownerRole,
-    updatedByUserId: actor?.id || null,
-    updatedByName: actor?.name || null,
-    updatedByAuthUid: actor?.authUid || null,
-    updatedAt: serverTimestamp(),
-    version: versionNumber
-  }
-
-  const versionData = {
-    templateId: templateRef.id,
-    templateName: libraryData.name,
-    eocType: normalizedType,
-    status: normalizedStatus,
-    items: normalizedItems,
-    itemSchemaVersion: EOC_TEMPLATE_ITEM_SCHEMA_VERSION,
-    versionNumber,
-    ownerUserId,
-    ownerName,
-    ownerAuthUid,
-    publishedByUserId: actor?.id || null,
-    publishedByName: actor?.name || null,
-    publishedByAuthUid: actor?.authUid || null,
-    publishedAt: serverTimestamp(),
-    createdAt: serverTimestamp(),
-    version: 1,
-    ...(cloneMeta ? cloneMeta : {})
-  }
-
-  const batch = writeBatch(db)
-  if (existingTemplate) {
-    batch.update(templateRef, libraryData)
-  } else {
-    batch.set(templateRef, {
-      ...libraryData,
-      createdByUserId: actor?.id || null,
-      createdByName: actor?.name || null,
-      createdByAuthUid: actor?.authUid || null,
-      createdAt: serverTimestamp(),
-      ...(cloneMeta ? cloneMeta : {})
-    })
-  }
-  batch.set(versionRef, versionData)
-  await batch.commit()
-
-  return {
-    templateId: templateRef.id,
-    templateName: libraryData.name,
-    eocType: normalizedType,
-    versionNumber,
-    versionId,
-    items: normalizedItems
-  }
+  const template = normalizeEocTemplateDefinition(payload)
+  const call = httpsCallable(functions, 'publishEocTemplate')
+  const response = await call({
+    operationId: makeOperationId('publish'),
+    templateId: String(templateId || '').trim() || null,
+    expectedVersion: existingTemplate ? getVersionNumber(existingTemplate) : 0,
+    template,
+    cloneMeta
+  })
+  return response.data
 }
 
 export async function previewDefaultAssignmentImpact({
@@ -224,7 +152,6 @@ export async function previewDefaultAssignmentImpact({
 }
 
 export async function assignDefaultTemplateForScope({
-  actor,
   locationId,
   shiftId,
   eocType,
@@ -243,86 +170,87 @@ export async function assignDefaultTemplateForScope({
   }
 
   const assignmentId = buildTemplateAssignmentDocId(normalizedLocationId, normalizedShiftId, normalizedType)
-  const assignmentRef = doc(db, 'eocTemplateAssignments', assignmentId)
-  const assignmentSnap = await getDoc(assignmentRef)
-
-  const payload = {
+  const assignmentSnap = await getDoc(doc(db, 'eocTemplateAssignments', assignmentId))
+  const call = httpsCallable(functions, 'assignEocTemplate')
+  const response = await call({
+    operationId: makeOperationId('assign'),
     locationId: normalizedLocationId,
     shiftId: normalizedShiftId,
     eocType: normalizedType,
-    defaultTemplateId: normalizedTemplateId,
-    defaultTemplateName: String(templateName || '').trim(),
-    defaultTemplateVersion: Number(templateVersion || 0) || null,
-    defaultTemplateVersionId: String(templateVersionId || '').trim() || null,
-    updatedByUserId: actor?.id || null,
-    updatedByName: actor?.name || null,
-    updatedByAuthUid: actor?.authUid || null,
-    updatedAt: serverTimestamp(),
-    version: assignmentSnap.exists() ? getVersionNumber(assignmentSnap.data()) + 1 : 1
-  }
-
-  if (assignmentSnap.exists()) {
-    await updateDoc(assignmentRef, payload)
-  } else {
-    await setDoc(assignmentRef, {
-      ...payload,
-      createdAt: serverTimestamp(),
-      createdByUserId: actor?.id || null,
-      createdByName: actor?.name || null,
-      createdByAuthUid: actor?.authUid || null
-    })
-  }
-
-  return {
-    assignmentId,
-    updatedTasks: 0
-  }
+    templateId: normalizedTemplateId,
+    templateName: String(templateName || '').trim(),
+    templateVersion: Number(templateVersion || 0) || null,
+    templateVersionId: String(templateVersionId || '').trim() || null,
+    expectedVersion: assignmentSnap.exists() ? getVersionNumber(assignmentSnap.data()) : 0
+  })
+  return response.data
 }
 
-export async function deleteTemplateAndReassignScopes({ actor, templateId, replacementTemplate }) {
+export async function saveEocSectionToLibrary({ section, eocType = 'house', existingSection = null }) {
+  const normalizedSection = normalizeEocTemplateDefinition({
+    name: section?.title || 'Saved section',
+    eocType,
+    sections: [section]
+  }, { includeIncomplete: true }).sections[0]
+  const call = httpsCallable(functions, 'saveEocSection')
+  const response = await call({
+    operationId: makeOperationId('section'),
+    sectionId: existingSection?.id || null,
+    expectedVersion: existingSection ? getVersionNumber(existingSection) : 0,
+    eocType,
+    section: normalizedSection
+  })
+  return response.data
+}
+
+export async function deleteTemplateAndReassignScopes({ templateId, replacementTemplate, reason = '', archiveRequestId = '' }) {
   const normalizedTemplateId = String(templateId || '').trim()
   const normalizedReplacementId = String(replacementTemplate?.id || '').trim()
 
-  if (!normalizedTemplateId || !normalizedReplacementId) {
-    throw new Error('Replacement template is required.')
-  }
+  if (!normalizedTemplateId) throw new Error('Template is required.')
   if (normalizedTemplateId === normalizedReplacementId) {
     throw new Error('Replacement template must be different from the template being archived.')
   }
+  const call = httpsCallable(functions, 'archiveEocTemplate')
+  const response = await call({
+    operationId: makeOperationId('archive'),
+    templateId: normalizedTemplateId,
+    replacementTemplateId: normalizedReplacementId || null,
+    archiveRequestId: String(archiveRequestId || '').trim() || null,
+    reason: String(reason || '').trim() || 'Template archived by admin'
+  })
+  return response.data
+}
 
-  const assignmentsSnap = await getDocs(query(
-    collection(db, 'eocTemplateAssignments'),
-    where('defaultTemplateId', '==', normalizedTemplateId)
-  ))
+export async function requestTemplateArchive({ templateId, reason }) {
+  const call = httpsCallable(functions, 'requestEocTemplateArchive')
+  const response = await call({ templateId: String(templateId || '').trim(), reason: String(reason || '').trim() })
+  return response.data
+}
 
-  for (const assignmentDoc of assignmentsSnap.docs) {
-    const assignmentData = assignmentDoc.data() || {}
-    await assignDefaultTemplateForScope({
-      actor,
-      locationId: assignmentData.locationId,
-      shiftId: assignmentData.shiftId,
-      eocType: assignmentData.eocType,
-      templateId: normalizedReplacementId,
-      templateName: replacementTemplate?.name || '',
-      templateVersion: replacementTemplate?.publishedVersion || replacementTemplate?.version || null,
-      templateVersionId: replacementTemplate?.publishedVersionId || null
-    })
-  }
+export async function rejectTemplateArchiveRequest({ archiveRequestId, reason }) {
+  const call = httpsCallable(functions, 'rejectEocTemplateArchiveRequest')
+  const response = await call({
+    archiveRequestId: String(archiveRequestId || '').trim(),
+    reason: String(reason || '').trim() || 'Archive request declined by admin'
+  })
+  return response.data
+}
 
-  const templateRef = doc(db, 'eocTemplateLibrary', normalizedTemplateId)
-  const templateSnap = await getDoc(templateRef)
-  if (templateSnap.exists()) {
-    await updateDoc(templateRef, {
-      status: 'archived',
-      archivedByUserId: actor?.id || null,
-      archivedByName: actor?.name || null,
-      archivedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      version: getVersionNumber(templateSnap.data()) + 1
-    })
-  }
+export async function previewTemplatePurge(templateId) {
+  const call = httpsCallable(functions, 'previewEocTemplatePurge')
+  const response = await call({ templateId: String(templateId || '').trim() })
+  return response.data
+}
 
-  return {
-    reassignedScopeCount: assignmentsSnap.size
-  }
+export async function purgeUnusedTemplate({ templateId, adminProfileId, pin, reason }) {
+  const call = httpsCallable(functions, 'purgeEocTemplate')
+  const response = await call({
+    operationId: makeOperationId('purge'),
+    templateId: String(templateId || '').trim(),
+    adminProfileId: String(adminProfileId || '').trim(),
+    pin: String(pin || '').trim(),
+    reason: String(reason || '').trim()
+  })
+  return response.data
 }
