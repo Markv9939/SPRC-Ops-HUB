@@ -78,6 +78,7 @@ export default function useUserScope(user) {
   const exactIssueLocationIds = useMemo(
     () => [...new Set([
       ...(Array.isArray(user?.issueLocationIds) ? user.issueLocationIds : []),
+      ...(Array.isArray(user?.authorizedLocations) ? user.authorizedLocations : []),
       user?.locationId
     ].map(normalizeExactIssueLocation).filter(Boolean))],
     [user]

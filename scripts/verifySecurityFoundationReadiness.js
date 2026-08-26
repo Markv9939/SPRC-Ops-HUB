@@ -8,6 +8,7 @@ const requiredFiles = [
   'docs/security/PHASE_2_DORMANT_SERVER_FOUNDATION.md',
   'docs/security/PHASE_3_DORMANT_CLIENT_BOOTSTRAP.md',
   'docs/security/PHASE_4_TO_8_LOCAL_SECURITY_READINESS.md',
+  'docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md',
   'docs/security/SECURITY_CANARY_AND_ROLLBACK.md',
   'functions/src/staffPinLoginService.js',
   'functions/src/staffAccountSecurityService.js',
@@ -15,8 +16,10 @@ const requiredFiles = [
   'functions/src/offlineReplaySecurityService.js',
   'functions/src/workflowSecurityModel.js',
   'functions/src/transportSecurityService.js',
+  'functions/src/operationalMutationSecurityService.js',
   'src/services/securityClientRuntime.js',
   'src/services/offlineSecurityModel.js',
+  'src/services/protectedOperationalMutationService.js',
   'src/services/appCheckMonitoringModel.js'
 ]
 
@@ -49,7 +52,10 @@ const checks = {
   directScopeWritesRetiredInStrictMode: ruleSource.includes("allow create: if !workflowSecurityEnabled('identity_users')")
     && ruleSource.includes("allow create, update: if !workflowSecurityEnabled('identity_users')"),
   serverOnlySecurityCollections: ruleSource.includes('match /securityWorkflowAudit/{auditId}')
-    && ruleSource.includes('allow read, write: if false;')
+    && ruleSource.includes('allow read, write: if false;'),
+  protectedOperationalMutationsPresent: indexSource.includes('submitProtectedEocV9')
+    && indexSource.includes('mutateProtectedIssueV9')
+    && ruleSource.includes("allow create: if !workflowSecurityEnabled('issues_feedback_audit')")
 }
 
 const releaseBlockers = []

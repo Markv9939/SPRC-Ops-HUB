@@ -206,14 +206,21 @@ function SupervisorDashboard({
     allowedComplianceSites,
     inTransportScope,
     inComplianceScope,
-    inEocScope
+    inEocScope,
+    inIssueScope,
+    exactIssueLocationIds
   } = useUserScope(user)
 
   // ── Real-time data from shared hooks ──
   // (Must be declared AFTER useUserScope so inEocScope/inComplianceScope are initialized.)
   // Note: eocAlerts and fleetAlerts are passed as props from App.jsx (already subscribed there)
   // to avoid duplicate Firestore listeners.
-  const { issues: eocIssues, overdueTasks: eocOverdueTasks } = useScopedIssues({ inEocScope })
+  const { issues: eocIssues, overdueTasks: eocOverdueTasks } = useScopedIssues({
+    user,
+    inEocScope,
+    inIssueScope,
+    issueLocationIds: exactIssueLocationIds
+  })
   const { overdueTasks: fleetOverdueTasks, upcomingTasks: fleetUpcomingTasks } = useScopedFleet({ inComplianceScope })
 
   const actorRoleOptions = useMemo(

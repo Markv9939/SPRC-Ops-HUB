@@ -7,7 +7,7 @@
  * Replaces the inline listeners in SupervisorDashboard (lines 358-376).
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, orderBy, onSnapshot, limit } from 'firebase/firestore'
 import { isAdminRole } from '../utils/orgModel'
@@ -15,14 +15,6 @@ import { ACTIVE_ISSUE_STATUSES, CLOSED_ISSUE_STATUSES } from '../utils/issueMode
 
 const ACTIVE_STATUSES = ACTIVE_ISSUE_STATUSES
 const RESOLVED_STATUSES = CLOSED_ISSUE_STATUSES
-
-function chunk(values, size) {
-  const chunks = []
-  for (let index = 0; index < values.length; index += size) {
-    chunks.push(values.slice(index, index + size))
-  }
-  return chunks
-}
 
 function tsMs(ts) {
   if (!ts) return 0
@@ -48,22 +40,26 @@ export default function useScopedIssues({
   const [resolvedIssues, setResolvedIssues] = useState([])
   const [overdueTasks, setOverdueTasks] = useState([])
   const [resolvedLimit, setResolvedLimit] = useState(50)
+  const exactLocations = useMemo(() => [...new Set((Array.isArray(issueLocationIds) ? issueLocationIds : [])
+    .map(value => String(value || '').trim().toLowerCase())
+    .filter(Boolean))], [issueLocationIds])
+  const admin = isAdminRole(user?.role)
+  const waitingForVerifiedScope = user?.authScopeEnforced === true && !admin && exactLocations.length === 0
   useEffect(() => {
     if (!enabled || !inEocScope) return
 
-    const exactLocations = [...new Set((Array.isArray(issueLocationIds) ? issueLocationIds : [])
-      .map(value => String(value || '').trim().toLowerCase())
-      .filter(Boolean))]
-    const canUseExactIssueQuery = exactLocations.length > 0 && !isAdminRole(user?.role)
+    const canUseExactIssueQuery = exactLocations.length > 0 && !admin
     const issueUnsubs = []
 
-    if (canUseExactIssueQuery) {
+    if (waitingForVerifiedScope) {
+      // Do not start a broad listener while signed scope is still hydrating.
+    } else if (canUseExactIssueQuery) {
       const updateBuckets = []
-      chunk(exactLocations, 10).forEach((locations, index) => {
+      exactLocations.forEach((locationId, index) => {
         const unsub = onSnapshot(
           query(
             collection(db, 'eocIssues'),
-            where('locationId', 'in', locations),
+            where('locationId', '==', locationId),
             where('status', 'in', ACTIVE_STATUSES),
             orderBy('createdAt', 'desc')
           ),
@@ -108,16 +104,16 @@ export default function useScopedIssues({
     }
 
     const resolvedUnsubs = []
-    if (includeResolved) {
-      const resolvedQueryLocations = canUseExactIssueQuery ? chunk(exactLocations, 10) : [null]
+    if (includeResolved && !waitingForVerifiedScope) {
+      const resolvedQueryLocations = canUseExactIssueQuery ? exactLocations : [null]
       const resolvedBuckets = []
-      resolvedQueryLocations.forEach((locations, index) => {
+      resolvedQueryLocations.forEach((locationId, index) => {
         const constraints = [
           where('status', 'in', RESOLVED_STATUSES),
           orderBy('closedAt', 'desc'),
           limit(resolvedLimit)
         ]
-        if (locations) constraints.unshift(where('locationId', 'in', locations))
+        if (locationId) constraints.unshift(where('locationId', '==', locationId))
         const unsub = onSnapshot(
           query(collection(db, 'eocIssues'), ...constraints),
           (snap) => {
@@ -162,11 +158,11 @@ export default function useScopedIssues({
       resolvedUnsubs.forEach(unsub => unsub())
       unsubOverdue()
     }
-  }, [enabled, includeResolved, inEocScope, inIssueScope, issueLocationIds, resolvedLimit, user?.role])
+  }, [admin, enabled, exactLocations, includeResolved, inEocScope, inIssueScope, resolvedLimit, waitingForVerifiedScope])
 
   return {
-    issues,
-    resolvedIssues,
+    issues: waitingForVerifiedScope ? [] : issues,
+    resolvedIssues: waitingForVerifiedScope ? [] : resolvedIssues,
     overdueTasks,
     resolvedLimit,
     loadMoreResolved: () => setResolvedLimit(value => value + 50)

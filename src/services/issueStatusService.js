@@ -4,6 +4,7 @@ import { assertExpectedVersion, getVersionNumber } from './versioning'
 import { fanOutIssueAlerts, writeAuditLog } from './notificationService'
 import { addPatternObservation, buildIssuePatternId, removePatternObservation } from '../utils/issueRecurrence'
 import { CLOSED_ISSUE_STATUSES, ISSUE_STATUS } from '../utils/issueModel'
+import { shouldUseProtectedOperationalMutation, submitProtectedIssueMutation } from './protectedOperationalMutationService'
 
 const TERMINAL_STATUSES = new Set(CLOSED_ISSUE_STATUSES)
 const PHOTO_RETENTION_MS = 90 * 24 * 60 * 60 * 1000
@@ -112,6 +113,12 @@ export async function updateIssueStatus({
   }
   if (!trimmedNote) {
     throw new Error(normalizedStatus === 'resolved' ? 'Resolution note is required.' : 'Note is required.')
+  }
+  if (await shouldUseProtectedOperationalMutation('issues_feedback_audit')) {
+    return submitProtectedIssueMutation({
+      action: 'status_update', issueId, expectedVersion: getVersionNumber(expectedIssue),
+      nextStatus: normalizedStatus, note: trimmedNote
+    })
   }
 
   let updatedIssue = null
@@ -274,6 +281,9 @@ export async function addIssueNote({ issueId, expectedIssue, note, actorUser }) 
   const trimmedNote = trim(note)
   if (!issueId) throw new Error('Issue ID is required.')
   if (!trimmedNote) throw new Error('Note is required.')
+  if (await shouldUseProtectedOperationalMutation('issues_feedback_audit')) {
+    return submitProtectedIssueMutation({ action: 'add_note', issueId, expectedVersion: getVersionNumber(expectedIssue), note: trimmedNote })
+  }
 
   let updatedIssue = null
   let activity = null
@@ -343,6 +353,9 @@ export async function addBhtIssueFollowUp({ issueId, expectedIssue, note, actorU
   const trimmedNote = trim(note)
   if (!issueId) throw new Error('Issue ID is required.')
   if (!trimmedNote) throw new Error('Describe the update before submitting.')
+  if (await shouldUseProtectedOperationalMutation('issues_feedback_audit')) {
+    return submitProtectedIssueMutation({ action: 'bht_follow_up', issueId, expectedVersion: getVersionNumber(expectedIssue), note: trimmedNote })
+  }
 
   const issueRef = doc(db, 'eocIssues', issueId)
   const activityRef = doc(collection(db, 'eocIssues', issueId, 'activity'))
@@ -393,6 +406,9 @@ export async function requestIssueReopen({ issueId, issue, note, actorUser }) {
   const trimmedNote = trim(note)
   if (!issueId) throw new Error('Issue ID is required.')
   if (!trimmedNote) throw new Error('Describe what returned before submitting.')
+  if (await shouldUseProtectedOperationalMutation('issues_feedback_audit')) {
+    return submitProtectedIssueMutation({ action: 'request_reopen', issueId, expectedVersion: getVersionNumber(issue), note: trimmedNote })
+  }
 
   const issueRef = doc(db, 'eocIssues', issueId)
   const activityRef = doc(collection(db, 'eocIssues', issueId, 'activity'))
@@ -436,6 +452,9 @@ export async function submitIssueResolutionForReview({ issueId, expectedIssue, n
   const trimmedNote = trim(note)
   if (!issueId) throw new Error('Issue ID is required.')
   if (!trimmedNote) throw new Error('Describe what was completed before submitting for review.')
+  if (await shouldUseProtectedOperationalMutation('issues_feedback_audit')) {
+    return submitProtectedIssueMutation({ action: 'submit_resolution', issueId, expectedVersion: getVersionNumber(expectedIssue), note: trimmedNote })
+  }
 
   let updatedIssue = null
   let activity = null
@@ -510,6 +529,9 @@ export async function reviewIssueResolution({ issueId, expectedIssue, decision, 
   if (!issueId) throw new Error('Issue ID is required.')
   if (!['approve', 'return'].includes(normalizedDecision)) throw new Error('Choose approve or return to active.')
   if (normalizedDecision === 'return' && !trimmedNote) throw new Error('Explain why this issue is being returned to active.')
+  if (await shouldUseProtectedOperationalMutation('issues_feedback_audit')) {
+    return submitProtectedIssueMutation({ action: 'review_resolution', issueId, expectedVersion: getVersionNumber(expectedIssue), decision: normalizedDecision, note: trimmedNote })
+  }
 
   let updatedIssue = null
   let activity = null

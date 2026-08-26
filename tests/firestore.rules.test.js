@@ -13,6 +13,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
@@ -2536,4 +2537,103 @@ test('workflow claims enforce current device sessions, roles, ownership, and loc
   await assertFails(getDoc(doc(bhtDb, 'shiftDebriefs/workflow_debrief')))
   await assertFails(getDoc(doc(bhtDb, 'alerts/workflow_alert')))
   await assertFails(getDoc(doc(bhtDb, 'appSettings/workflowSetting')))
+})
+
+test('strict EOC and issue workflows require protected server mutations while drafts and reads remain usable', async () => {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+  await seed('appSettings/securityWorkflows', {
+    schemaVersion: 6,
+    enabled: true,
+    workflows: ['eoc', 'issues_feedback_audit']
+  })
+  await seed('users/server_mutation_bht', {
+    name: 'Server Mutation BHT', role: 'bht', active: true, deleted: false,
+    securityVersion: 2, location: 'OTC', locationId: 'test_house', house: 'test_house',
+    authorizedLocations: ['OTC', 'test_house'], issueLocationIds: ['test_house'], version: 1
+  })
+  await seed('usersByAuthUid/server_mutation_uid', { userId: 'server_mutation_bht', version: 2 })
+  await seed('staffSessions/server_mutation_session', {
+    profileId: 'server_mutation_bht', authUid: 'server_mutation_uid', securityVersion: 2,
+    active: true, revokedAt: null, expiresAt
+  })
+  await seed('eocTasks/server_mutation_task', {
+    taskType: 'house', locationId: 'test_house', shiftId: 'shift_1', dueDate: '2026-08-26',
+    status: 'pending', cycleKey: 'server_mutation_task', eligibleUserIds: ['server_mutation_bht'],
+    templateScope: 'otc_shared', version: 1, createdAt: new Date(), updatedAt: new Date()
+  })
+  await seed('eocIssues/server_mutation_issue', {
+    locationId: 'test_house', eocType: 'house', label: 'Door', status: 'open',
+    reportedByUserId: 'server_mutation_bht', version: 1, createdAt: new Date(), updatedAt: new Date()
+  })
+  await seed('eocIssues/server_mutation_legacy_missing_location', {
+    eocType: 'house', label: 'Malformed legacy issue', status: 'open',
+    reportedByUserId: 'server_mutation_bht', version: 1, createdAt: new Date(), updatedAt: new Date()
+  })
+  const bhtDb = secureAuthed(
+    'server_mutation_uid', 'server_mutation_bht', 'server_mutation_session', 2, 'bht',
+    ['eoc', 'issues_feedback_audit'],
+    { authorizedLocations: ['OTC', 'test_house'], issueLocationIds: ['test_house'], locationId: 'test_house' }
+  )
+  await assertSucceeds(getDoc(doc(bhtDb, 'eocTasks/server_mutation_task')))
+  await assertSucceeds(getDoc(doc(bhtDb, 'eocIssues/server_mutation_issue')))
+  await assertSucceeds(getDocs(query(
+    collection(bhtDb, 'eocIssues'),
+    where('locationId', '==', 'test_house')
+  )))
+  await assertSucceeds(getDocs(query(
+    collection(bhtDb, 'eocIssues'),
+    where('locationId', '==', 'test_house'),
+    where('status', 'in', ['open', 'in_progress', 'pending_supervisor_review']),
+    orderBy('createdAt', 'desc')
+  )))
+  await assertSucceeds(getDocs(query(
+    collection(bhtDb, 'eocIssues'),
+    where('locationId', '==', 'test_house'),
+    where('status', 'in', ['resolved', 'voided']),
+    orderBy('closedAt', 'desc')
+  )))
+  await assertFails(getDoc(doc(bhtDb, 'eocIssues/server_mutation_legacy_missing_location')))
+  await seed('users/server_mutation_admin', {
+    name: 'Server Mutation Admin', role: 'admin', active: true, deleted: false,
+    securityVersion: 1, authorizedLocations: [], issueLocationIds: [], version: 1
+  })
+  await seed('usersByAuthUid/server_mutation_admin_uid', { userId: 'server_mutation_admin', version: 1 })
+  await seed('staffSessions/server_mutation_admin_session', {
+    profileId: 'server_mutation_admin', authUid: 'server_mutation_admin_uid', securityVersion: 1,
+    active: true, revokedAt: null, expiresAt
+  })
+  const adminDb = secureAuthed(
+    'server_mutation_admin_uid', 'server_mutation_admin', 'server_mutation_admin_session', 1, 'admin',
+    ['eoc', 'issues_feedback_audit'],
+    { authorizedLocations: [], issueLocationIds: [] }
+  )
+  await assertSucceeds(getDocs(query(
+    collection(adminDb, 'eocIssues'),
+    orderBy('createdAt', 'desc')
+  )))
+  await assertSucceeds(getDoc(doc(adminDb, 'eocIssues/server_mutation_legacy_missing_location')))
+  await assertSucceeds(setDoc(doc(bhtDb, 'eocSubmissionDrafts/server_mutation_task__server_mutation_bht'), {
+    taskId: 'server_mutation_task', locationId: 'test_house', shiftId: 'shift_1', eocType: 'house',
+    draftByUserId: 'server_mutation_bht', templateScope: 'otc_shared', version: 1,
+    createdAt: new Date(), updatedAt: new Date()
+  }))
+  await assertFails(setDoc(doc(bhtDb, 'eocSubmissions/direct_strict_submission'), {
+    locationId: 'test_house', shiftId: 'shift_1', eocType: 'house', templateScope: 'otc_shared',
+    submittedByUserId: 'server_mutation_bht', submittedByName: 'Server Mutation BHT', version: 1,
+    createdAt: new Date(), updatedAt: new Date()
+  }))
+  await assertFails(updateDoc(doc(bhtDb, 'eocTasks/server_mutation_task'), {
+    status: 'completed', submissionId: 'direct_strict_submission', version: 2, updatedAt: new Date()
+  }))
+  await assertFails(setDoc(doc(bhtDb, 'eocIssues/direct_strict_issue'), {
+    locationId: 'test_house', eocType: 'house', label: 'Direct issue', status: 'open',
+    reportedByUserId: 'server_mutation_bht', version: 1, createdAt: new Date(), updatedAt: new Date()
+  }))
+  await assertFails(updateDoc(doc(bhtDb, 'eocIssues/server_mutation_issue'), {
+    status: 'pending_supervisor_review', version: 2, updatedAt: new Date()
+  }))
+  await assertFails(setDoc(doc(bhtDb, 'eocIssues/server_mutation_issue/activity/direct_strict_activity'), {
+    issueId: 'server_mutation_issue', locationId: 'test_house', eventType: 'bht_follow_up',
+    actorUserId: 'server_mutation_bht', immutable: true, version: 1, createdAt: new Date()
+  }))
 })

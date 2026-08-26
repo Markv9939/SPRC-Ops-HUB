@@ -23,6 +23,7 @@ import { authorizeDormantOfflineReplay } from './offlineReplaySecurityService.js
 import { workflowSecurityEnabled } from './workflowSecurityModel.js'
 import { createProtectedTransport } from './transportSecurityService.js'
 import { ACCESS_SCOPE_ACTIONS, performDormantAccessScopeAction } from './accessScopeSecurityService.js'
+import { mutateProtectedIssue, submitProtectedEoc } from './operationalMutationSecurityService.js'
 
 initializeApp()
 const db = getFirestore()
@@ -261,6 +262,52 @@ export const createProtectedTransportV6 = onCall({
   enforceAppCheck: false,
   secrets: [STAFF_PIN_AUTH_SECRET]
 }, createProtectedTransportV6Handler)
+
+export async function submitProtectedEocV9Handler(request, dependencies = {}) {
+  try {
+    return await submitProtectedEoc({
+      db: dependencies.db || db,
+      secret: dependencies.secret || STAFF_PIN_AUTH_SECRET.value(),
+      requestAuth: request.auth,
+      requestData: request.data,
+      appCheckPresent: Boolean(request.app),
+      nowMs: dependencies.nowMs || Date.now()
+    })
+  } catch (error) {
+    if (error instanceof StaffAccountSecurityError) throw new HttpsError(error.code, error.message)
+    console.error('Protected EOC submission failed', error)
+    throw new HttpsError('internal', 'The EOC could not be submitted. Try again.')
+  }
+}
+
+export const submitProtectedEocV9 = onCall({
+  region: 'us-central1',
+  enforceAppCheck: false,
+  secrets: [STAFF_PIN_AUTH_SECRET]
+}, submitProtectedEocV9Handler)
+
+export async function mutateProtectedIssueV9Handler(request, dependencies = {}) {
+  try {
+    return await mutateProtectedIssue({
+      db: dependencies.db || db,
+      secret: dependencies.secret || STAFF_PIN_AUTH_SECRET.value(),
+      requestAuth: request.auth,
+      requestData: request.data,
+      appCheckPresent: Boolean(request.app),
+      nowMs: dependencies.nowMs || Date.now()
+    })
+  } catch (error) {
+    if (error instanceof StaffAccountSecurityError) throw new HttpsError(error.code, error.message)
+    console.error('Protected issue mutation failed', error)
+    throw new HttpsError('internal', 'The issue could not be updated. Try again.')
+  }
+}
+
+export const mutateProtectedIssueV9 = onCall({
+  region: 'us-central1',
+  enforceAppCheck: false,
+  secrets: [STAFF_PIN_AUTH_SECRET]
+}, mutateProtectedIssueV9Handler)
 
 function assignmentDocId(locationId, shiftId, eocType) {
   return `asg_${cleanId(String(locationId || '').toLowerCase())}_${cleanId(shiftId)}_${eocType}`

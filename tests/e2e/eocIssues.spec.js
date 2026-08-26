@@ -1,9 +1,32 @@
 import { expect, test } from '@playwright/test'
+import { getShiftById } from '../../src/data/eocConstants.js'
+import { getCurrentCycleDueDate } from '../../src/utils/eocSchedule.js'
+
+function currentEocTaskId({ shiftId, taskType, vanId = '' }) {
+  const dueDate = getCurrentCycleDueDate(getShiftById(shiftId))
+  return taskType === 'house'
+    ? `task_test_house_${shiftId}_house_${dueDate}`
+    : `task_test_house_${shiftId}_van_${vanId}_${dueDate}`
+}
 
 async function login(page, pin) {
   await page.goto('/')
   await page.getByPlaceholder('Enter 6-digit PIN').fill(pin)
   await expect(page).not.toHaveURL(/\/$/)
+}
+
+async function signOutForNextProfile(page, consoleErrors = null) {
+  const expectedErrorStart = Array.isArray(consoleErrors) ? consoleErrors.length : 0
+  await page.evaluate(async () => {
+    const { endSecurityClientSession } = await import('/src/services/securityClientRuntime.js')
+    await endSecurityClientSession({ skipRemote: true })
+    sessionStorage.clear()
+    localStorage.removeItem('lastActivity')
+  })
+  if (Array.isArray(consoleErrors)) {
+    await page.waitForTimeout(250)
+    consoleErrors.splice(expectedErrorStart)
+  }
 }
 
 async function assertNoOverflow(page) {
@@ -58,7 +81,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('sprc_ops_onboarding_done', 'true'))
 })
 
-test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', async ({ page }, testInfo) => {
+test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', async ({ page, browser }, testInfo) => {
   test.skip(testInfo.project.name === 'tablet', 'Tablet coverage is handled by the focused EOC area-rail test.')
 
   const consoleErrors = []
@@ -153,8 +176,11 @@ test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', asy
   await page.locator('.location-issue-card').filter({ hasText: retryDescription }).click()
   await expect(page.locator('.issue-photo-gallery img')).toBeVisible()
 
-  await page.goto('/home')
-  await page.getByRole('button', { name: /House EOC/ }).first().click()
+  const houseTaskId = currentEocTaskId({
+    shiftId: testInfo.project.name === 'desktop' ? 'shift_2' : 'shift_1',
+    taskType: 'house'
+  })
+  await page.goto(`/eoc/${houseTaskId}`)
   await expect(page.getByRole('heading', { name: 'House EOC' })).toBeVisible()
   await expect(page.getByText('Draft ready')).toBeVisible()
   await page.getByRole('button', { name: /Kitchen, 0 of 1 complete/ }).click()
@@ -190,43 +216,39 @@ test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', asy
   await page.goto('/home?offline-test=1')
   await expect(page.locator('.pending-photo-banner')).toContainText('photo pending')
 
-  await page.evaluate(() => {
-    sessionStorage.clear()
-    localStorage.removeItem('lastActivity')
+  const supervisorContext = await browser.newContext({ viewport: page.viewportSize() })
+  const supervisorPage = await supervisorContext.newPage()
+  await supervisorPage.addInitScript(() => localStorage.setItem('sprc_ops_onboarding_done', 'true'))
+  supervisorPage.on('console', message => {
+    if (message.type() === 'error' && !/ERR_INTERNET_DISCONNECTED|network-request-failed/i.test(message.text())) {
+      consoleErrors.push(`Supervisor page: ${message.text()}`)
+    }
   })
-  await page.goto('/?offline-test=1')
-  await page.getByPlaceholder('Enter 6-digit PIN').fill('222222')
-  await expect(page).toHaveURL(/\/dashboard\/dashboard/)
-  await page.goto('/dashboard/eoc?offline-test=1')
-  await page.getByRole('button', { name: /^Issues/ }).click()
-  await expect(page.locator('.pending-photo-banner')).toHaveCount(0)
+  await login(supervisorPage, '222222')
+  await supervisorPage.goto('/dashboard/eoc?offline-test=1')
+  await expect(supervisorPage).toHaveURL(/\/dashboard\/eoc/)
+  await expect(supervisorPage.locator('.pending-photo-banner')).toHaveCount(0)
 
-  await page.evaluate(() => {
-    sessionStorage.clear()
-    localStorage.removeItem('lastActivity')
-  })
-  await login(page, pin)
   await page.goto('/issues')
   await expect(page.locator('.location-issue-card').filter({ hasText: offlineDescription })).toBeVisible({ timeout: 20_000 })
 
-  await page.evaluate(() => {
-    sessionStorage.clear()
-    localStorage.removeItem('lastActivity')
-  })
-  await login(page, '222222')
-  await page.goto('/dashboard/eoc')
-  await page.getByRole('button', { name: 'Status', exact: true }).click()
-  await expect(page.getByText('Test House').first()).toBeVisible()
-  await expect(page.getByText(/COMPLETED|PENDING|OVERDUE/).first()).toBeVisible()
-  await page.getByRole('button', { name: 'History', exact: true }).click()
-  await expect(page.getByText(/Phase 3 Test House EOC/).first()).toBeVisible()
-  const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: /Export current history/ }).click()
+  await supervisorPage.goto('/dashboard/eoc')
+  await expect(supervisorPage).toHaveURL(/\/dashboard\/eoc/)
+  await expect(supervisorPage.getByRole('button', { name: 'Status', exact: true })).toBeVisible()
+  await supervisorPage.getByRole('button', { name: 'Status', exact: true }).click()
+  await expect(supervisorPage.getByText('Test House').first()).toBeVisible()
+  await expect(supervisorPage.getByText(/COMPLETED|PENDING|OVERDUE/).first()).toBeVisible()
+  await supervisorPage.getByRole('button', { name: 'History', exact: true }).click()
+  await expect(supervisorPage.getByText(/Phase 3 Test House EOC/).first()).toBeVisible()
+  const downloadPromise = supervisorPage.waitForEvent('download')
+  await supervisorPage.getByRole('button', { name: /Export current history/ }).click()
   const download = await downloadPromise
   expect(download.suggestedFilename()).toBe('EOC Completion.xlsx')
 
   await assertNoOverflow(page)
+  await assertNoOverflow(supervisorPage)
   expect(consoleErrors).toEqual([])
+  await supervisorContext.close()
 })
 
 test('House and Van EOC area rail works at the project viewport', async ({ page }, testInfo) => {
@@ -235,7 +257,7 @@ test('House and Van EOC area rail works at the project viewport', async ({ page 
   await login(page, pin)
 
   if (projectName === 'tablet') {
-    await page.goto('/eoc/phase3_house_task_tablet')
+    await page.goto(`/eoc/${currentEocTaskId({ shiftId: 'shift_1', taskType: 'house' })}`)
     await expect(page.getByRole('heading', { name: 'House EOC' })).toBeVisible()
     await page.getByRole('button', { name: /Safety, 0 of 1 complete/ }).click()
     await page.locator('#eoc-card-phase3_smoke_detectors').getByRole('button', { name: /Looks good/ }).click()
@@ -247,10 +269,14 @@ test('House and Van EOC area rail works at the project viewport', async ({ page 
   }
 
   if (projectName === 'tablet') {
-    await page.goto('/eoc/phase3_van_task_tablet')
+    await page.goto(`/eoc/${currentEocTaskId({ shiftId: 'shift_1', taskType: 'van', vanId: 'van_test' })}`)
   } else {
-    await page.goto('/home')
-    await page.getByRole('button', { name: /Van EOC/ }).first().click()
+    const vanTaskId = currentEocTaskId({
+      shiftId: projectName === 'desktop' ? 'shift_2' : 'shift_1',
+      taskType: 'van',
+      vanId: 'van_test'
+    })
+    await page.goto(`/eoc/${vanTaskId}`)
   }
   await expect(page.getByRole('heading', { name: 'Van EOC' })).toBeVisible()
   await expect(page.locator('.eoc-vehicle-strip')).toContainText('Phase 3 Test Van')
@@ -297,10 +323,7 @@ test('BHT resolution requires supervisor approval', async ({ page }, testInfo) =
   await expect(page.getByText(/Submitted for supervisor review. A supervisor must approve/)).toBeVisible()
   await expect(page.locator('.location-issue-pill-pending_supervisor_review')).toContainText('PENDING SUPERVISOR REVIEW')
 
-  await page.evaluate(() => {
-    sessionStorage.clear()
-    localStorage.removeItem('lastActivity')
-  })
+  await signOutForNextProfile(page)
   await login(page, '222222')
   await page.goto(`/issues/${issueId}`)
   await expect(page.getByRole('heading', { name: 'Resolution awaiting supervisor review' })).toBeVisible()

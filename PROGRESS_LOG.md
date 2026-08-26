@@ -26,6 +26,61 @@ Do not copy credentials, PINs, client names, real workplace photos, or other sen
 
 ---
 
+## 2026-08-26 — Security foundation Phase 9 protected EOC and issue mutations
+
+**Purpose**
+
+Finish the remaining local security-foundation gap caused by Firestore's hard expression limit, while keeping production and the default six-digit PIN runtime unchanged.
+
+**Outcome and exact status**
+
+- Added dormant protected server transactions for EOC completion and the operational issue lifecycle. The server now enforces current device session, role, location, owner/eligibility, current state, expected record version, idempotent operation ID, immutable activity/audit, recurrence, and alert behavior before committing a strict-mode mutation.
+- Added exact client routing so only a matching secure EOC or issues workflow claim uses the protected callable; the absent/default gate retains the existing compatibility path.
+- Strict workflow rules allow scoped reads and drafts but deny direct browser EOC/issue mutations. Non-admin issue listeners use exact location queries; admins retain the intended global issue view.
+- Added idempotent notification recovery for an interrupted EOC request and record-level stale/two-device conflict protection.
+- Corrected the browser fixture to isolate emulator data by viewport and use the same canonical cycle task IDs as the real task synchronizer.
+- Status is **implemented, verified, committed, and pushed to the isolated security branch for review; dormant and not released**. Production remains unchanged.
+
+**Exact files added or changed**
+
+- Server mutation model/service/tests: `functions/src/operationalMutationSecurityModel.js`, `functions/src/operationalMutationSecurityService.js`, `functions/src/index.js`, `functions/tests/operationalMutationSecurityModel.test.js`, `functions/tests/operationalMutationSecurity.contract.emulator.js`.
+- Client routing/model/tests: `src/services/protectedOperationalMutationModel.js`, `src/services/protectedOperationalMutationService.js`, `src/services/offlineSyncService.js`, `src/services/bhtIssueReportService.js`, `src/services/issueStatusService.js`, `src/services/issueRelationshipService.js`, `src/components/IssueDetail.jsx`, `tests/protectedOperationalMutationService.test.js`.
+- Scoped reads/rules/tests: `firestore.rules`, `src/hooks/useScopedIssues.js`, `src/hooks/useUserScope.js`, `src/components/SupervisorDashboard.jsx`, `tests/firestore.rules.test.js`.
+- Browser and command harness: `scripts/seedIssuePhase3E2e.js`, `tests/e2e/eocIssues.spec.js`, `playwright.config.js`, `package.json`.
+- Documentation/readiness: `docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md`, `scripts/verifySecurityFoundationReadiness.js`, `MASTER_PLAN.md`, `PROGRESS_LOG.md`, `README.md`, `docs/security/PHASE_4_TO_8_LOCAL_SECURITY_READINESS.md`.
+
+**Tests and direct evidence**
+
+- `npm run smoke:phase9:full`: focused mutation model/client 4 passed; mutation emulator 4 passed; Firestore rules 35 passed; build passed with 1,910 modules; final lint passed with zero errors or warnings.
+- Full non-emulator regression: 140 passed, 0 failed, including 56 security contracts plus PIN, Shift Debrief, EOC, supervisor EOC, Function models, issues/photos/feedback, and reset/cutover suites.
+- Full security Auth/Firestore emulator: 40 passed, 0 failed. Storage rules: 4 passed. Shift Debrief emulator: 1 passed. Core reset emulator: 1 passed. Synthetic EOC upgrade seed/write/verify: passed.
+- Functions emulator under temporary official Node.js 22.23.2: 10 passed, 0 failed; all dormant Functions, including both Phase 9 callables, loaded under the declared runtime.
+- Secure browser matrix: 7 isolated mobile/tablet/desktop workflows passed, 0 failed. Disabled/default compatibility matrix: the same 7 isolated workflows passed, 0 failed.
+- Readiness under Node.js 22.23.2: `localDormantImplementationReady: true`, `runtimeParity: true`, `productionReleaseReady: false`.
+- Final Markdown links, heading/fence structure, `git diff --check`, clean branch state, and remote synchronization are checked after this entry is finalized.
+
+**Deployment/configuration/data status**
+
+- No production read/write, deploy, merge, Auth provider change, Anonymous Authentication enablement, secret creation, workflow activation, App Check enforcement, migration, reset, or canary occurred.
+- The existing production release and compatibility runtime remain the rollback baseline.
+
+**Risks and follow-up**
+
+- The next step is a separately approved production release operation: branch/PR review, secret/config preparation, coordinated rollback capture, dormant deployment, Test House/synthetic canary activation, observation, and go/no-go between each workflow.
+- Do not enable the old global strict-auth switch or Anonymous Authentication as a shortcut.
+- Compatibility retirement remains last and requires every named workflow and rollback path to pass live canary evidence.
+
+**Related evidence and Master Plan sections**
+
+- `docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md`
+- `docs/security/SECURITY_CANARY_AND_ROLLBACK.md`
+- 6. Offline Behavior
+- 8. Current Security Foundation Assessment
+- 9. Feature and Work Status
+- 11. High-Level Release Status
+
+---
+
 ## 2026-08-26 — Security foundation Phases 4–8 local dormant completion
 
 **Purpose**

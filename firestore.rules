@@ -918,7 +918,8 @@ service cloud.firestore {
         && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
-      allow update: if validEocTaskStatus(request.resource.data.status)
+      allow update: if (!workflowSecurityEnabled('eoc') || request.resource.data.status != 'completed')
+        && validEocTaskStatus(request.resource.data.status)
         && validIgnoredTaskPayload(request.resource.data)
         && request.resource.data.shiftId is string
         && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
@@ -969,7 +970,8 @@ service cloud.firestore {
     match /eocSubmissions/{docId} {
       allow read: if true;
 
-      allow create: if request.resource.data.keys().hasAll([
+      allow create: if !workflowSecurityEnabled('eoc')
+        && request.resource.data.keys().hasAll([
         'locationId', 'shiftId', 'eocType', 'submittedByUserId', 'submittedByName', 'templateScope'
       ])
         && request.resource.data.shiftId is string
@@ -1200,9 +1202,24 @@ service cloud.firestore {
 
     // EOC Issues
     match /eocIssues/{docId} {
-      allow read: if workflowExactIssueLocationAllowed('issues_feedback_audit', resource.data.locationId);
+      allow read: if workflowSecurityEnabled('issues_feedback_audit')
+        ? (
+          hasCurrentSecuritySession()
+          && (
+            workflowTokenRole() == 'admin'
+            || (
+              ('locationId' in resource.data)
+              && workflowTokenLocationAllowed(resource.data.locationId)
+            )
+          )
+        )
+        : (
+          ('locationId' in resource.data)
+          && exactIssueLocationAllowed(resource.data.locationId)
+        );
 
-      allow create: if request.resource.data.keys().hasAll([
+      allow create: if !workflowSecurityEnabled('issues_feedback_audit')
+        && request.resource.data.keys().hasAll([
         'locationId', 'eocType', 'label', 'status', 'reportedByUserId'
       ])
         && request.resource.data.status == 'open'
@@ -1210,7 +1227,7 @@ service cloud.firestore {
         && workflowRoleAllowed('issues_feedback_audit', ['bht', 'tech', 'supervisor', 'admin'])
         && validVersionField(request.resource.data);
 
-      allow update: if (
+      allow update: if !workflowSecurityEnabled('issues_feedback_audit') && (
           (
             validBhtResolutionTransition(resource.data, request.resource.data)
             && (hasLegacyAuthSession() || strictBhtIssueActor(request.resource.data))
@@ -1218,8 +1235,7 @@ service cloud.firestore {
           )
           || (
             request.resource.data.status in ['open', 'in_progress', 'pending_supervisor_review', 'resolved', 'voided']
-            && authRoleAllowed(['supervisor', 'admin'])
-            && exactIssueLocationAllowed(request.resource.data.locationId)
+            && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
             && request.resource.data.locationId == resource.data.locationId
             && validVersionField(request.resource.data)
             && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
@@ -1227,17 +1243,8 @@ service cloud.firestore {
             ])
             && (
               !(
-                ('parentIssueId' in resource.data)
-                && resource.data.parentIssueId != null
-                && request.resource.data.parentIssueId == null
-              )
-              || authRoleAllowed(['admin'])
-            )
-            && (
-              !(
-                ('linkedTrackingId' in resource.data)
-                && resource.data.linkedTrackingId != null
-                && request.resource.data.linkedTrackingId == null
+                (('parentIssueId' in resource.data) && resource.data.parentIssueId != null && request.resource.data.parentIssueId == null)
+                || (('linkedTrackingId' in resource.data) && resource.data.linkedTrackingId != null && request.resource.data.linkedTrackingId == null)
               )
               || authRoleAllowed(['admin'])
             )
@@ -1264,28 +1271,26 @@ service cloud.firestore {
 
       match /activity/{activityId} {
         allow read: if workflowExactIssueLocationAllowed('issues_feedback_audit', get(/databases/$(database)/documents/eocIssues/$(docId)).data.locationId);
-        allow create: if workflowSessionReady('issues_feedback_audit') && (hasLegacyAuthSession() || signedIn())
+        allow create: if !workflowSecurityEnabled('issues_feedback_audit')
+          && (hasLegacyAuthSession() || signedIn())
           && request.resource.data.issueId == docId
-          && workflowExactIssueLocationAllowed('issues_feedback_audit', request.resource.data.locationId)
+          && exactIssueLocationAllowed(request.resource.data.locationId)
           && request.resource.data.immutable == true
           && (
-            !(request.resource.data.eventType in ['problem_returned', 'bht_follow_up', 'resolution_submitted'])
-            || (!workflowSecurityEnabled('issues_feedback_audit') && hasLegacyAuthSession())
-            || (
-              authProfile().role in ['bht', 'tech']
-              && request.resource.data.actorUserId == authAppUserId()
-            )
+            hasLegacyAuthSession()
+            || request.resource.data.actorUserId == authAppUserId()
+            || authRoleAllowed(['supervisor', 'admin'])
           )
           && (
             !('relationshipAudit' in request.resource.data)
             || request.resource.data.relationshipAudit != true
-            || (!workflowSecurityEnabled('issues_feedback_audit') && hasLegacyAuthSession())
-            || workflowRoleAllowed('issues_feedback_audit', ['supervisor', 'admin'])
+            || hasLegacyAuthSession()
+            || authRoleAllowed(['supervisor', 'admin'])
           )
           && (
             request.resource.data.eventType != 'relationship_unlinked'
-            || (!workflowSecurityEnabled('issues_feedback_audit') && hasLegacyAuthSession())
-            || workflowRoleAllowed('issues_feedback_audit', ['admin'])
+            || hasLegacyAuthSession()
+            || authRoleAllowed(['admin'])
           )
           && validVersionField(request.resource.data);
         allow update, delete: if false;

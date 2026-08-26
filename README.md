@@ -80,7 +80,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 ## Source of Truth
 - Living operational blueprint: `MASTER_PLAN.md`
 - Detailed work/release evidence: `PROGRESS_LOG.md`
-- Security foundation evidence: `docs/security/PHASE_1_SECURITY_FOUNDATION_BASELINE.md`, `docs/security/PHASE_2_DORMANT_SERVER_FOUNDATION.md`, `docs/security/PHASE_3_DORMANT_CLIENT_BOOTSTRAP.md`, `docs/security/PHASE_4_TO_8_LOCAL_SECURITY_READINESS.md`, and `docs/security/SECURITY_CANARY_AND_ROLLBACK.md`
+- Security foundation evidence: `docs/security/PHASE_1_SECURITY_FOUNDATION_BASELINE.md`, `docs/security/PHASE_2_DORMANT_SERVER_FOUNDATION.md`, `docs/security/PHASE_3_DORMANT_CLIENT_BOOTSTRAP.md`, `docs/security/PHASE_4_TO_8_LOCAL_SECURITY_READINESS.md`, `docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md`, and `docs/security/SECURITY_CANARY_AND_ROLLBACK.md`
 - Older V2 blueprint retained for historical comparison: `plan.md`
 - Instruction alignment + approved exceptions: `docs/PROJECT_ALIGNMENT.md`
 - Session startup + operating rules: `PROJECT_INSTRUCTIONS.md`

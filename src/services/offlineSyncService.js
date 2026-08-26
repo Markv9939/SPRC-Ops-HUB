@@ -44,6 +44,7 @@ import { submitAppFeedbackOnline } from './appFeedbackService'
 import { uploadEocResponsePhotos } from './eocSubmissionAttachmentService'
 import { evaluateOfflineActionForCurrentUser } from './offlineSecurityModel'
 import { authorizeOfflineActionReplay } from './offlineReplayAuthorization'
+import { shouldUseProtectedOperationalMutation, submitProtectedEocMutation } from './protectedOperationalMutationService'
 
 export const OFFLINE_ACTION_TYPES = {
   EOC_SUBMISSION: 'eocSubmission',
@@ -355,7 +356,25 @@ export async function submitEocSubmissionOnline(payload) {
   submittedEocSubmissionId = submissionRef.id
   let alreadySubmitted = false
 
-  await runTransaction(db, async (transaction) => {
+  const useProtectedEocMutation = await shouldUseProtectedOperationalMutation('eoc')
+  if (useProtectedEocMutation) {
+    const protectedResult = await submitProtectedEocMutation({
+      operationId: `eoc_submit_${safeIdPart(task.id).slice(0, 48)}_${safeIdPart(normalizedUserId).slice(0, 48)}`,
+      taskId: task.id,
+      expectedTaskVersion: getVersionNumber(task),
+      eocType,
+      vehicleId,
+      vehicleName,
+      vinNumber,
+      odometerReading: eocType === 'van' ? odometerReading.trim() : '',
+      odometerMileage: normalizedOdometerMileage,
+      answers: answersData,
+      draftId: getDraftDocId(task.id, normalizedUserId),
+      ...(payload.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {})
+    })
+    submittedEocSubmissionId = protectedResult.submissionId
+    alreadySubmitted = protectedResult.alreadySubmitted === true
+  } else await runTransaction(db, async (transaction) => {
     const taskRef = doc(db, 'eocTasks', task.id)
     const taskSnap = await transaction.get(taskRef)
     const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
