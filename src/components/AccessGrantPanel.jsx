@@ -9,6 +9,7 @@ import {
   grantBackupAccess,
   revokeBackupAccess
 } from '../services/accessGrantService'
+import { isSecureSessionUser } from '../services/securityAccountActions'
 import { MAIN_LOCATIONS } from '../utils/orgModel'
 
 const LOCATION_OPTIONS = MAIN_LOCATIONS
@@ -180,7 +181,7 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
 
     setSubmitting(true)
     try {
-      const grantId = await grantBackupAccess({
+      const grantResult = await grantBackupAccess({
         userId: selectedUser.id,
         userName: selectedUser.name,
         locationId: form.locationId,
@@ -188,16 +189,19 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
         expiresOn: form.expiresOn,
         reason: form.reason,
         grantedByUserId: currentUser.id,
-        grantedByName: currentUser.name
+        grantedByName: currentUser.name,
+        protectedSession: isSecureSessionUser(currentUser)
       })
 
-      await writeAudit('access_grant_create', grantId, form.reason.trim(), {
-        targetUserId: selectedUser.id,
-        targetUserName: selectedUser.name,
-        locationId: String(form.locationId || '').trim().toUpperCase(),
-        startsOn: form.startsOn,
-        expiresOn: form.expiresOn
-      })
+      if (!grantResult.protected) {
+        await writeAudit('access_grant_create', grantResult.id, form.reason.trim(), {
+          targetUserId: selectedUser.id,
+          targetUserName: selectedUser.name,
+          locationId: String(form.locationId || '').trim().toUpperCase(),
+          startsOn: form.startsOn,
+          expiresOn: form.expiresOn
+        })
+      }
 
       setForm(prev => ({
         ...prev,
@@ -242,17 +246,20 @@ function AccessGrantPanel({ currentUser, users, isOffline = false }) {
     }
 
     try {
-      await revokeBackupAccess({
+      const revokeResult = await revokeBackupAccess({
         grantId: grant.id,
         reason,
         revokedByUserId: currentUser.id,
-        revokedByName: currentUser.name
+        revokedByName: currentUser.name,
+        protectedSession: isSecureSessionUser(currentUser)
       })
-      await writeAudit('access_grant_revoke', grant.id, reason.trim(), {
-        targetUserId: grant.userId,
-        targetUserName: grant.userName,
-        locationId: grant.locationId
-      })
+      if (!revokeResult.protected) {
+        await writeAudit('access_grant_revoke', grant.id, reason.trim(), {
+          targetUserId: grant.userId,
+          targetUserName: grant.userName,
+          locationId: grant.locationId
+        })
+      }
       notifySuccess('Backup access revoked')
     } catch (error) {
       console.error('Failed to revoke access grant:', error)

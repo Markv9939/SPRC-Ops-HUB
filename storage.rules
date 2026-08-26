@@ -11,6 +11,15 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/appSettings/authPolicy).data.authScopeEnforced == true;
     }
 
+    function workflowSecurityEnabled(workflowId) {
+      return signedIn()
+        && 'workflowSecurityVersion' in request.auth.token
+        && 'secureWorkflows' in request.auth.token
+        && request.auth.token.workflowSecurityVersion == 6
+        && request.auth.token.secureWorkflows is list
+        && workflowId in request.auth.token.secureWorkflows;
+    }
+
     function mappedUserId() {
       return signedIn()
         && firestore.exists(/databases/(default)/documents/usersByAuthUid/$(request.auth.uid))
@@ -33,8 +42,37 @@ service firebase.storage {
         );
     }
 
+    function currentWorkflowSession(locationId) {
+      let userId = mappedUserId();
+      let profilePath = /databases/(default)/documents/users/$(userId);
+      let sessionPath = /databases/(default)/documents/staffSessions/$(request.auth.token.sessionId);
+      return userId != ''
+        && 'profileId' in request.auth.token
+        && 'sessionId' in request.auth.token
+        && 'securityVersion' in request.auth.token
+        && request.auth.token.sessionVersion == 2
+        && request.auth.token.profileId == userId
+        && firestore.exists(profilePath)
+        && firestore.get(profilePath).data.active == true
+        && firestore.get(profilePath).data.deleted != true
+        && firestore.get(profilePath).data.securityVersion == request.auth.token.securityVersion
+        && firestore.exists(sessionPath)
+        && firestore.get(sessionPath).data.active == true
+        && firestore.get(sessionPath).data.authUid == request.auth.uid
+        && firestore.get(sessionPath).data.profileId == userId
+        && firestore.get(sessionPath).data.securityVersion == request.auth.token.securityVersion
+        && firestore.get(sessionPath).data.expiresAt > request.time
+        && strictLocationAllowed(locationId);
+    }
+
     function locationAllowed(locationId) {
       return signedIn() && (!strictAuthEnabled() || strictLocationAllowed(locationId));
+    }
+
+    function workflowLocationAllowed(workflowId, locationId) {
+      return workflowSecurityEnabled(workflowId)
+        ? currentWorkflowSession(locationId)
+        : locationAllowed(locationId);
     }
 
     function strictAttachmentReadable(locationId, issueId, attachmentId) {
@@ -51,9 +89,13 @@ service firebase.storage {
 
     match /issueAttachments/{locationId}/{issueId}/{fileName} {
       allow get: if signedIn()
-        && (!strictAuthEnabled() || strictAttachmentReadable(locationId, issueId, resource.metadata.attachmentId));
+        && (
+          workflowSecurityEnabled('issues_feedback_audit')
+            ? (currentWorkflowSession(locationId) && strictAttachmentReadable(locationId, issueId, resource.metadata.attachmentId))
+            : (!strictAuthEnabled() || strictAttachmentReadable(locationId, issueId, resource.metadata.attachmentId))
+        );
       allow list: if false;
-      allow create, update: if locationAllowed(locationId)
+      allow create, update: if workflowLocationAllowed('issues_feedback_audit', locationId)
         && request.resource.size > 0
         && request.resource.size <= 2 * 1024 * 1024
         && request.resource.contentType == 'image/jpeg'
@@ -64,9 +106,9 @@ service firebase.storage {
     }
 
     match /eocSubmissionAttachments/{locationId}/{submissionId}/{fileName} {
-      allow get: if locationAllowed(locationId);
+      allow get: if workflowLocationAllowed('templates_photos', locationId);
       allow list: if false;
-      allow create, update: if locationAllowed(locationId)
+      allow create, update: if workflowLocationAllowed('templates_photos', locationId)
         && request.resource.size > 0
         && request.resource.size <= 2 * 1024 * 1024
         && request.resource.contentType == 'image/jpeg'

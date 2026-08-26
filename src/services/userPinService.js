@@ -4,6 +4,7 @@ import { hashPin } from '../utils/pinHash'
 import { normalizeRole } from '../utils/orgModel'
 import { findDuplicatePinUser } from './pinConflictService'
 import { PIN_LENGTH, PIN_VERSION, isObviousPin, isValidPin } from '../utils/pinPolicy'
+import { isSecureSessionUser, performSecurityAccountAction } from './securityAccountActions'
 
 function roleCanSelfRotate(role) {
   const normalizedRole = normalizeRole(role)
@@ -26,6 +27,17 @@ export async function changeOwnPin({ sessionUser, currentPin, newPin, confirmPin
   if (String(newPin) !== String(confirmPin)) throw toError('New PIN and confirm PIN must match.')
   if (String(currentPin) === String(newPin)) throw toError('New PIN must be different from current PIN.')
   if (isObviousPin(newPin)) throw toError('Choose a less obvious PIN. Repeated or sequential digits are not allowed.')
+
+  if (isSecureSessionUser(sessionUser)) {
+    const result = await performSecurityAccountAction({
+      action: 'self_change_pin',
+      targetProfileId: userId,
+      currentPin,
+      newPin
+    })
+    if (result.status !== 'completed') throw toError('Protected PIN change is not enabled yet.')
+    return { secure: true, requiresSignIn: true, ...result }
+  }
 
   const userRef = doc(db, 'users', userId)
   const userSnap = await getDoc(userRef)
@@ -66,4 +78,5 @@ export async function changeOwnPin({ sessionUser, currentPin, newPin, confirmPin
   } catch (auditError) {
     console.warn('PIN updated, but audit log write failed:', auditError)
   }
+  return { secure: false, requiresSignIn: false }
 }

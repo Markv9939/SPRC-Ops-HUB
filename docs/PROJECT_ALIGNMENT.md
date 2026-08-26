@@ -1,6 +1,6 @@
 # Project Alignment to Master AGENTS.md
 
-Last updated: 2026-05-18
+Last updated: 2026-08-26
 Owner: Product + Engineering
 Status: Active
 
@@ -25,11 +25,15 @@ These exceptions are intentional and approved for this repo.
 
 2. Cloud Functions baseline
 - Master default: Firebase Cloud Functions when applicable.
-- Repo exception: Cloud Functions are optional and not required for current cutover/runtime.
+- Repo exception: Cloud Functions are feature-dependent rather than mandatory for every change. Protected template administration, retention, and privacy workflows already depend on deployed Functions and must be verified when those areas change.
 
 3. PWA implementation timing
 - Master default: installable PWA direction.
 - Repo exception: PWA implementation is deferred by owner decision for now.
+
+4. Security-foundation release boundary
+- Local dormant implementation and tests do not authorize a production authentication, rules, Storage, Functions, Hosting, App Check, secret, data, or configuration change.
+- Release must follow the named workflow canary and coordinated rollback contract in `docs/security/SECURITY_CANARY_AND_ROLLBACK.md`.
 
 ## Delivery Workflow Contract (Required)
 For each logical batch of changes:
@@ -38,7 +42,7 @@ For each logical batch of changes:
    - `npm run build`
    - `npm run lint`
    - `npm run smoke:phase9:full` (when validating release readiness)
-3. Deploy for owner testing:
+3. After explicit owner approval, deploy the authorized layers for testing:
    - Hosting changes: `firebase deploy --only hosting --project sprc-tx-l`
    - Rules changes: `firebase deploy --only firestore:rules --project sprc-tx-l`
 4. Validate on iPhone/iPad critical paths.
@@ -51,5 +55,7 @@ When instructions conflict, resolve in this order:
 1. Master `AGENTS.md` safety/change-control rules.
 2. `PROJECT_INSTRUCTIONS.md` for repo operating rules and session-start order.
 3. This file (`docs/PROJECT_ALIGNMENT.md`) for approved repo exceptions.
-4. `plan.md` for live product blueprint and behavior contract.
-5. Implementation in code.
+4. `MASTER_PLAN.md` for the living operational blueprint, decisions, and status.
+5. `PROGRESS_LOG.md` for detailed implementation and release evidence.
+6. `plan.md` as an older V2 blueprint retained for historical comparison.
+7. Implementation in code, which must be checked when documentation claims conflict.

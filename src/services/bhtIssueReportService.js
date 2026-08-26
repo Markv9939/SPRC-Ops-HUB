@@ -45,7 +45,10 @@ function buildBhtHomeIssueData({ user, assignment, issueType, description, vanId
 }
 
 export async function submitBhtIssueReportOnline(payload) {
-  const issueData = buildBhtHomeIssueData(payload || {})
+  const issueData = {
+    ...buildBhtHomeIssueData(payload || {}),
+    ...(payload?.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {})
+  }
   const localReportId = safeIdPart(payload?.localReportId)
   const issueRef = localReportId
     ? doc(db, 'eocIssues', `bht_${localReportId}`)

@@ -1,3 +1,5 @@
+import { buildOfflineSecurityBinding } from './offlineSecurityModel'
+
 const DB_NAME = 'sprc_ops_offline_v1'
 const DB_VERSION = 2
 const DRAFTS_STORE = 'drafts'
@@ -133,6 +135,8 @@ export async function mutateOfflineDraftAndOutbox({
           id: queueAction.id || makeId(queueAction.type),
           type: queueAction.type,
           payload: queueAction.payload,
+          ownerProfileId: String(queueAction.payload?.user?.id || queueAction.payload?.normalizedUserId || ''),
+          securityBinding: buildOfflineSecurityBinding(queueAction.type, queueAction.payload),
           status: 'pending',
           attempts: 0,
           createdAtIso: nowIso,
@@ -189,7 +193,8 @@ export async function queueOfflineAction({ id, type, payload }) {
     createdAtIso: nowIso,
     updatedAtIso: nowIso,
     lastError: '',
-    ownerProfileId: String(payload?.user?.id || payload?.normalizedUserId || '')
+    ownerProfileId: String(payload?.user?.id || payload?.normalizedUserId || ''),
+    securityBinding: buildOfflineSecurityBinding(type, payload)
   }
   await withStore(OUTBOX_STORE, 'readwrite', (store) => {
     store.put(action)
@@ -221,6 +226,7 @@ export async function queueOfflineActionWithAttachments({ id, type, payload, att
     type,
     payload,
     ownerProfileId,
+    securityBinding: buildOfflineSecurityBinding(type, payload),
     status: 'pending',
     attempts: 0,
     createdAtIso: nowIso,

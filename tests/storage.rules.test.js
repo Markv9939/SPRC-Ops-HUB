@@ -18,8 +18,8 @@ async function seed(path, data) {
   await env.withSecurityRulesDisabled(async context => setDoc(doc(context.firestore(), path), data))
 }
 
-function storageFor(uid = '') {
-  return (uid ? env.authenticatedContext(uid) : env.unauthenticatedContext()).storage(bucketUrl)
+function storageFor(uid = '', claims = {}) {
+  return (uid ? env.authenticatedContext(uid, claims) : env.unauthenticatedContext()).storage(bucketUrl)
 }
 
 function metadata(locationId = 'test_house', issueId = 'issue_1', attachmentId = 'photo_1', contentType = 'image/jpeg') {
@@ -74,4 +74,41 @@ test('photo question files are private and restricted to the submission location
   await assertSucceeds(storageFor('response_bht_uid').ref(allowedPath).put(new Uint8Array([1, 2, 3]), responseMetadata()))
   await assertFails(storageFor('response_bht_uid').ref(wrongLocationPath).put(new Uint8Array([1]), responseMetadata('mesquite')))
   await assertFails(storageFor('response_bht_uid').ref(allowedPath).delete())
+})
+
+test('dormant workflow claims require a current matching device session for photos', async () => {
+  await seed('appSettings/authPolicy', { authScopeEnforced: false })
+  await seed('users/workflow_bht', {
+    role: 'bht', active: true, deleted: false, securityVersion: 4,
+    issueLocationIds: ['test_house']
+  })
+  await seed('usersByAuthUid/workflow_uid', { userId: 'workflow_bht' })
+  await seed('staffSessions/workflow_session', {
+    active: true,
+    authUid: 'workflow_uid',
+    profileId: 'workflow_bht',
+    securityVersion: 4,
+    expiresAt: new Date(Date.now() + 60_000)
+  })
+  const claims = {
+    profileId: 'workflow_bht',
+    sessionId: 'workflow_session',
+    sessionVersion: 2,
+    securityVersion: 4,
+    workflowSecurityVersion: 6,
+    secureWorkflows: ['templates_photos', 'issues_feedback_audit']
+  }
+  const path = 'eocSubmissionAttachments/test_house/submission_1/workflow_photo.jpg'
+  await assertSucceeds(storageFor('workflow_uid', claims).ref(path).put(
+    new Uint8Array([1, 2, 3]),
+    responseMetadata('test_house', 'submission_1', 'workflow_photo')
+  ))
+  await seed('staffSessions/workflow_session', {
+    active: false,
+    authUid: 'workflow_uid',
+    profileId: 'workflow_bht',
+    securityVersion: 4,
+    expiresAt: new Date(Date.now() + 60_000)
+  })
+  await assertFails(storageFor('workflow_uid', claims).ref(path).getMetadata())
 })

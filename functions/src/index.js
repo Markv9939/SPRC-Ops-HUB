@@ -1,7 +1,9 @@
 import crypto from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
+import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
+import { defineSecret } from 'firebase-functions/params'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { attachmentNeedsDeletion, summarizeCleanupResults } from './retentionModel.js'
@@ -11,6 +13,16 @@ import {
   normalizePublishedEocSection,
   normalizePublishedEocTemplate
 } from './eocTemplateAdminModel.js'
+import { StaffPinLoginError, beginDormantStaffPinSession } from './staffPinLoginService.js'
+import {
+  StaffAccountSecurityError,
+  loadMappedActor,
+  performDormantStaffSecurityAction
+} from './staffAccountSecurityService.js'
+import { authorizeDormantOfflineReplay } from './offlineReplaySecurityService.js'
+import { workflowSecurityEnabled } from './workflowSecurityModel.js'
+import { createProtectedTransport } from './transportSecurityService.js'
+import { ACCESS_SCOPE_ACTIONS, performDormantAccessScopeAction } from './accessScopeSecurityService.js'
 
 initializeApp()
 const db = getFirestore()
@@ -18,6 +30,7 @@ const bucket = () => getStorage().bucket()
 const PIN_PEPPER = 'sprc-pin-v2-6digit'
 const PIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000
 const PIN_MAX_ATTEMPTS = 5
+const STAFF_PIN_AUTH_SECRET = defineSecret('STAFF_PIN_AUTH_SECRET')
 const EOC_ASSIGNMENT_SHIFTS = new Set([
   'shift_1',
   'shift_2',
@@ -33,6 +46,32 @@ function cleanId(value, maximum = 160) {
 
 async function requireMappedActor(request, roles = ['supervisor', 'admin']) {
   if (!request.auth) throw new HttpsError('unauthenticated', 'A Firebase session is required.')
+  const workflowConfigSnapshot = await db.doc('appSettings/securityWorkflows').get()
+  const workflowConfig = workflowConfigSnapshot.data() || {}
+  if (workflowSecurityEnabled(workflowConfig, 'templates_photos')) {
+    const claims = request.auth.token || {}
+    if (claims.workflowSecurityVersion !== 6
+      || !Array.isArray(claims.secureWorkflows)
+      || !claims.secureWorkflows.includes('templates_photos')) {
+      throw new HttpsError('permission-denied', 'Sign in again before using protected template tools.')
+    }
+    try {
+      const actor = await loadMappedActor({ db, requestAuth: request.auth, nowMs: Date.now(), requireCurrentSession: true })
+      if (!roles.includes(actor.role)) throw new HttpsError('permission-denied', 'You do not have permission for this template action.')
+      return {
+        id: actor.id,
+        authUid: actor.authUid,
+        name: String(actor.name || '').trim() || 'Staff user',
+        role: actor.role,
+        authorizedLocations: Array.isArray(actor.authorizedLocations) ? actor.authorizedLocations : [],
+        organizationId: String(actor.organizationId || '').trim() || 'sprc'
+      }
+    } catch (error) {
+      if (error instanceof HttpsError) throw error
+      if (error instanceof StaffAccountSecurityError) throw new HttpsError(error.code, error.message)
+      throw error
+    }
+  }
   const mappingSnap = await db.doc(`usersByAuthUid/${request.auth.uid}`).get()
   const profileId = String(mappingSnap.data()?.userId || '').trim()
   if (!mappingSnap.exists || !profileId) throw new HttpsError('permission-denied', 'Your signed-in account is not linked to an active staff profile.')
@@ -104,6 +143,124 @@ export async function establishPinSessionHandler(request) {
 }
 
 export const establishPinSession = onCall({ region: 'us-central1' }, establishPinSessionHandler)
+
+export async function beginStaffPinSessionV2Handler(request, dependencies = {}) {
+  try {
+    return await beginDormantStaffPinSession({
+      db: dependencies.db || db,
+      auth: dependencies.auth || getAuth(),
+      secret: dependencies.secret || STAFF_PIN_AUTH_SECRET.value(),
+      requestData: request.data,
+      sourceAddress: dependencies.sourceAddress
+        || request.rawRequest?.ip
+        || String(request.rawRequest?.headers?.['x-forwarded-for'] || '').split(',')[0].trim()
+        || 'unknown',
+      appCheckPresent: dependencies.appCheckPresent ?? Boolean(request.app),
+      nowMs: dependencies.nowMs || Date.now()
+    })
+  } catch (error) {
+    if (error instanceof StaffPinLoginError) throw new HttpsError(error.code, error.message)
+    console.error('Dormant server PIN login failed without issuing a session.', {
+      code: String(error?.code || 'unknown'),
+      message: String(error?.message || 'Unknown server PIN login error')
+    })
+    throw new HttpsError('internal', 'A secure session could not be issued. Try again.')
+  }
+}
+
+// This callable is off by default and also requires appSettings/securityFoundation
+// schemaVersion 2 with serverPinLoginEnabled=true. The Phase 3 client reaches it
+// only when its separate compile-time and versioned configuration gates also match.
+export const beginStaffPinSessionV2 = onCall({
+  region: 'us-central1',
+  enforceAppCheck: false,
+  secrets: [STAFF_PIN_AUTH_SECRET]
+}, beginStaffPinSessionV2Handler)
+
+export async function manageStaffSecurityV4Handler(request, dependencies = {}) {
+  try {
+    const action = String(request.data?.action || '').trim()
+    const performer = Object.values(ACCESS_SCOPE_ACTIONS).includes(action)
+      ? performDormantAccessScopeAction
+      : performDormantStaffSecurityAction
+    return await performer({
+      db: dependencies.db || db,
+      auth: dependencies.auth || getAuth(),
+      secret: dependencies.secret || STAFF_PIN_AUTH_SECRET.value(),
+      requestData: request.data,
+      requestAuth: request.auth,
+      appCheckPresent: dependencies.appCheckPresent ?? Boolean(request.app),
+      nowMs: dependencies.nowMs || Date.now()
+    })
+  } catch (error) {
+    if (error instanceof StaffAccountSecurityError) throw new HttpsError(error.code, error.message)
+    console.error('Dormant protected staff security action failed.', {
+      code: String(error?.code || 'unknown'),
+      message: String(error?.message || 'Unknown protected staff security action error')
+    })
+    throw new HttpsError('internal', 'The protected staff account action could not be completed. Try again.')
+  }
+}
+
+// Phase 4 remains dormant. Calls fail closed unless the versioned server setting
+// explicitly enables protectedAccountActionsVersion=4 and protectedAccountActionsEnabled=true.
+export const manageStaffSecurityV4 = onCall({
+  region: 'us-central1',
+  enforceAppCheck: false,
+  secrets: [STAFF_PIN_AUTH_SECRET]
+}, manageStaffSecurityV4Handler)
+
+export async function authorizeOfflineReplayV5Handler(request, dependencies = {}) {
+  try {
+    return await authorizeDormantOfflineReplay({
+      db: dependencies.db || db,
+      secret: dependencies.secret || STAFF_PIN_AUTH_SECRET.value(),
+      requestData: request.data,
+      requestAuth: request.auth,
+      appCheckPresent: dependencies.appCheckPresent ?? Boolean(request.app),
+      nowMs: dependencies.nowMs || Date.now()
+    })
+  } catch (error) {
+    if (error instanceof StaffAccountSecurityError) throw new HttpsError(error.code, error.message)
+    console.error('Dormant protected offline replay authorization failed.', {
+      code: String(error?.code || 'unknown'),
+      message: String(error?.message || 'Unknown offline replay authorization error')
+    })
+    throw new HttpsError('internal', 'Offline work could not be authorized for replay. Try again.')
+  }
+}
+
+export const authorizeOfflineReplayV5 = onCall({
+  region: 'us-central1',
+  enforceAppCheck: false,
+  secrets: [STAFF_PIN_AUTH_SECRET]
+}, authorizeOfflineReplayV5Handler)
+
+export async function createProtectedTransportV6Handler(request, dependencies = {}) {
+  try {
+    return await createProtectedTransport({
+      db: dependencies.db || db,
+      secret: dependencies.secret || STAFF_PIN_AUTH_SECRET.value(),
+      requestAuth: request.auth,
+      requestData: request.data,
+      appCheckPresent: dependencies.appCheckPresent ?? Boolean(request.app),
+      nowMs: dependencies.nowMs || Date.now()
+    })
+  } catch (error) {
+    if (error instanceof StaffAccountSecurityError) throw new HttpsError(error.code, error.message)
+    console.error('Dormant protected transport creation failed.', {
+      code: String(error?.code || 'unknown'),
+      message: String(error?.message || 'Unknown protected transport error')
+    })
+    throw new HttpsError('internal', 'The protected transport could not be created. Try again.')
+  }
+}
+
+export const createProtectedTransportV6 = onCall({
+  region: 'us-central1',
+  enforceAppCheck: false,
+  secrets: [STAFF_PIN_AUTH_SECRET]
+}, createProtectedTransportV6Handler)
 
 function assignmentDocId(locationId, shiftId, eocType) {
   return `asg_${cleanId(String(locationId || '').toLowerCase())}_${cleanId(shiftId)}_${eocType}`
@@ -237,7 +394,7 @@ export async function publishEocTemplateHandler(request) {
   })
 }
 
-export const publishEocTemplate = onCall({ region: 'us-central1' }, publishEocTemplateHandler)
+export const publishEocTemplate = onCall({ region: 'us-central1', enforceAppCheck: false }, publishEocTemplateHandler)
 
 export async function assignEocTemplateHandler(request) {
   const actor = await requireMappedActor(request)
@@ -314,7 +471,7 @@ export async function assignEocTemplateHandler(request) {
   })
 }
 
-export const assignEocTemplate = onCall({ region: 'us-central1' }, assignEocTemplateHandler)
+export const assignEocTemplate = onCall({ region: 'us-central1', enforceAppCheck: false }, assignEocTemplateHandler)
 
 export async function saveEocSectionHandler(request) {
   const actor = await requireMappedActor(request)
@@ -411,7 +568,7 @@ export async function saveEocSectionHandler(request) {
   })
 }
 
-export const saveEocSection = onCall({ region: 'us-central1' }, saveEocSectionHandler)
+export const saveEocSection = onCall({ region: 'us-central1', enforceAppCheck: false }, saveEocSectionHandler)
 
 export async function archiveEocTemplateHandler(request) {
   const actor = await requireMappedActor(request, ['admin'])
@@ -504,7 +661,7 @@ export async function archiveEocTemplateHandler(request) {
   })
 }
 
-export const archiveEocTemplate = onCall({ region: 'us-central1' }, archiveEocTemplateHandler)
+export const archiveEocTemplate = onCall({ region: 'us-central1', enforceAppCheck: false }, archiveEocTemplateHandler)
 
 export async function requestEocTemplateArchiveHandler(request) {
   const actor = await requireMappedActor(request)
@@ -535,7 +692,7 @@ export async function requestEocTemplateArchiveHandler(request) {
   return { requestId, status: 'pending' }
 }
 
-export const requestEocTemplateArchive = onCall({ region: 'us-central1' }, requestEocTemplateArchiveHandler)
+export const requestEocTemplateArchive = onCall({ region: 'us-central1', enforceAppCheck: false }, requestEocTemplateArchiveHandler)
 
 export async function rejectEocTemplateArchiveRequestHandler(request) {
   const actor = await requireMappedActor(request, ['admin'])
@@ -562,7 +719,7 @@ export async function rejectEocTemplateArchiveRequestHandler(request) {
   })
 }
 
-export const rejectEocTemplateArchiveRequest = onCall({ region: 'us-central1' }, rejectEocTemplateArchiveRequestHandler)
+export const rejectEocTemplateArchiveRequest = onCall({ region: 'us-central1', enforceAppCheck: false }, rejectEocTemplateArchiveRequestHandler)
 
 function templateReferenceQueries(templateId) {
   return {
@@ -594,7 +751,7 @@ export async function previewEocTemplatePurgeHandler(request) {
   return { templateId, templateName: templateSnap.data()?.name || '', status: templateSnap.data()?.status || 'active', ...summarizeTemplateReferences(Object.fromEntries(entries)) }
 }
 
-export const previewEocTemplatePurge = onCall({ region: 'us-central1' }, previewEocTemplatePurgeHandler)
+export const previewEocTemplatePurge = onCall({ region: 'us-central1', enforceAppCheck: false }, previewEocTemplatePurgeHandler)
 
 export async function purgeEocTemplateHandler(request) {
   const actor = await requireMappedActor(request, ['admin'])
@@ -634,7 +791,7 @@ export async function purgeEocTemplateHandler(request) {
   })
 }
 
-export const purgeEocTemplate = onCall({ region: 'us-central1' }, purgeEocTemplateHandler)
+export const purgeEocTemplate = onCall({ region: 'us-central1', enforceAppCheck: false }, purgeEocTemplateHandler)
 
 function hashPin(pin) {
   return crypto.createHash('sha256').update(`${PIN_PEPPER}:${String(pin || '').trim()}`).digest('hex')
@@ -709,7 +866,7 @@ export async function emergencyPrivacyRemoveHandler(request) {
   return { removed: true }
 }
 
-export const emergencyPrivacyRemove = onCall({ region: 'us-central1' }, emergencyPrivacyRemoveHandler)
+export const emergencyPrivacyRemove = onCall({ region: 'us-central1', enforceAppCheck: false }, emergencyPrivacyRemoveHandler)
 
 export async function runPhotoRetentionCleanup({ now = Timestamp.now(), batchLimit = 100 } = {}) {
   const issuesSnap = await db.collection('eocIssues').where('photoDeletionDueAt', '<=', now).limit(batchLimit).get()
