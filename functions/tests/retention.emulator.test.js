@@ -8,7 +8,18 @@ import { Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
 
 process.env.GCLOUD_PROJECT ||= 'demo-sprc-functions'
-const { emergencyPrivacyRemoveHandler, runPhotoRetentionCleanup } = await import('../src/index.js')
+const {
+  assignEocTemplateHandler,
+  archiveEocTemplateHandler,
+  emergencyPrivacyRemoveHandler,
+  establishPinSessionHandler,
+  previewEocTemplatePurgeHandler,
+  publishEocTemplateHandler,
+  purgeEocTemplateHandler,
+  requestEocTemplateArchiveHandler,
+  runPhotoRetentionCleanup,
+  saveEocSectionHandler
+} = await import('../src/index.js')
 const db = getFirestore()
 const bucket = getStorage().bucket()
 const pinHash = pin => crypto.createHash('sha256').update(`sprc-pin-v2-6digit:${pin}`).digest('hex')
@@ -69,6 +80,175 @@ test('emergency privacy removal locks repeated invalid PIN attempts', async () =
   }
   await assert.rejects(() => emergencyPrivacyRemoveHandler({ auth: { uid: 'anon' }, data: { adminProfileId: 'admin_lock_test', pin: '000000', issueId: 'missing', attachmentId: 'missing', reason: 'Synthetic invalid attempt.' } }), error => error?.code === 'resource-exhausted')
   await assert.rejects(() => emergencyPrivacyRemoveHandler({ auth: { uid: 'anon' }, data: { adminProfileId: 'admin_lock_test', pin: '492815', issueId: 'missing', attachmentId: 'missing', reason: 'Synthetic locked attempt.' } }), error => error?.code === 'resource-exhausted')
+})
+
+test('verified PIN sessions securely map the current Firebase UID to the staff profile', async () => {
+  await db.doc('users/pin_session_supervisor').set({ role: 'supervisor', active: true, name: 'PIN Session Supervisor', pinHash: pinHash('275184') })
+  await assert.rejects(() => establishPinSessionHandler({ auth: { uid: 'pin_session_uid' }, data: { profileId: 'pin_session_supervisor', pin: '000000' } }), error => error?.code === 'permission-denied')
+  const result = await establishPinSessionHandler({ auth: { uid: 'pin_session_uid' }, data: { profileId: 'pin_session_supervisor', pin: '275184' } })
+  assert.equal(result.profileId, 'pin_session_supervisor')
+  assert.equal((await db.doc('usersByAuthUid/pin_session_uid').get()).data().userId, 'pin_session_supervisor')
+})
+
+test('template publishing is owner-scoped, immutable, and idempotent', async () => {
+  await db.doc('users/template_supervisor').set({ role: 'supervisor', active: true, name: 'Template Supervisor', authorizedLocations: ['OTC'] })
+  await db.doc('usersByAuthUid/template_supervisor_uid').set({ userId: 'template_supervisor' })
+  const request = {
+    auth: { uid: 'template_supervisor_uid' },
+    data: {
+      operationId: 'publish_operation_1',
+      template: {
+        name: 'Night Safety',
+        eocType: 'house',
+        sections: [{
+          id: 'safety',
+          title: 'Safety',
+          questions: [{ trackingId: 'front_lock', label: 'Does the front lock work?', questionType: 'pass_issue' }]
+        }]
+      }
+    }
+  }
+  const first = await publishEocTemplateHandler(request)
+  const repeated = await publishEocTemplateHandler(request)
+  assert.equal(first.templateId, repeated.templateId)
+  assert.equal(first.versionNumber, 1)
+  assert.equal((await db.collection('eocTemplateVersions').get()).size, 1)
+  assert.equal((await db.doc(`eocTemplateLibrary/${first.templateId}`).get()).data().schemaVersion, 3)
+
+  await db.doc('users/other_supervisor').set({ role: 'supervisor', active: true, name: 'Other Supervisor', authorizedLocations: ['OTC'] })
+  await db.doc('usersByAuthUid/other_supervisor_uid').set({ userId: 'other_supervisor' })
+  await assert.rejects(() => publishEocTemplateHandler({
+    auth: { uid: 'other_supervisor_uid' },
+    data: { ...request.data, operationId: 'publish_operation_2', templateId: first.templateId, expectedVersion: 1 }
+  }), error => error?.code === 'permission-denied')
+})
+
+test('template assignment verifies published version and supervisor location scope', async () => {
+  await db.doc('users/assignment_supervisor').set({ role: 'supervisor', active: true, name: 'Assignment Supervisor', authorizedLocations: ['OTC'] })
+  await db.doc('usersByAuthUid/assignment_supervisor_uid').set({ userId: 'assignment_supervisor' })
+  const published = await publishEocTemplateHandler({
+    auth: { uid: 'assignment_supervisor_uid' },
+    data: {
+      operationId: 'publish_for_assignment',
+      template: {
+        name: 'Assignment Template',
+        eocType: 'house',
+        sections: [{ id: 'section', title: 'Section', questions: [{ trackingId: 'question', label: 'Question', questionType: 'pass_issue' }] }]
+      }
+    }
+  })
+  const assigned = await assignEocTemplateHandler({
+    auth: { uid: 'assignment_supervisor_uid' },
+    data: {
+      operationId: 'assign_operation_1',
+      locationId: 'test_house',
+      shiftId: 'shift_1',
+      eocType: 'house',
+      templateId: published.templateId,
+      templateVersionId: published.versionId
+    }
+  })
+  assert.equal(assigned.assignmentId, 'asg_test_house_shift_1_house')
+  await assert.rejects(() => assignEocTemplateHandler({
+    auth: { uid: 'assignment_supervisor_uid' },
+    data: {
+      operationId: 'assign_operation_2',
+      locationId: 'res',
+      shiftId: 'res_shift_1_day',
+      eocType: 'house',
+      templateId: published.templateId,
+      templateVersionId: published.versionId
+    }
+  }), error => error?.code === 'permission-denied')
+})
+
+test('saved section versions are owner-scoped and reusable snapshots', async () => {
+  await db.doc('users/section_supervisor').set({ role: 'supervisor', active: true, name: 'Section Supervisor', authorizedLocations: ['OTC'] })
+  await db.doc('usersByAuthUid/section_supervisor_uid').set({ userId: 'section_supervisor' })
+  const result = await saveEocSectionHandler({
+    auth: { uid: 'section_supervisor_uid' },
+    data: {
+      operationId: 'section_operation_1',
+      eocType: 'house',
+      section: {
+        id: 'kitchen',
+        title: 'Kitchen',
+        questions: [{ trackingId: 'sink', label: 'Does the sink drain?', questionType: 'pass_issue' }]
+      }
+    }
+  })
+  assert.equal(result.questionCount, 1)
+  assert.equal((await db.doc(`eocSectionVersions/${result.versionId}`).get()).exists, true)
+})
+
+test('admin archive review reassigns defaults and resolves the supervisor request', async () => {
+  await db.doc('users/archive_supervisor').set({ role: 'supervisor', active: true, name: 'Archive Supervisor', authorizedLocations: ['OTC'] })
+  await db.doc('usersByAuthUid/archive_supervisor_uid').set({ userId: 'archive_supervisor' })
+  await db.doc('users/archive_admin').set({ role: 'admin', active: true, name: 'Archive Admin', authorizedLocations: [] })
+  await db.doc('usersByAuthUid/archive_admin_uid').set({ userId: 'archive_admin' })
+  const publish = async (operationId, name, trackingId) => publishEocTemplateHandler({
+    auth: { uid: 'archive_supervisor_uid' },
+    data: {
+      operationId,
+      template: {
+        name,
+        eocType: 'house',
+        sections: [{ id: `${trackingId}_section`, title: 'Safety', questions: [{ trackingId, label: 'Safety check', questionType: 'pass_issue' }] }]
+      }
+    }
+  })
+  const original = await publish('archive_publish_original', 'Original Template', 'original_check')
+  const replacement = await publish('archive_publish_replacement', 'Replacement Template', 'replacement_check')
+  await assignEocTemplateHandler({
+    auth: { uid: 'archive_supervisor_uid' },
+    data: { operationId: 'archive_assign', locationId: 'test_house', shiftId: 'shift_1', eocType: 'house', templateId: original.templateId, templateVersionId: original.versionId }
+  })
+  const archiveRequest = await requestEocTemplateArchiveHandler({
+    auth: { uid: 'archive_supervisor_uid' },
+    data: { templateId: original.templateId, reason: 'Replace the old safety checklist.' }
+  })
+  const result = await archiveEocTemplateHandler({
+    auth: { uid: 'archive_admin_uid' },
+    data: {
+      operationId: 'archive_approve',
+      templateId: original.templateId,
+      replacementTemplateId: replacement.templateId,
+      archiveRequestId: archiveRequest.requestId,
+      reason: 'Approved after assignment review.'
+    }
+  })
+  assert.equal(result.reassignedScopeCount, 1)
+  assert.equal((await db.doc(`eocTemplateLibrary/${original.templateId}`).get()).data().status, 'archived')
+  assert.equal((await db.doc('eocTemplateAssignments/asg_test_house_shift_1_house').get()).data().defaultTemplateId, replacement.templateId)
+  assert.equal((await db.doc(`eocTemplateArchiveRequests/${archiveRequest.requestId}`).get()).data().status, 'approved')
+})
+
+test('permanent template deletion requires an archived unused template and the current admin PIN', async () => {
+  await db.doc('users/purge_supervisor').set({ role: 'supervisor', active: true, name: 'Purge Supervisor', authorizedLocations: ['OTC'] })
+  await db.doc('usersByAuthUid/purge_supervisor_uid').set({ userId: 'purge_supervisor' })
+  await db.doc('users/purge_admin').set({ role: 'admin', active: true, name: 'Purge Admin', authorizedLocations: [], pinHash: pinHash('614295') })
+  await db.doc('usersByAuthUid/purge_admin_uid').set({ userId: 'purge_admin' })
+  const published = await publishEocTemplateHandler({
+    auth: { uid: 'purge_supervisor_uid' },
+    data: { operationId: 'purge_publish', template: { name: 'Unused Template', eocType: 'house', sections: [{ id: 'unused_section', title: 'Unused', questions: [{ trackingId: 'unused_question', label: 'Unused check', questionType: 'pass_issue' }] }] } }
+  })
+  await archiveEocTemplateHandler({
+    auth: { uid: 'purge_admin_uid' },
+    data: { operationId: 'purge_archive', templateId: published.templateId, reason: 'Unused test template.' }
+  })
+  const impact = await previewEocTemplatePurgeHandler({ auth: { uid: 'purge_admin_uid' }, data: { templateId: published.templateId } })
+  assert.equal(impact.purgeAllowed, true)
+  await assert.rejects(() => purgeEocTemplateHandler({
+    auth: { uid: 'purge_admin_uid' },
+    data: { operationId: 'purge_wrong_pin', templateId: published.templateId, adminProfileId: 'purge_admin', pin: '000000', reason: 'Remove unused test template.' }
+  }), error => error?.code === 'permission-denied')
+  const result = await purgeEocTemplateHandler({
+    auth: { uid: 'purge_admin_uid' },
+    data: { operationId: 'purge_success', templateId: published.templateId, adminProfileId: 'purge_admin', pin: '614295', reason: 'Remove unused test template.' }
+  })
+  assert.equal(result.purged, true)
+  assert.equal((await db.doc(`eocTemplateLibrary/${published.templateId}`).get()).exists, false)
+  assert.equal((await db.doc(`eocTemplateVersions/${published.versionId}`).get()).exists, false)
 })
 
 test.after(() => {

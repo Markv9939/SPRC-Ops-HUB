@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   getEocCycleScopeKey,
+  isSupportedEocAssignment,
   shouldMarkEocTaskMissed
 } from '../src/utils/eocTaskLifecycle.js'
 
@@ -33,5 +34,12 @@ test('van cycle identity includes vehicle', () => {
   const first = getEocCycleScopeKey({ ...oldTask, taskType: 'van', vanId: 'van_1' })
   const second = getEocCycleScopeKey({ ...oldTask, taskType: 'van', vanId: 'van_2' })
   assert.notEqual(first, second)
+})
+
+test('task sync accepts operational location shifts and ignores layout-only locations', () => {
+  assert.equal(isSupportedEocAssignment({ locationId: 'test_house', shiftId: 'shift_1' }), true)
+  assert.equal(isSupportedEocAssignment({ locationId: 'res', shiftId: 'res_shift_1_day' }), true)
+  assert.equal(isSupportedEocAssignment({ locationId: 'test_house_tablet', shiftId: 'shift_1' }), false)
+  assert.equal(isSupportedEocAssignment({ locationId: 'res', shiftId: 'shift_1' }), false)
 })
 

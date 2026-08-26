@@ -232,12 +232,6 @@ test('BHT issue, protected photo, EOC, offline retry, and supervisor tools', asy
 test('House and Van EOC area rail works at the project viewport', async ({ page }, testInfo) => {
   const pin = testInfo.project.metadata.pin
   const projectName = testInfo.project.name
-  const vanTaskId = projectName === 'desktop'
-    ? 'phase3_van_task_shift2'
-    : projectName === 'tablet'
-      ? 'phase3_van_task_tablet'
-      : 'phase3_van_task'
-
   await login(page, pin)
 
   if (projectName === 'tablet') {
@@ -252,7 +246,12 @@ test('House and Van EOC area rail works at the project viewport', async ({ page 
     await expect(page.getByRole('button', { name: 'Submit EOC' })).toBeEnabled()
   }
 
-  await page.goto(`/eoc/${vanTaskId}`)
+  if (projectName === 'tablet') {
+    await page.goto('/eoc/phase3_van_task_tablet')
+  } else {
+    await page.goto('/home')
+    await page.getByRole('button', { name: /Van EOC/ }).first().click()
+  }
   await expect(page.getByRole('heading', { name: 'Van EOC' })).toBeVisible()
   await expect(page.locator('.eoc-vehicle-strip')).toContainText('Phase 3 Test Van')
   await expect(page.locator('.eoc-vehicle-strip')).toContainText('TESTVIN0000000001')

@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
-import { useEffect, useMemo, useState } from 'react'
-import { collection, doc, onSnapshot, serverTimestamp, updateDoc } from 'firebase/firestore'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { collection, onSnapshot, query, where } from 'firebase/firestore'
 import { db } from '../firebase'
 import { LOCATIONS, SHIFTS, isShiftAllowedForMainLocation } from '../data/eocConstants'
 import { getAvailableMainLocationsForUser, isAdminRole, locationIdToMainLocation } from '../utils/orgModel'
@@ -9,14 +9,26 @@ import {
   deleteTemplateAndReassignScopes,
   getTemplateAssignmentMapKey,
   previewDefaultAssignmentImpact,
+  previewTemplatePurge,
+  purgeUnusedTemplate,
+  rejectTemplateArchiveRequest,
+  requestTemplateArchive,
+  saveEocSectionToLibrary,
   savePublishedTemplateVersion
 } from '../services/eocTemplateService'
-import { normalizeEocTemplateItems } from '../utils/eocTemplateModel'
+import { normalizeEocTemplateDefinition } from '../utils/eocTemplateModel'
+import {
+  createEocTemplateDraftId,
+  deleteEocTemplateDraft,
+  saveEocTemplateDraft,
+  watchEocTemplateDrafts
+} from '../services/eocTemplateDraftService'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
 import AppModal from './AppModal'
 import EocTemplateEditorDrawer from './EocTemplateEditorDrawer'
 import EocTemplateScopeCard from './EocTemplateScopeCard'
+import useEocTemplateBuilderAccess from '../hooks/useEocTemplateBuilderAccess'
 
 function toMillis(value) {
   if (!value) return 0
@@ -24,10 +36,6 @@ function toMillis(value) {
   if (typeof value?.seconds === 'number') return value.seconds * 1000
   const parsed = new Date(value).getTime()
   return Number.isFinite(parsed) ? parsed : 0
-}
-
-function normalizeTemplateItems(items) {
-  return normalizeEocTemplateItems(items)
 }
 
 function sortByUpdated(items) {
@@ -57,15 +65,24 @@ function matchesTemplateSearch(template, searchValue) {
   if (!normalizedSearch) return true
   const name = String(template?.name || '').toLowerCase()
   const owner = String(template?.ownerName || '').toLowerCase()
-  const itemMatch = (Array.isArray(template?.items) ? template.items : []).some(item => (
-    String(item?.category || '').toLowerCase().includes(normalizedSearch)
-    || String(item?.label || '').toLowerCase().includes(normalizedSearch)
+  const normalized = normalizeEocTemplateDefinition(template, { includeIncomplete: true })
+  const itemMatch = normalized.sections.some(section => (
+    String(section.title || '').toLowerCase().includes(normalizedSearch)
+    || section.questions.some(question => String(question.label || '').toLowerCase().includes(normalizedSearch))
   ))
   return name.includes(normalizedSearch) || owner.includes(normalizedSearch) || itemMatch
 }
 
+function templateQuestionCount(template) {
+  return normalizeEocTemplateDefinition(template, { includeIncomplete: true }).sections
+    .reduce((count, section) => count + section.questions.length, 0)
+}
+
 function EocTemplateManager({ user, isOffline = false }) {
   const [templates, setTemplates] = useState([])
+  const [sectionLibrary, setSectionLibrary] = useState([])
+  const [drafts, setDrafts] = useState([])
+  const [archiveRequests, setArchiveRequests] = useState([])
   const [assignments, setAssignments] = useState([])
   const [loadingTemplates, setLoadingTemplates] = useState(true)
   const [loadingAssignments, setLoadingAssignments] = useState(true)
@@ -96,10 +113,26 @@ function EocTemplateManager({ user, isOffline = false }) {
     replacementId: '',
     options: [],
     impactedCount: 0,
+    archiveRequestId: '',
+    isWorking: false
+  })
+  const [archiveRequestModal, setArchiveRequestModal] = useState({
+    isOpen: false,
+    template: null,
+    reason: '',
+    isWorking: false
+  })
+  const [purgeModal, setPurgeModal] = useState({
+    isOpen: false,
+    template: null,
+    impact: null,
+    pin: '',
+    reason: '',
     isWorking: false
   })
 
   const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 900 : false))
+  const builderAccess = useEocTemplateBuilderAccess()
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth <= 900)
@@ -107,8 +140,32 @@ function EocTemplateManager({ user, isOffline = false }) {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  useEffect(() => onSnapshot(
+    collection(db, 'eocSectionLibrary'),
+    snapshot => setSectionLibrary(snapshot.docs.map(sectionDoc => ({ id: sectionDoc.id, ...sectionDoc.data() }))),
+    error => console.error('Error loading EOC section library:', error)
+  ), [])
+
+  useEffect(() => watchEocTemplateDrafts(
+    user,
+    nextDrafts => setDrafts(sortByUpdated(nextDrafts)),
+    error => console.error('Error loading EOC template drafts:', error)
+  ), [user])
+
   const isAdmin = isAdminRole(user?.role)
   const canManageTemplates = isAdmin || user?.role === 'supervisor'
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setArchiveRequests([])
+      return undefined
+    }
+    return onSnapshot(
+      query(collection(db, 'eocTemplateArchiveRequests'), where('status', '==', 'pending')),
+      snapshot => setArchiveRequests(sortByUpdated(snapshot.docs.map(requestDoc => ({ id: requestDoc.id, ...requestDoc.data() })))),
+      error => console.error('Error loading EOC template archive requests:', error)
+    )
+  }, [isAdmin])
 
   const availableMainLocations = useMemo(() => {
     const values = getAvailableMainLocationsForUser(user)
@@ -123,6 +180,13 @@ function EocTemplateManager({ user, isOffline = false }) {
   const allowedLocationIds = useMemo(
     () => new Set(scopedLocations.map(location => String(location.id || '').trim().toLowerCase())),
     [scopedLocations]
+  )
+  const builderEnabled = isAdmin || (
+    builderAccess.supervisorEnabled
+    && (
+      builderAccess.enabledLocationIds.length === 0
+      || scopedLocations.some(location => builderAccess.enabledLocationIds.includes(String(location.id || '').trim().toLowerCase()))
+    )
   )
 
   useEffect(() => {
@@ -255,15 +319,76 @@ function EocTemplateManager({ user, isOffline = false }) {
   }, [quickTemplateOptions])
 
   const openNewTemplate = () => {
-    setEditorTemplate({ name: '', eocType: 'house', status: 'active', items: [] })
+    if (!builderEnabled) return
+    setEditorTemplate({
+      name: '',
+      eocType: 'house',
+      status: 'active',
+      items: [],
+      _draftId: createEocTemplateDraftId(user)
+    })
     setIsEditorOpen(true)
   }
 
   const openEditTemplate = (template) => {
+    if (!builderEnabled) return
     if (!canEditTemplate(user, template)) return
-    setEditorTemplate(template)
+    const existingDraft = drafts.find(draft => draft.targetTemplateId === template.id)
+    setEditorTemplate(existingDraft ? {
+      ...existingDraft.template,
+      id: template.id,
+      _draftId: existingDraft.id,
+      _cloneMeta: existingDraft.cloneMeta || null
+    } : {
+      ...template,
+      _draftId: createEocTemplateDraftId(user, template.id)
+    })
     setIsEditorOpen(true)
   }
+
+  const openDraft = (draft) => {
+    const targetTemplate = draft.targetTemplateId
+      ? templates.find(template => template.id === draft.targetTemplateId)
+      : null
+    if (draft.targetTemplateId && !targetTemplate) {
+      alert('The template connected to this draft no longer exists.')
+      return
+    }
+    setEditorTemplate({
+      ...draft.template,
+      ...(targetTemplate ? { id: targetTemplate.id } : {}),
+      _draftId: draft.id,
+      _cloneMeta: draft.cloneMeta || null
+    })
+    setIsEditorOpen(true)
+  }
+
+  const handleDeleteDraft = async (draft) => {
+    const confirmed = await showConfirmDialog(`Discard draft "${draft.templateName || 'Untitled template'}"?`, {
+      title: 'Discard Draft',
+      tone: 'warning',
+      confirmText: 'Discard'
+    })
+    if (!confirmed) return
+    try {
+      await deleteEocTemplateDraft(draft.id)
+      notifySuccess('Draft discarded')
+    } catch (error) {
+      console.error('Error deleting EOC template draft:', error)
+      alert('Draft could not be discarded.')
+    }
+  }
+
+  const handleDraftChange = useCallback(async (template) => {
+    if (!editorTemplate?._draftId) return
+    await saveEocTemplateDraft({
+      draftId: editorTemplate._draftId,
+      user,
+      template,
+      targetTemplateId: editorTemplate.id || '',
+      cloneMeta: editorTemplate._cloneMeta || null
+    })
+  }, [editorTemplate, user])
 
   const handleSaveTemplate = async (payload, options = { assignNow: false }) => {
     if (!canManageTemplates) {
@@ -275,13 +400,14 @@ function EocTemplateManager({ user, isOffline = false }) {
       return
     }
 
-    const normalizedItems = normalizeTemplateItems(payload.items)
+    const normalizedTemplate = normalizeEocTemplateDefinition(payload)
     if (!payload.name || !String(payload.name || '').trim()) {
       alert('Template name is required.')
       return
     }
-    if (normalizedItems.length === 0) {
-      alert('Add at least one valid template item.')
+    const questionCount = normalizedTemplate.sections.reduce((count, section) => count + section.questions.length, 0)
+    if (questionCount === 0) {
+      alert('Add at least one valid question.')
       return
     }
 
@@ -304,7 +430,8 @@ function EocTemplateManager({ user, isOffline = false }) {
         actor: user,
         templateId,
         existingTemplate,
-        payload: { ...payload, items: normalizedItems }
+        payload: normalizedTemplate,
+        cloneMeta: editorTemplate?._cloneMeta || null
       })
       notifySuccess(existingTemplate ? `Template version ${saved.versionNumber} published` : 'Template saved to library')
 
@@ -317,6 +444,7 @@ function EocTemplateManager({ user, isOffline = false }) {
       }
       setSmartTemplate(savedTemplate)
       setPreferredTemplateIds(previous => ({ ...previous, [savedTemplate.eocType]: savedTemplate.id }))
+      if (editorTemplate?._draftId) await deleteEocTemplateDraft(editorTemplate._draftId)
       setIsEditorOpen(false)
 
       if (options?.assignNow) {
@@ -325,48 +453,43 @@ function EocTemplateManager({ user, isOffline = false }) {
       }
     } catch (error) {
       console.error('Error saving template:', error)
-      alert('Failed to save template.')
+      throw new Error(error?.message || 'Failed to save template.')
     }
   }
 
-  const handleCloneTemplate = async (template) => {
+  const handleCloneTemplate = (template) => {
+    if (!builderEnabled) return
     if (!canManageTemplates) {
       alert('You do not have permission to clone templates.')
       return
     }
+    const clone = normalizeEocTemplateDefinition({
+      ...template,
+      name: `${String(template.name || 'Template').trim()} (Copy)`
+    }, { includeIncomplete: true })
+    setEditorTemplate({
+      ...clone,
+      _draftId: createEocTemplateDraftId(user),
+      _cloneMeta: {
+        clonedFromTemplateId: template.id,
+        clonedFromTemplateName: template.name || '',
+        clonedFromVersion: template.publishedVersion || template.version || null
+      }
+    })
+    setIsEditorOpen(true)
+  }
+
+  const handleSaveSection = async (section, eocType) => {
     if (isOffline) {
-      alert('Offline mode: cloning templates is unavailable.')
+      alert('Reconnect before saving a section to the library.')
       return
     }
-
     try {
-      const cloneName = `${String(template.name || 'Template').trim()} (Copy)`
-      const cloneType = String(template.eocType || 'house').trim() === 'van' ? 'van' : 'house'
-      const created = await savePublishedTemplateVersion({
-        actor: user,
-        payload: {
-          name: cloneName,
-          eocType: cloneType,
-          status: 'active',
-          items: normalizeTemplateItems(template.items)
-        },
-        cloneMeta: {
-          clonedFromTemplateId: template.id,
-          clonedFromTemplateName: template.name || '',
-          clonedFromVersion: template.publishedVersion || template.version || null
-        }
-      })
-      setSmartTemplate({
-        id: created.templateId,
-        name: cloneName,
-        eocType: cloneType,
-        publishedVersion: created.versionNumber,
-        publishedVersionId: created.versionId
-      })
-      notifySuccess('Template copied. Open it in My Templates to edit.')
+      await saveEocSectionToLibrary({ section, eocType })
+      notifySuccess('Section saved to the library')
     } catch (error) {
-      console.error('Error cloning template:', error)
-      alert('Failed to clone template.')
+      console.error('Error saving section:', error)
+      alert(error?.message || 'Failed to save section.')
     }
   }
 
@@ -377,9 +500,13 @@ function EocTemplateManager({ user, isOffline = false }) {
     setPreferredTemplateIds(previous => ({ ...previous, [resolvedType]: template.id }))
   }
 
-  const handleDeleteTemplate = async (template) => {
+  const handleDeleteTemplate = async (template, archiveRequest = null) => {
     if (!isAdmin) {
-      alert('Only admins can archive templates.')
+      if (!isOwnedByUser(user, template)) {
+        alert('You can request archive only for templates you own.')
+        return
+      }
+      setArchiveRequestModal({ isOpen: true, template, reason: '', isWorking: false })
       return
     }
     if (isOffline) {
@@ -395,13 +522,11 @@ function EocTemplateManager({ user, isOffline = false }) {
         confirmText: 'Archive'
       })
       if (!confirmed) return
-      await updateDoc(doc(db, 'eocTemplateLibrary', template.id), {
-        status: 'archived',
-        archivedByUserId: user?.id || null,
-        archivedByName: user?.name || null,
-        archivedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        version: Number(template.version || 0) + 1
+      await deleteTemplateAndReassignScopes({
+        templateId: template.id,
+        replacementTemplate: null,
+        archiveRequestId: archiveRequest?.id || '',
+        reason: archiveRequest?.reason || 'Archived unused template from the template library.'
       })
       notifySuccess('Template archived')
       return
@@ -423,8 +548,27 @@ function EocTemplateManager({ user, isOffline = false }) {
       replacementId: replacementOptions[0].id,
       options: replacementOptions,
       impactedCount: impactedAssignments.length,
+      archiveRequestId: archiveRequest?.id || '',
       isWorking: false
     })
+  }
+
+  const submitArchiveRequest = async () => {
+    const reason = String(archiveRequestModal.reason || '').trim()
+    if (!archiveRequestModal.template || !reason) {
+      alert('Enter a reason for the archive request.')
+      return
+    }
+    try {
+      setArchiveRequestModal(previous => ({ ...previous, isWorking: true }))
+      await requestTemplateArchive({ templateId: archiveRequestModal.template.id, reason })
+      notifySuccess('Archive request sent to admins')
+      setArchiveRequestModal({ isOpen: false, template: null, reason: '', isWorking: false })
+    } catch (error) {
+      console.error('Error requesting template archive:', error)
+      alert(error?.message || 'Failed to send archive request.')
+      setArchiveRequestModal(previous => ({ ...previous, isWorking: false }))
+    }
   }
 
   const closeDeleteModal = () => {
@@ -434,6 +578,7 @@ function EocTemplateManager({ user, isOffline = false }) {
       replacementId: '',
       options: [],
       impactedCount: 0,
+      archiveRequestId: '',
       isWorking: false
     })
   }
@@ -451,7 +596,8 @@ function EocTemplateManager({ user, isOffline = false }) {
       const result = await deleteTemplateAndReassignScopes({
         actor: user,
         templateId: deleteModal.template.id,
-        replacementTemplate
+        replacementTemplate,
+        archiveRequestId: deleteModal.archiveRequestId
       })
       notifySuccess(`Template archived. ${result.reassignedScopeCount} scope(s) reassigned.`)
       closeDeleteModal()
@@ -459,6 +605,52 @@ function EocTemplateManager({ user, isOffline = false }) {
       console.error('Error archiving template:', error)
       alert('Failed to archive template.')
       setDeleteModal(previous => ({ ...previous, isWorking: false }))
+    }
+  }
+
+  const rejectArchiveRequest = async (archiveRequest) => {
+    const confirmed = await showConfirmDialog(`Decline the archive request for "${archiveRequest.templateName}"?`, {
+      title: 'Decline Archive Request',
+      tone: 'warning',
+      confirmText: 'Decline'
+    })
+    if (!confirmed) return
+    try {
+      await rejectTemplateArchiveRequest({ archiveRequestId: archiveRequest.id, reason: 'Archive request declined by admin.' })
+      notifySuccess('Archive request declined')
+    } catch (error) {
+      console.error('Error declining archive request:', error)
+      alert(error?.message || 'Archive request could not be declined.')
+    }
+  }
+
+  const openPurgeTemplate = async (template) => {
+    if (!isAdmin || isOffline || template?.status !== 'archived') return
+    try {
+      const impact = await previewTemplatePurge(template.id)
+      setPurgeModal({ isOpen: true, template, impact, pin: '', reason: '', isWorking: false })
+    } catch (error) {
+      console.error('Error previewing template deletion:', error)
+      alert(error?.message || 'Permanent deletion could not be checked.')
+    }
+  }
+
+  const confirmPurgeTemplate = async () => {
+    if (!purgeModal.template || !purgeModal.impact?.purgeAllowed) return
+    try {
+      setPurgeModal(previous => ({ ...previous, isWorking: true }))
+      await purgeUnusedTemplate({
+        templateId: purgeModal.template.id,
+        adminProfileId: user.id,
+        pin: purgeModal.pin,
+        reason: purgeModal.reason
+      })
+      notifySuccess('Unused archived template permanently deleted')
+      setPurgeModal({ isOpen: false, template: null, impact: null, pin: '', reason: '', isWorking: false })
+    } catch (error) {
+      console.error('Error permanently deleting template:', error)
+      alert(error?.message || 'Template could not be permanently deleted.')
+      setPurgeModal(previous => ({ ...previous, isWorking: false }))
     }
   }
 
@@ -585,9 +777,14 @@ function EocTemplateManager({ user, isOffline = false }) {
           <p style={{ fontSize: '13px', color: '#556677', marginBottom: '12px' }}>
             Manage template library in one place. Use clone to customize shared templates without changing anyone else&apos;s template.
           </p>
+          {!builderEnabled && (
+            <div style={{ ...sectionCardStyle, borderColor: 'rgba(17,47,82,0.22)', color: '#556677', fontSize: '13px' }}>
+              Template building is currently in a controlled pilot. You can review templates and manage assignments; an admin can enable building for your locations.
+            </div>
+          )}
 
           <div style={sectionCardStyle}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) repeat(3, minmax(150px, 0.5fr)) auto', gap: '8px', alignItems: 'center' }}>
+            <div className="eoc-template-filter-grid">
               <input
                 value={searchValue}
                 onChange={event => setSearchValue(event.target.value)}
@@ -609,7 +806,7 @@ function EocTemplateManager({ user, isOffline = false }) {
                 <option value="mine">Mine</option>
                 <option value="shared">Shared</option>
               </select>
-              <button type="button" onClick={openNewTemplate} style={primaryButton} disabled={!canManageTemplates || isOffline}>New Template</button>
+              <button type="button" onClick={openNewTemplate} style={primaryButton} disabled={!canManageTemplates || !builderEnabled || isOffline}>New Template</button>
             </div>
           </div>
 
@@ -624,6 +821,37 @@ function EocTemplateManager({ user, isOffline = false }) {
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button type="button" style={primaryButton} onClick={() => handleOpenAssignForTemplate(smartTemplate)}>Assign This Template</button>
                 <button type="button" style={subtleButton} onClick={() => setSmartTemplate(null)}>Dismiss</button>
+              </div>
+            </div>
+          )}
+
+          {drafts.length > 0 && (
+            <div style={sectionCardStyle}>
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: '#1A3553' }}>Your Drafts ({drafts.length})</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {drafts.map(draft => (
+                  <div key={draft.id} className="eoc-template-draft-row" style={{ border: '1px solid rgba(17,47,82,0.14)', borderRadius: '7px', padding: '9px 10px', backgroundColor: '#FFFFFF' }}>
+                    <div className="eoc-template-draft-copy"><strong style={{ display: 'block', fontSize: '13px', color: '#1A3553' }}>{draft.templateName || 'Untitled template'}</strong><span style={{ fontSize: '12px', color: '#556677' }}>{String(draft.eocType || 'house').toUpperCase()} {draft.targetTemplateId ? '| Unpublished changes' : '| New template'}</span></div>
+                    <div className="eoc-template-draft-actions"><button type="button" style={subtleButton} onClick={() => openDraft(draft)} disabled={isOffline}>Resume</button><button type="button" style={subtleButton} onClick={() => handleDeleteDraft(draft)} disabled={isOffline}>Discard</button></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isAdmin && archiveRequests.length > 0 && (
+            <div style={{ ...sectionCardStyle, borderColor: 'rgba(205,78,66,0.35)' }}>
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: '#1A3553' }}>Archive Requests ({archiveRequests.length})</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {archiveRequests.map((archiveRequest) => {
+                  const template = templates.find(candidate => candidate.id === archiveRequest.templateId)
+                  return (
+                    <div key={archiveRequest.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', border: '1px solid rgba(17,47,82,0.14)', borderRadius: '7px', padding: '9px 10px', backgroundColor: '#FFFFFF', flexWrap: 'wrap' }}>
+                      <div><strong style={{ display: 'block', fontSize: '13px', color: '#1A3553' }}>{archiveRequest.templateName || 'Template'}</strong><span style={{ display: 'block', fontSize: '12px', color: '#556677' }}>Requested by {archiveRequest.requestedByName || 'Supervisor'}</span><span style={{ display: 'block', fontSize: '12px', color: '#556677', marginTop: '3px' }}>{archiveRequest.reason}</span></div>
+                      <div style={{ display: 'flex', gap: '6px' }}><button type="button" style={primaryButton} onClick={() => template ? handleDeleteTemplate(template, archiveRequest) : alert('This template no longer exists.')} disabled={!template || isOffline}>Review</button><button type="button" style={subtleButton} onClick={() => rejectArchiveRequest(archiveRequest)} disabled={isOffline}>Decline</button></div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -648,15 +876,16 @@ function EocTemplateManager({ user, isOffline = false }) {
                             {template.name} ({String(template.eocType || '').toUpperCase()})
                           </div>
                           <div style={{ fontSize: '12px', color: '#556677' }}>
-                            Items: {Array.isArray(template.items) ? template.items.length : 0} | Status: {template.status || 'active'}
+                            Questions: {templateQuestionCount(template)} | Status: {template.status || 'active'}
                             {assignedCount > 0 ? ` | Default in ${assignedCount} scope(s)` : ''}
                           </div>
                         </div>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          <button type="button" style={subtleButton} onClick={() => openEditTemplate(template)} disabled={!canManageTemplates || isOffline}>Edit</button>
-                          <button type="button" style={subtleButton} onClick={() => handleCloneTemplate(template)} disabled={!canManageTemplates || isOffline}>Clone</button>
+                          <button type="button" style={subtleButton} onClick={() => openEditTemplate(template)} disabled={!canManageTemplates || !builderEnabled || isOffline}>Edit</button>
+                          <button type="button" style={subtleButton} onClick={() => handleCloneTemplate(template)} disabled={!canManageTemplates || !builderEnabled || isOffline}>Clone</button>
                           <button type="button" style={subtleButton} onClick={() => handleOpenAssignForTemplate(template)} disabled={!canManageTemplates || isOffline}>Assign</button>
-                          <button type="button" style={subtleButton} onClick={() => handleDeleteTemplate(template)} disabled={!isAdmin || isOffline}>Archive</button>
+                          {template.status !== 'archived' && <button type="button" style={subtleButton} onClick={() => handleDeleteTemplate(template)} disabled={isOffline}>{isAdmin ? 'Archive' : 'Request Archive'}</button>}
+                          {isAdmin && template.status === 'archived' && <button type="button" style={subtleButton} onClick={() => openPurgeTemplate(template)} disabled={isOffline}>Delete Permanently</button>}
                         </div>
                       </div>
                     </div>
@@ -684,13 +913,14 @@ function EocTemplateManager({ user, isOffline = false }) {
                           {template.name} ({String(template.eocType || '').toUpperCase()})
                         </div>
                         <div style={{ fontSize: '12px', color: '#556677' }}>
-                          Owner: {template.ownerName || '--'} | Items: {Array.isArray(template.items) ? template.items.length : 0}
+                          Owner: {template.ownerName || '--'} | Questions: {templateQuestionCount(template)}
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                        <button type="button" style={subtleButton} onClick={() => handleCloneTemplate(template)} disabled={!canManageTemplates || isOffline}>Clone</button>
+                        <button type="button" style={subtleButton} onClick={() => handleCloneTemplate(template)} disabled={!canManageTemplates || !builderEnabled || isOffline}>Clone</button>
                         <button type="button" style={subtleButton} onClick={() => handleOpenAssignForTemplate(template)} disabled={!canManageTemplates || isOffline}>Assign</button>
-                        <button type="button" style={subtleButton} onClick={() => openEditTemplate(template)} disabled={!isAdmin || isOffline}>Edit</button>
+                        <button type="button" style={subtleButton} onClick={() => openEditTemplate(template)} disabled={!isAdmin || !builderEnabled || isOffline}>Edit</button>
+                        {isAdmin && template.status === 'archived' && <button type="button" style={subtleButton} onClick={() => openPurgeTemplate(template)} disabled={isOffline}>Delete Permanently</button>}
                       </div>
                     </div>
                   </div>
@@ -704,7 +934,7 @@ function EocTemplateManager({ user, isOffline = false }) {
       {activeView === 'assignments' && (
         <>
           <p style={{ fontSize: '13px', color: '#556677', marginBottom: '12px' }}>
-            Choose defaults by location + shift. Changes apply immediately to incomplete EOCs after one confirmation.
+            Choose defaults by location + shift. Changes begin with the next EOC cycle after one confirmation.
           </p>
 
           <div style={sectionCardStyle}>
@@ -775,8 +1005,11 @@ function EocTemplateManager({ user, isOffline = false }) {
         isMobile={isMobile}
         initialTemplate={editorTemplate}
         isEditing={Boolean(editorTemplate?.id)}
-        canManageTemplates={canManageTemplates}
+        canManageTemplates={canManageTemplates && builderEnabled}
         isOffline={isOffline}
+        sectionLibrary={sectionLibrary}
+        onSaveSection={handleSaveSection}
+        onDraftChange={handleDraftChange}
         onClose={() => setIsEditorOpen(false)}
         onSave={handleSaveTemplate}
       />
@@ -811,6 +1044,48 @@ function EocTemplateManager({ user, isOffline = false }) {
             <option key={option.id} value={option.id}>{option.name}</option>
           ))}
         </select>
+      </AppModal>
+
+      <AppModal
+        isOpen={archiveRequestModal.isOpen}
+        tone="warning"
+        title="Request Template Archive"
+        maxWidth="500px"
+        footer={[
+          <button key="cancel" type="button" style={subtleButton} onClick={() => setArchiveRequestModal({ isOpen: false, template: null, reason: '', isWorking: false })} disabled={archiveRequestModal.isWorking}>Cancel</button>,
+          <button key="request" type="button" style={primaryButton} onClick={submitArchiveRequest} disabled={archiveRequestModal.isWorking || !String(archiveRequestModal.reason || '').trim()}>{archiveRequestModal.isWorking ? 'Sending...' : 'Send Request'}</button>
+        ]}
+      >
+        <div style={{ fontSize: '13px', color: '#556677', marginBottom: '10px' }}>
+          Admins will review assignments and choose a replacement if this template is in use.
+        </div>
+        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#1A3553' }}>
+          Reason
+          <textarea
+            rows={4}
+            value={archiveRequestModal.reason}
+            onChange={event => setArchiveRequestModal(previous => ({ ...previous, reason: event.target.value }))}
+            placeholder="Why should this template be archived?"
+            style={{ ...filterInputStyle, width: '100%', marginTop: '5px', resize: 'vertical' }}
+            disabled={archiveRequestModal.isWorking}
+          />
+        </label>
+      </AppModal>
+
+      <AppModal
+        isOpen={purgeModal.isOpen}
+        tone="danger"
+        title="Permanently Delete Template"
+        maxWidth="520px"
+        footer={[
+          <button key="cancel" type="button" style={subtleButton} onClick={() => setPurgeModal({ isOpen: false, template: null, impact: null, pin: '', reason: '', isWorking: false })} disabled={purgeModal.isWorking}>Cancel</button>,
+          <button key="purge" type="button" style={primaryButton} onClick={confirmPurgeTemplate} disabled={purgeModal.isWorking || !purgeModal.impact?.purgeAllowed || !/^\d{6}$/.test(purgeModal.pin) || String(purgeModal.reason || '').trim().length < 8}>{purgeModal.isWorking ? 'Deleting...' : 'Delete Permanently'}</button>
+        ]}
+      >
+        <p style={{ margin: '0 0 10px', fontSize: '13px', color: '#556677' }}>This is limited to archived templates with no assignments, EOC tasks, submissions, or issues. Published versions will also be removed.</p>
+        {purgeModal.impact && <div style={{ marginBottom: '10px', padding: '9px', backgroundColor: purgeModal.impact.purgeAllowed ? 'rgba(40,120,80,0.08)' : 'rgba(183,94,84,0.1)', borderRadius: '7px', fontSize: '12px', color: '#2D3F53' }}>Assignments: {purgeModal.impact.assignments} | Tasks: {purgeModal.impact.tasks} | Submissions: {purgeModal.impact.submissions} | Issues: {purgeModal.impact.issues} | Versions: {purgeModal.impact.versions}<br /><strong>{purgeModal.impact.purgeAllowed ? 'Safe deletion checks passed.' : 'Deletion is blocked because this template has operational history.'}</strong></div>}
+        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#1A3553', marginBottom: '9px' }}>Reason<textarea rows={3} value={purgeModal.reason} onChange={event => setPurgeModal(previous => ({ ...previous, reason: event.target.value }))} style={{ ...filterInputStyle, width: '100%', marginTop: '5px', resize: 'vertical' }} disabled={purgeModal.isWorking} /></label>
+        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#1A3553' }}>Your 6-digit admin PIN<input type="password" inputMode="numeric" maxLength={6} value={purgeModal.pin} onChange={event => setPurgeModal(previous => ({ ...previous, pin: event.target.value.replace(/\D/g, '').slice(0, 6) }))} style={{ ...filterInputStyle, width: '100%', marginTop: '5px' }} disabled={purgeModal.isWorking || !purgeModal.impact?.purgeAllowed} /></label>
       </AppModal>
     </div>
   )

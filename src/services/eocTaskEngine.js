@@ -3,7 +3,8 @@ import { getShiftById, getTemplateScopeForShift } from '../data/eocConstants'
 import { getCurrentCycleDueDate } from '../utils/eocSchedule'
 import { collection, query, where, getDocs, doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore'
 import { getVersionNumber } from './versioning'
-import { MISSED_EOC_REASON, shouldMarkEocTaskMissed } from '../utils/eocTaskLifecycle'
+import { isSupportedEocAssignment, MISSED_EOC_REASON, shouldMarkEocTaskMissed } from '../utils/eocTaskLifecycle'
+import { commitFirestoreWritesInChunks } from '../utils/firestoreBatching'
 import { loadTemplateAssignmentsByScope, resolveTemplateForScope } from './eocTemplateService'
 import { getAvailableMainLocationsForUser, isAdminRole, isBhtRole, isSupervisorRole, locationIdToMainLocation } from '../utils/orgModel'
 import {
@@ -228,22 +229,22 @@ function isAcknowledgedBy(debrief, userId) {
   return debrief?.confirmed === true && String(debrief?.confirmation?.confirmedByUserId || '').trim() === normalizedUserId
 }
 
-async function queueUniqueAlert(batch, alertId, payload) {
+async function queueUniqueAlert(writeOperations, alertId, payload) {
   const alertRef = doc(db, 'alerts', alertId)
   const existingSnap = await getDoc(alertRef)
   if (existingSnap.exists()) return false
-  batch.set(alertRef, {
-    ...payload,
-    alertKey: alertId,
-    read: false,
-    version: 1,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  })
+  writeOperations.push(batch => batch.set(alertRef, {
+      ...payload,
+      alertKey: alertId,
+      read: false,
+      version: 1,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }))
   return true
 }
 
-async function syncDebriefTimingAlerts({ user, assignments, timingConfig, batch }) {
+async function syncDebriefTimingAlerts({ user, assignments, timingConfig, writeOperations }) {
   if (!isSupervisorRole(user?.role) && !isAdminRole(user?.role)) return 0
 
   const now = new Date()
@@ -277,7 +278,7 @@ async function syncDebriefTimingAlerts({ user, assignments, timingConfig, batch 
       cleanIdPart(assignment.bhtUserId),
       cleanIdPart(timing.shiftStartDateKey)
     ].join('__')
-    const queued = await queueUniqueAlert(batch, alertId, {
+    const queued = await queueUniqueAlert(writeOperations, alertId, {
       type: 'shift_debrief_missing',
       debriefId,
       locationId: assignment.locationId,
@@ -306,7 +307,7 @@ async function syncDebriefTimingAlerts({ user, assignments, timingConfig, batch 
         cleanIdPart(receivingUserId)
       ].join('__')
       const receivingNames = debrief.receivingUserNames || {}
-      const queued = await queueUniqueAlert(batch, alertId, {
+      const queued = await queueUniqueAlert(writeOperations, alertId, {
         type: 'shift_debrief_incoming_ack_late',
         debriefId: debrief.id,
         locationId: debrief.locationId,
@@ -380,6 +381,7 @@ async function runEocTaskSyncForUserScope(user) {
     .map(d => normalizeAssignment({ id: d.id, ...d.data() }))
     .filter(Boolean)
     .filter(assignment => assignment.active)
+    .filter(isSupportedEocAssignment)
 
   const scopedGroupKeys = getAccessibleGroupKeys(user, normalizedAssignments)
   if (scopedGroupKeys.size === 0) {
@@ -392,7 +394,7 @@ async function runEocTaskSyncForUserScope(user) {
   const templateAssignmentsByScope = await loadTemplateAssignmentsByScope()
   const desiredTasks = buildDesiredTasks(assignmentsForScope, templateAssignmentsByScope, timingConfig)
   const desiredTaskIds = new Set(desiredTasks.map(task => task.cycleKey))
-  const batch = writeBatch(db)
+  const writeOperations = []
   const touched = new Set()
 
   let created = 0
@@ -404,13 +406,13 @@ async function runEocTaskSyncForUserScope(user) {
 
     if (!existingSnap.exists()) {
       const initialStatus = getDesiredStatus(task, 'pending', todayStr, now)
-      batch.set(taskRef, {
-        ...task,
-        status: initialStatus,
-        version: 1,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      })
+      writeOperations.push(batch => batch.set(taskRef, {
+          ...task,
+          status: initialStatus,
+          version: 1,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }))
       touched.add(taskRef.id)
       created += 1
       continue
@@ -446,31 +448,31 @@ async function runEocTaskSyncForUserScope(user) {
       || existing.active !== true
 
     if (nextStatus !== existing.status || needsTaskShapeUpdate) {
-      batch.update(taskRef, {
-        taskType: task.taskType,
-        locationId: task.locationId,
-        shiftId: task.shiftId,
-        templateScope: task.templateScope,
-        vanId: task.vanId || null,
-        dueDate: task.dueDate,
-        availableAt: task.availableAt || null,
-        dueAt: task.dueAt || null,
-        shiftStartAt: task.shiftStartAt || null,
-        shiftEndAt: task.shiftEndAt || null,
-        outgoingDebriefDueAt: task.outgoingDebriefDueAt || null,
-        incomingAcknowledgmentLateAt: task.incomingAcknowledgmentLateAt || null,
-        timingSource: task.timingSource || 'legacy',
-        shiftLabel: task.shiftLabel,
-        scopeKey,
-        eligibleUserIds: nextEligibleUserIds,
-        eligibleUserNames: nextEligibleUserNames,
-        assigneeUserId: task.assigneeUserId || '',
-        assigneeUserName: task.assigneeUserName || '',
-        active: true,
-        status: nextStatus,
-        version: getVersionNumber(existing) + 1,
-        updatedAt: serverTimestamp()
-      })
+      writeOperations.push(batch => batch.update(taskRef, {
+          taskType: task.taskType,
+          locationId: task.locationId,
+          shiftId: task.shiftId,
+          templateScope: task.templateScope,
+          vanId: task.vanId || null,
+          dueDate: task.dueDate,
+          availableAt: task.availableAt || null,
+          dueAt: task.dueAt || null,
+          shiftStartAt: task.shiftStartAt || null,
+          shiftEndAt: task.shiftEndAt || null,
+          outgoingDebriefDueAt: task.outgoingDebriefDueAt || null,
+          incomingAcknowledgmentLateAt: task.incomingAcknowledgmentLateAt || null,
+          timingSource: task.timingSource || 'legacy',
+          shiftLabel: task.shiftLabel,
+          scopeKey,
+          eligibleUserIds: nextEligibleUserIds,
+          eligibleUserNames: nextEligibleUserNames,
+          assigneeUserId: task.assigneeUserId || '',
+          assigneeUserName: task.assigneeUserName || '',
+          active: true,
+          status: nextStatus,
+          version: getVersionNumber(existing) + 1,
+          updatedAt: serverTimestamp()
+        }))
       touched.add(taskRef.id)
       updated += 1
     }
@@ -486,22 +488,22 @@ async function runEocTaskSyncForUserScope(user) {
     if (desiredTaskIds.has(taskDoc.id)) continue
 
     const isMissed = shouldMarkEocTaskMissed(data, desiredTasks)
-    batch.update(taskDoc.ref, isMissed
-      ? {
-          active: false,
-          status: 'missed',
-          missedAt: serverTimestamp(),
-          missedReason: MISSED_EOC_REASON,
-          version: getVersionNumber(data) + 1,
-          updatedAt: serverTimestamp()
-        }
-      : {
-          active: false,
-          status: 'ignored',
-          ignoredReason: 'Task no longer matches the current assignment scope.',
-          version: getVersionNumber(data) + 1,
-          updatedAt: serverTimestamp()
-        })
+    writeOperations.push(batch => batch.update(taskDoc.ref, isMissed
+        ? {
+            active: false,
+            status: 'missed',
+            missedAt: serverTimestamp(),
+            missedReason: MISSED_EOC_REASON,
+            version: getVersionNumber(data) + 1,
+            updatedAt: serverTimestamp()
+          }
+        : {
+            active: false,
+            status: 'ignored',
+            ignoredReason: 'Task no longer matches the current assignment scope.',
+            version: getVersionNumber(data) + 1,
+            updatedAt: serverTimestamp()
+          }))
     touched.add(taskDoc.id)
     updated += 1
   }
@@ -513,11 +515,11 @@ async function runEocTaskSyncForUserScope(user) {
     if (!data.dueAt && (!data.dueDate || data.dueDate >= todayStr)) continue
     if (touched.has(taskDoc.id)) continue
 
-    batch.update(taskDoc.ref, {
-      status: 'overdue',
-      version: getVersionNumber(data) + 1,
-      updatedAt: serverTimestamp()
-    })
+    writeOperations.push(batch => batch.update(taskDoc.ref, {
+        status: 'overdue',
+        version: getVersionNumber(data) + 1,
+        updatedAt: serverTimestamp()
+      }))
     touched.add(taskDoc.id)
     updated += 1
   }
@@ -526,12 +528,10 @@ async function runEocTaskSyncForUserScope(user) {
     user,
     assignments: assignmentsForScope,
     timingConfig,
-    batch
+    writeOperations
   })
 
-  if (created > 0 || updated > 0 || alerts > 0) {
-    await batch.commit()
-  }
+  await commitFirestoreWritesInChunks(writeOperations, () => writeBatch(db))
 
   return {
     created,

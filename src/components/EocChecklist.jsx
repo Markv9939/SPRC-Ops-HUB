@@ -30,14 +30,20 @@ import { notifySuccess } from '../utils/toast'
 import useEocIssueFeatures from '../hooks/useEocIssueFeatures'
 import { getMatchingChecklistIssues } from '../services/issueRecurrenceService'
 import IssuePhotoPicker from './IssuePhotoPicker'
-import { normalizeEocTemplateItems } from '../utils/eocTemplateModel'
+import {
+  EOC_QUESTION_TYPES,
+  flattenEocTemplateSections,
+  normalizeEocTemplateItems
+} from '../utils/eocTemplateModel'
 import {
   findFirstIncompleteEocAreaIndex,
   findNextIncompleteEocAreaIndex,
   getEocAreaProgress,
   getEocChecklistProgress,
+  hasEocQuestionAnswer,
   isEocAreaComplete,
-  isEocIssueDetailMissing
+  isEocIssueDetailMissing,
+  isEocQuestionReady
 } from '../utils/eocGuidedFlow'
 
 const DRAFT_SAVE_DEBOUNCE_MS = 700
@@ -60,6 +66,25 @@ function formatDueLabel(task) {
   return task?.dueDate || '--'
 }
 
+function normalizeRuntimeTemplate(source) {
+  if (Array.isArray(source)) return normalizeEocTemplateItems(source)
+  if (Array.isArray(source?.sections) && source.sections.length > 0) {
+    return flattenEocTemplateSections(source.sections)
+  }
+  return normalizeEocTemplateItems(source?.items)
+}
+
+function reviewAnswerLabel(item, answer, responseDetails) {
+  const type = item?.questionType || EOC_QUESTION_TYPES.PASS_ISSUE
+  if (type === EOC_QUESTION_TYPES.PASS_ISSUE) return answer === 'repair' ? 'Needs attention' : 'Looks good'
+  if (type === EOC_QUESTION_TYPES.PHOTO) {
+    const count = Array.isArray(responseDetails?.photos) ? responseDetails.photos.length : 0
+    return `${count} ${count === 1 ? 'photo' : 'photos'}`
+  }
+  if (item?.required === false && !String(answer ?? '').trim()) return 'Optional - not answered'
+  return String(answer ?? '').trim() || 'Completed'
+}
+
 function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline = false }) {
   const [task, setTask] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -72,6 +97,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
   const [eocType, setEocType] = useState('')
   const [answers, setAnswers] = useState({})
   const [repairDetails, setRepairDetails] = useState({})
+  const [responseDetails, setResponseDetails] = useState({})
   const [error, setError] = useState('')
   const [draftReady, setDraftReady] = useState(false)
   const [draftStatus, setDraftStatus] = useState('idle')
@@ -161,7 +187,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
   useEffect(() => {
     if (!eocType) return
 
-    const normalizeLibraryItems = (items) => normalizeEocTemplateItems(items)
+    const normalizeLibraryItems = source => normalizeRuntimeTemplate(source)
 
     const templateId = String(task?.templateId || '').trim()
     const templateVersionId = String(task?.templateVersionId || '').trim()
@@ -206,7 +232,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
             return
           }
           const data = snap.data() || {}
-          assignedTemplateItems = normalizeLibraryItems(data.items)
+          assignedTemplateItems = normalizeLibraryItems(data)
           applyTemplateItems()
         },
         (err) => {
@@ -338,12 +364,12 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
   })), [activeTemplate, photosEnabled])
 
   const checklistProgress = useMemo(
-    () => getEocChecklistProgress(validationTemplate, answers, repairDetails),
-    [validationTemplate, answers, repairDetails]
+    () => getEocChecklistProgress(validationTemplate, answers, repairDetails, responseDetails),
+    [validationTemplate, answers, repairDetails, responseDetails]
   )
   const areaProgress = useMemo(
-    () => getEocAreaProgress(validationTemplate, answers, repairDetails),
-    [validationTemplate, answers, repairDetails]
+    () => getEocAreaProgress(validationTemplate, answers, repairDetails, responseDetails),
+    [validationTemplate, answers, repairDetails, responseDetails]
   )
   const currentArea = areaProgress[selectedAreaIndex] || areaProgress[0] || null
   const currentAreaItems = useMemo(() => (
@@ -421,11 +447,11 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
     }
 
     for (const item of validationTemplate) {
-      if (!answers[item.id]) {
+      if (!isEocQuestionReady(item, answers, repairDetails, responseDetails)) {
         return {
           type: 'missing-answer',
           itemId: item.id,
-          message: `Complete this checklist item: ${item.label}`
+          message: `Complete this question: ${item.label}`
         }
       }
       if (answers[item.id] === 'repair' && isRepairMissing(item.id)) {
@@ -490,6 +516,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
         if (data) {
           if (data.answers && typeof data.answers === 'object') setAnswers(data.answers)
           if (data.repairDetails && typeof data.repairDetails === 'object') setRepairDetails(data.repairDetails)
+          if (data.responseDetails && typeof data.responseDetails === 'object') setResponseDetails(data.responseDetails)
           if (typeof data.odometerReading === 'string') setOdometerReading(data.odometerReading)
           if (typeof data.vehicleName === 'string' && data.vehicleName.trim()) setVehicleName(data.vehicleName)
           if (typeof data.vinNumber === 'string' && data.vinNumber.trim()) setVinNumber(data.vinNumber)
@@ -513,7 +540,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
 
   useEffect(() => {
     if (!draftReady || activeTemplate.length === 0 || guidedPositionReadyRef.current) return
-    const firstIncompleteIndex = findFirstIncompleteEocAreaIndex(validationTemplate, answers, repairDetails)
+    const firstIncompleteIndex = findFirstIncompleteEocAreaIndex(validationTemplate, answers, repairDetails, responseDetails)
     guidedPositionReadyRef.current = true
     if (firstIncompleteIndex < 0) {
       setSelectedAreaIndex(Math.max(areaProgress.length - 1, 0))
@@ -521,7 +548,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
       return
     }
     setSelectedAreaIndex(firstIncompleteIndex)
-  }, [activeTemplate, answers, areaProgress.length, draftReady, repairDetails, validationTemplate])
+  }, [activeTemplate, answers, areaProgress.length, draftReady, repairDetails, responseDetails, validationTemplate])
 
   useEffect(() => {
     if (!draftRestoredNotice) return undefined
@@ -551,7 +578,8 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
       vinNumber: vinNumber || '',
       odometerReading: eocType === 'van' ? odometerReading : '',
       answers,
-      repairDetails
+      repairDetails,
+      responseDetails
     }
     const cloudPayload = {
       ...payload,
@@ -560,9 +588,13 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
         unableToTakePhoto: details?.unableToTakePhoto === true,
         unableReason: details?.unableReason || '',
         photoAttachmentIds: (details?.photos || []).map(photo => photo.id)
+      }])),
+      responseDetails: Object.fromEntries(Object.entries(responseDetails).map(([itemId, details]) => [itemId, {
+        photoAttachmentIds: (details?.photos || []).map(photo => photo.id)
       }]))
     }
     const hasLocalPhotos = Object.values(repairDetails).some(details => (details?.photos || []).length > 0)
+      || Object.values(responseDetails).some(details => (details?.photos || []).length > 0)
 
     const serialized = JSON.stringify(payload)
     if (!initialDraftSnapshotRef.current) {
@@ -606,7 +638,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
     return () => {
       if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current)
     }
-  }, [answers, draftReady, eocType, isOffline, normalizedUserId, odometerReading, repairDetails, submitting, task?.id, task?.locationId, task?.shiftId, task?.templateScope, task?.templateId, task?.templateName, task?.templateVersion, task?.templateVersionId, task?.vanId, user?.name, vehicleId, vehicleName, vinNumber])
+  }, [answers, draftReady, eocType, isOffline, normalizedUserId, odometerReading, repairDetails, responseDetails, submitting, task?.id, task?.locationId, task?.shiftId, task?.templateScope, task?.templateId, task?.templateName, task?.templateVersion, task?.templateVersionId, task?.vanId, user?.name, vehicleId, vehicleName, vinNumber])
 
   const setAnswer = (itemId, value) => {
     setError('')
@@ -634,6 +666,11 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
   const setRepairPhotos = (itemId, photos) => {
     setError('')
     setRepairDetails(prev => ({ ...prev, [itemId]: { ...(prev[itemId] || {}), photos } }))
+  }
+
+  const setResponsePhotos = (itemId, photos) => {
+    setError('')
+    setResponseDetails(prev => ({ ...prev, [itemId]: { ...(prev[itemId] || {}), photos } }))
   }
 
   const setUnablePhoto = (itemId, unableToTakePhoto) => {
@@ -665,13 +702,13 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
     if (!currentArea) return false
 
     for (const itemId of currentArea.itemIds) {
-      if (!answers[itemId]) {
+      const validationItem = validationTemplate.find(item => item.id === itemId)
+      if (!validationItem || !isEocQuestionReady(validationItem, answers, repairDetails, responseDetails)) {
         setError('Answer the remaining items in this area first.')
         window.setTimeout(() => document.getElementById(`eoc-card-${itemId}`)?.focus(), 60)
         return false
       }
 
-      const validationItem = validationTemplate.find(item => item.id === itemId) || itemId
       if (isEocIssueDetailMissing(validationItem, answers, repairDetails)) {
         setError(validationItem?.requiresPhotoOnIssue
           ? 'Add the required issue details and photo, or explain why a photo cannot be taken safely.'
@@ -742,7 +779,8 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
     odometerReading,
     activeTemplate,
     answers,
-    repairDetails
+    repairDetails,
+    responseDetails
   })
 
   const handleSubmit = async () => {
@@ -795,7 +833,15 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
       const result = await submitEocSubmissionOnline(buildSubmissionPayload())
       const failedResults = (result.photoResults || []).filter(item => item.state !== 'uploaded')
       if (failedResults.length > 0) {
-        const photoById = new Map(Object.values(repairDetails).flatMap(details => details?.photos || []).map(photo => [photo.id, photo]))
+        const responsePhotoFailed = failedResults.some(item => item.responsePhoto === true)
+        if (responsePhotoFailed) {
+          await queueEocSubmission(buildSubmissionPayload())
+          notifySuccess('EOC submitted. Photo upload will retry automatically.')
+        }
+        const photoById = new Map([
+          ...Object.values(repairDetails).flatMap(details => details?.photos || []),
+          ...Object.values(responseDetails).flatMap(details => details?.photos || [])
+        ].map(photo => [photo.id, photo]))
         const failedByIssue = new Map()
         failedResults.forEach(item => {
           const photo = photoById.get(item.attachmentId)
@@ -810,7 +856,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
             kind: 'report',
             user
           })))
-          notifySuccess('EOC submitted. Photo upload will retry automatically.')
+          if (!responsePhotoFailed && failedByIssue.size > 0) notifySuccess('EOC submitted. Photo upload will retry automatically.')
         } catch (queueError) {
           console.error('EOC saved, but failed photos could not be queued:', queueError)
           alert('The EOC was submitted, but this device could not retain a failed photo upload. Do not clear browser data and notify a supervisor.')
@@ -831,6 +877,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
   }
 
   const handleItemKeyDown = (event, item) => {
+    if ((item?.questionType || EOC_QUESTION_TYPES.PASS_ISSUE) !== EOC_QUESTION_TYPES.PASS_ISSUE) return
     const key = event.key
     const targetTag = String(event.target?.tagName || '').toLowerCase()
     const inTextInput = targetTag === 'input' || targetTag === 'textarea'
@@ -997,7 +1044,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
                 <div><p>Final step</p><h3>Review EOC</h3></div>
               </div>
               <div className="eoc-review-summary">
-                <div><strong>{checklistProgress.completeCount}</strong><span>Looks good</span></div>
+                <div><strong>{checklistProgress.readyCount - checklistProgress.attentionCount}</strong><span>Completed</span></div>
                 <div className={checklistProgress.attentionCount > 0 ? 'has-attention' : ''}>
                   <strong>{checklistProgress.attentionCount}</strong><span>Needs attention</span>
                 </div>
@@ -1015,7 +1062,7 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
                         </div>
                         <div className="eoc-review-copy">
                           <strong>{item.label}</strong>
-                          <span>{answers[item.id] === 'repair' ? 'Needs attention' : 'Looks good'}</span>
+                          <span>{reviewAnswerLabel(item, answers[item.id], responseDetails[item.id])}</span>
                           {answers[item.id] === 'repair' && <p>{repairDetails[item.id]?.description}</p>}
                         </div>
                         <button
@@ -1062,38 +1109,89 @@ function EocChecklist({ taskId, user, onComplete, onBack, onOpenIssue, isOffline
                   const globalItemIndex = activeTemplate.findIndex(candidate => candidate.id === item.id)
                   const validationItem = validationTemplate.find(candidate => candidate.id === item.id) || item
                   const answer = answers[item.id]
+                  const type = item.questionType || EOC_QUESTION_TYPES.PASS_ISSUE
+                  const answered = hasEocQuestionAnswer(item, answer, responseDetails[item.id])
                   const matchingIssues = matchingIssuesByItem[item.id] || []
                   const matchingIssuesLoading = matchingIssuesLoadingByItem[item.id] === true
                   return (
                     <section
                       id={`eoc-card-${item.id}`}
                       key={item.id}
-                      className={`eoc-area-item-card${answer === 'ok' ? ' is-good' : ''}${answer === 'repair' ? ' is-attention' : ''}`}
+                      className={`eoc-area-item-card${answer === 'ok' || (type !== EOC_QUESTION_TYPES.PASS_ISSUE && answered) ? ' is-good' : ''}${answer === 'repair' ? ' is-attention' : ''}`}
                       tabIndex={0}
                       onKeyDown={event => handleItemKeyDown(event, item)}
                     >
                       <h4>{globalItemIndex + 1}. {item.label}</h4>
                       {item.helpText && <p className="eoc-guided-help">{item.helpText}</p>}
-                      <div className="eoc-area-answer-grid">
-                        <button
-                          type="button"
-                          className={`eoc-answer-button is-good${answer === 'ok' ? ' is-selected' : ''}`}
-                          onClick={() => setAnswer(item.id, 'ok')}
-                          aria-pressed={answer === 'ok'}
+                      {item.required === false && <p className="eoc-question-optional">Optional</p>}
+                      {type === EOC_QUESTION_TYPES.PASS_ISSUE && (
+                        <div className="eoc-area-answer-grid">
+                          <button
+                            type="button"
+                            className={`eoc-answer-button is-good${answer === 'ok' ? ' is-selected' : ''}`}
+                            onClick={() => setAnswer(item.id, 'ok')}
+                            aria-pressed={answer === 'ok'}
+                          >
+                            <Check size={20} /><span>Looks good</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`eoc-answer-button is-attention${answer === 'repair' ? ' is-selected' : ''}`}
+                            onClick={() => setAnswer(item.id, 'repair')}
+                            aria-pressed={answer === 'repair'}
+                          >
+                            <AlertTriangle size={19} /><span>Needs attention</span>
+                          </button>
+                        </div>
+                      )}
+                      {type === EOC_QUESTION_TYPES.SHORT_TEXT && (
+                        <textarea
+                          className="eoc-custom-answer-input"
+                          rows={3}
+                          value={answer || ''}
+                          onChange={event => setAnswer(item.id, event.target.value)}
+                          placeholder="Enter response"
+                        />
+                      )}
+                      {type === EOC_QUESTION_TYPES.MULTIPLE_CHOICE && (
+                        <select
+                          className="eoc-custom-answer-input"
+                          value={answer || ''}
+                          onChange={event => setAnswer(item.id, event.target.value)}
                         >
-                          <Check size={20} /><span>Looks good</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`eoc-answer-button is-attention${answer === 'repair' ? ' is-selected' : ''}`}
-                          onClick={() => setAnswer(item.id, 'repair')}
-                          aria-pressed={answer === 'repair'}
-                        >
-                          <AlertTriangle size={19} /><span>Needs attention</span>
-                        </button>
-                      </div>
+                          <option value="">Select an answer</option>
+                          {(item.options || []).map(option => <option key={option} value={option}>{option}</option>)}
+                        </select>
+                      )}
+                      {type === EOC_QUESTION_TYPES.NUMBER && (
+                        <input
+                          className="eoc-custom-answer-input"
+                          type="number"
+                          inputMode="decimal"
+                          value={answer ?? ''}
+                          onChange={event => setAnswer(item.id, event.target.value)}
+                          placeholder="Enter number"
+                        />
+                      )}
+                      {type === EOC_QUESTION_TYPES.DATE_TIME && (
+                        <input
+                          className="eoc-custom-answer-input"
+                          type="datetime-local"
+                          value={answer || ''}
+                          onChange={event => setAnswer(item.id, event.target.value)}
+                        />
+                      )}
+                      {type === EOC_QUESTION_TYPES.PHOTO && (
+                        <div className="eoc-custom-photo-answer">
+                          <IssuePhotoPicker
+                            value={responseDetails[item.id]?.photos || []}
+                            onChange={photos => setResponsePhotos(item.id, photos)}
+                            disabled={submitting}
+                          />
+                        </div>
+                      )}
 
-                      {answer === 'repair' && (
+                      {type === EOC_QUESTION_TYPES.PASS_ISSUE && answer === 'repair' && (
                         <div className="eoc-guided-issue">
                           {recurrenceEnabled && (matchingIssuesLoading || matchingIssues.length > 0) && (
                             <div className="eoc-related-issues">

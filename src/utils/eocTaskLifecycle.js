@@ -1,3 +1,6 @@
+import { isShiftAllowedForMainLocation } from '../data/eocConstants.js'
+import { locationIdToMainLocation } from './orgModel.js'
+
 export const MISSED_EOC_REASON = 'The next scheduled EOC cycle began without a completed submission.'
 
 function clean(value) {
@@ -19,6 +22,11 @@ export function getEocCycleScopeKey(task) {
     clean(task?.taskType || task?.eocType),
     clean(task?.vanId)
   ].join('::')
+}
+
+export function isSupportedEocAssignment(assignment) {
+  const mainLocation = locationIdToMainLocation(assignment?.locationId)
+  return Boolean(mainLocation && isShiftAllowedForMainLocation(mainLocation, assignment?.shiftId))
 }
 
 export function shouldMarkEocTaskMissed(task, desiredTasks) {

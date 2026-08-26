@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildAttachmentMetadata, buildAttachmentStoragePath, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_KIND, requiredPhotoSatisfied, validateProcessedPhoto } from '../src/utils/photoModel.js'
+import { buildAttachmentMetadata, buildAttachmentStoragePath, buildEocResponseAttachmentMetadata, buildEocResponseAttachmentStoragePath, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_KIND, requiredPhotoSatisfied, validateProcessedPhoto } from '../src/utils/photoModel.js'
 
 test('attachment paths are randomized-ID based and contain no public URL', () => {
   const path = buildAttachmentStoragePath({ locationId: 'test_house', issueId: 'issue_1', attachmentId: 'random_1' })
@@ -8,6 +8,23 @@ test('attachment paths are randomized-ID based and contain no public URL', () =>
   const metadata = buildAttachmentMetadata({ attachmentId: 'random_1', issueId: 'issue_1', locationId: 'test_house', kind: 'report', processed: { width: 1200, height: 900, size: 1000, type: 'image/jpeg' }, uploader: { id: 'bht_1', name: 'BHT One' } })
   assert.equal('downloadUrl' in metadata, false)
   assert.equal(metadata.retentionDays, 90)
+})
+
+test('photo question attachments use submission-scoped private paths', () => {
+  const path = buildEocResponseAttachmentStoragePath({ locationId: 'test_house', submissionId: 'submission_1', attachmentId: 'photo_1' })
+  const metadata = buildEocResponseAttachmentMetadata({
+    attachmentId: 'photo_1',
+    submissionId: 'submission_1',
+    locationId: 'test_house',
+    itemId: 'question_photo',
+    processed: { size: 1000, type: 'image/jpeg', width: 800, height: 600 },
+    uploader: { id: 'staff_1', name: 'Staff One' }
+  })
+
+  assert.equal(path, 'eocSubmissionAttachments/test_house/submission_1/photo_1.jpg')
+  assert.equal(metadata.storagePath, path)
+  assert.equal(metadata.kind, 'response')
+  assert.equal(metadata.itemId, 'question_photo')
 })
 
 test('processed photos enforce JPEG, dimensions, and 2 MB size', () => {

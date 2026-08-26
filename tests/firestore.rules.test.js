@@ -21,6 +21,7 @@ import {
   where,
   writeBatch
 } from 'firebase/firestore'
+import { commitFirestoreWritesInChunks } from '../src/utils/firestoreBatching.js'
 
 const projectId = 'sprc-ops-hub-rules-test'
 
@@ -42,6 +43,7 @@ async function seed(path, data) {
 }
 
 test.before(async () => {
+  await testEnv.clearFirestore()
   await seed('appSettings/authPolicy', {
     authScopeEnforced: true
   })
@@ -1759,7 +1761,76 @@ test('PIN compatibility mode works after Firebase UID changes without orphaning 
   }))
 })
 
-test('supervisor can create an immutable owned EOC template version', async () => {
+test('BHT can save photo-question metadata only for an authorized EOC submission location', async () => {
+  await seed('users/photo_response_bht', {
+    name: 'Photo Response BHT',
+    role: 'bht',
+    active: true,
+    email: 'photo.response@example.com',
+    authorizedLocations: [],
+    issueLocationIds: ['test_house'],
+    version: 1
+  })
+  await seed('usersByAuthUid/photo_response_bht_uid', {
+    userId: 'photo_response_bht',
+    email: 'photo.response@example.com',
+    version: 1
+  })
+  await seed('eocSubmissions/photo_response_submission', {
+    locationId: 'test_house',
+    shiftId: 'shift_1',
+    eocType: 'house',
+    submittedByUserId: 'photo_response_bht',
+    submittedByName: 'Photo Response BHT',
+    templateScope: 'otc_shared',
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  })
+
+  const bhtDb = authed('photo_response_bht_uid', 'photo.response@example.com')
+  const attachmentRef = doc(bhtDb, 'eocSubmissions/photo_response_submission/attachments/photo_1')
+  await assertSucceeds(setDoc(attachmentRef, {
+    schemaVersion: 1,
+    attachmentId: 'photo_1',
+    submissionId: 'photo_response_submission',
+    locationId: 'test_house',
+    itemId: 'question_photo',
+    kind: 'response',
+    state: 'uploading',
+    width: 800,
+    height: 600,
+    sizeBytes: 1200,
+    mimeType: 'image/jpeg',
+    uploaderProfileId: 'photo_response_bht',
+    uploaderName: 'Photo Response BHT',
+    storagePath: 'eocSubmissionAttachments/test_house/photo_response_submission/photo_1.jpg',
+    visibility: 'location',
+    retentionDays: 90,
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  }))
+  await assertSucceeds(updateDoc(attachmentRef, {
+    state: 'uploaded',
+    uploadedAt: new Date(),
+    version: 2,
+    updatedAt: new Date()
+  }))
+  await assertFails(setDoc(doc(bhtDb, 'eocSubmissions/photo_response_submission/attachments/photo_wrong'), {
+    attachmentId: 'photo_wrong',
+    submissionId: 'photo_response_submission',
+    locationId: 'mesquite',
+    itemId: 'question_photo',
+    kind: 'response',
+    state: 'uploading',
+    sizeBytes: 1200,
+    mimeType: 'image/jpeg',
+    version: 1
+  }))
+})
+
+test('published EOC templates can be read but browser writes are blocked', async () => {
   await seed('users/template_version_supervisor', {
     name: 'Template Version Supervisor',
     role: 'supervisor',
@@ -1837,12 +1908,42 @@ test('supervisor can create an immutable owned EOC template version', async () =
     createdAt: serverTimestamp(),
     version: 1
   })
-  await assertSucceeds(publishBatch.commit())
+  await assertFails(publishBatch.commit())
 
   await assertFails(updateDoc(versionRef, {
     templateName: 'Silently changed version'
   }))
   await assertFails(deleteDoc(versionRef))
+})
+
+test('EOC template drafts are private to their supervisor owner', async () => {
+  await seed('appSettings/authPolicy', { authScopeEnforced: true })
+  await seed('users/draft_supervisor', {
+    name: 'Draft Supervisor', role: 'supervisor', active: true,
+    email: 'draft.supervisor@example.com', authorizedLocations: ['OTC'], version: 1
+  })
+  await seed('usersByAuthUid/draft_supervisor_uid', {
+    userId: 'draft_supervisor', email: 'draft.supervisor@example.com', version: 1
+  })
+  await seed('users/other_draft_supervisor', {
+    name: 'Other Draft Supervisor', role: 'supervisor', active: true,
+    email: 'other.draft.supervisor@example.com', authorizedLocations: ['OTC'], version: 1
+  })
+  await seed('usersByAuthUid/other_draft_supervisor_uid', {
+    userId: 'other_draft_supervisor', email: 'other.draft.supervisor@example.com', version: 1
+  })
+  const ownerDb = authed('draft_supervisor_uid', 'draft.supervisor@example.com')
+  const otherDb = authed('other_draft_supervisor_uid', 'other.draft.supervisor@example.com')
+  const draftRef = doc(ownerDb, 'eocTemplateDrafts/draft_private')
+  await assertSucceeds(setDoc(draftRef, {
+    ownerAuthUid: 'draft_supervisor_uid', ownerUserId: 'draft_supervisor',
+    templateName: 'Private Draft', eocType: 'house', template: { name: 'Private Draft', sections: [] },
+    version: 1, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+  }))
+  await assertSucceeds(getDoc(draftRef))
+  await assertFails(getDoc(doc(otherDb, 'eocTemplateDrafts/draft_private')))
+  await assertSucceeds(updateDoc(draftRef, { templateName: 'Updated Draft', version: 2, updatedAt: serverTimestamp() }))
+  await assertFails(updateDoc(doc(otherDb, 'eocTemplateDrafts/draft_private'), { templateName: 'Stolen Draft', version: 3 }))
 })
 
 test('authorized staff can save the automatic missed EOC lifecycle fields', async () => {
@@ -1885,6 +1986,68 @@ test('authorized staff can save the automatic missed EOC lifecycle fields', asyn
     missedAt: serverTimestamp(),
     missedReason: 'The next scheduled EOC cycle began without a completed submission.'
   }))
+})
+
+test('rule-safe batches allow a large authorized EOC task and alert sync', async () => {
+  await seed('users/eoc_sync_batch_admin', {
+    name: 'EOC Sync Batch Admin',
+    role: 'admin',
+    active: true,
+    email: 'eoc.sync.batch@example.com',
+    authorizedLocations: ['OTC'],
+    issueLocationIds: ['test_house'],
+    version: 1
+  })
+  await seed('usersByAuthUid/eoc_sync_batch_admin_uid', {
+    userId: 'eoc_sync_batch_admin',
+    email: 'eoc.sync.batch@example.com',
+    emailDomain: 'example.com',
+    linkedAt: new Date(),
+    linkedBy: 'self_first_login',
+    version: 1
+  })
+
+  const adminDb = authed('eoc_sync_batch_admin_uid', 'eoc.sync.batch@example.com')
+  const runId = `eoc_sync_batch_${Date.now().toString(36)}`
+  const taskIds = []
+  const alertIds = []
+  const operations = []
+  for (let index = 0; index < 8; index += 1) {
+    const suffix = String(index + 1).padStart(2, '0')
+    const taskId = `${runId}_task_${suffix}`
+    const alertId = `${runId}_alert_${suffix}`
+    taskIds.push(taskId)
+    alertIds.push(alertId)
+    operations.push(batch => batch.set(doc(adminDb, 'eocTasks', taskId), {
+      taskType: 'house',
+      locationId: 'test_house',
+      shiftId: 'shift_1',
+      dueDate: '2026-08-17',
+      status: 'pending',
+      cycleKey: taskId,
+      eligibleUserIds: [],
+      templateScope: 'otc_shared',
+      version: 1,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }))
+    operations.push(batch => batch.set(doc(adminDb, 'alerts', alertId), {
+      type: 'shift_debrief_missing',
+      message: `Synthetic EOC sync alert ${suffix}`,
+      read: false,
+      audience: 'supervisor',
+      locationId: 'test_house',
+      version: 1,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }))
+  }
+
+  const commitCount = await commitFirestoreWritesInChunks(operations, () => writeBatch(adminDb))
+
+  assert.equal(commitCount, 16)
+  await assertSucceeds(getDoc(doc(adminDb, 'eocTasks', taskIds.at(-1))))
+  await assertSucceeds(getDoc(doc(adminDb, 'alerts', alertIds.at(-1))))
 })
 
 test('BHT can report a returned problem but only a supervisor can reopen the issue', async () => {

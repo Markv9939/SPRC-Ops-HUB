@@ -6,6 +6,7 @@ import { hashPin } from '../utils/pinHash'
 import { isActiveNonDeletedUser } from '../services/pinConflictService'
 import { getScopedSessionUser } from '../services/accessGrantService'
 import { getAuthPolicy } from '../services/authPolicyService'
+import { establishPinSession } from '../services/pinSessionService'
 import { isOfflineMode } from '../utils/networkGuard'
 import { PIN_LENGTH, isValidPin, normalizePin } from '../utils/pinPolicy'
 import {
@@ -206,6 +207,16 @@ function PinLogin({ onLogin }) {
           'Login timed out while starting the secure file session. Please try again.'
         )
         const normalizedRole = normalizeRole(userData.role)
+
+        try {
+          await withTimeout(
+            establishPinSession({ profileId: pinUser.id, pin: currentPin }),
+            LOGIN_STEP_TIMEOUT_MS,
+            'Secure session setup timed out.'
+          )
+        } catch (sessionLinkError) {
+          console.warn('Secure PIN session mapping was unavailable:', sessionLinkError)
+        }
 
         // When claim enforcement is on, prevent stale claim sessions from constraining PIN identity.
         if (authScopeEnforced && !claimsMatchPinUser(authSession, userData)) {
