@@ -28,6 +28,7 @@ export async function submitAppFeedbackOnline(payload = {}) {
 
   await setDoc(feedbackRef, {
     ...record,
+    ...(payload.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   })

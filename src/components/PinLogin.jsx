@@ -7,6 +7,10 @@ import { isActiveNonDeletedUser } from '../services/pinConflictService'
 import { getScopedSessionUser } from '../services/accessGrantService'
 import { getAuthPolicy } from '../services/authPolicyService'
 import { establishPinSession } from '../services/pinSessionService'
+import {
+  SECURITY_CLIENT_BOOTSTRAP_COMPILED,
+  beginSecurityClientPinLogin
+} from '../services/securityClientRuntime'
 import { isOfflineMode } from '../utils/networkGuard'
 import { PIN_LENGTH, isValidPin, normalizePin } from '../utils/pinPolicy'
 import {
@@ -56,7 +60,7 @@ function PinLogin({ onLogin }) {
   }, [])
 
   useEffect(() => {
-    if (lockoutUntil && Date.now() < lockoutUntil) {
+    if (!SECURITY_CLIENT_BOOTSTRAP_COMPILED && lockoutUntil && Date.now() < lockoutUntil) {
       const timer = setInterval(() => {
         if (Date.now() >= lockoutUntil) {
           setLockoutUntil(null)
@@ -129,7 +133,7 @@ function PinLogin({ onLogin }) {
     const currentPin = typeof pinOverride === 'string' ? pinOverride : pin
     if (isLoading) return
 
-    if (lockoutUntil && Date.now() < lockoutUntil) {
+    if (!SECURITY_CLIENT_BOOTSTRAP_COMPILED && lockoutUntil && Date.now() < lockoutUntil) {
       const remainingMinutes = Math.ceil((lockoutUntil - Date.now()) / 60000)
       setError(`Account locked. Try again in ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}`)
       return
@@ -147,6 +151,32 @@ function PinLogin({ onLogin }) {
       if (isOfflineMode()) {
         setError('Offline mode detected. Reconnect to sign in.')
         setIsLoading(false)
+        return
+      }
+
+      let securityResult
+      try {
+        securityResult = await withTimeout(
+          beginSecurityClientPinLogin(currentPin),
+          LOGIN_STEP_TIMEOUT_MS,
+          'Secure login timed out. Please check connection and try again.'
+        )
+      } catch (securityError) {
+        setError(securityError?.message || 'Secure login failed. Please try again.')
+        setPin('')
+        return
+      }
+      if (securityResult.status === 'authenticated') {
+        localStorage.removeItem('failedAttempts')
+        localStorage.removeItem('lockoutUntil')
+        setFailedAttempts(0)
+        onLogin(securityResult.user)
+        return
+      }
+
+      if (lockoutUntil && Date.now() < lockoutUntil) {
+        const remainingMinutes = Math.ceil((lockoutUntil - Date.now()) / 60000)
+        setError(`Account locked. Try again in ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}`)
         return
       }
 
@@ -368,7 +398,7 @@ function PinLogin({ onLogin }) {
 
         <button
           onClick={handleSubmit}
-          disabled={isLoading || (lockoutUntil && Date.now() < lockoutUntil)}
+          disabled={isLoading || (!SECURITY_CLIENT_BOOTSTRAP_COMPILED && lockoutUntil && Date.now() < lockoutUntil)}
           style={{
             width: '100%',
             padding: '14px',
@@ -378,9 +408,9 @@ function PinLogin({ onLogin }) {
             borderRadius: '10px',
             fontSize: '18px',
             fontWeight: 'bold',
-            cursor: (isLoading || (lockoutUntil && Date.now() < lockoutUntil)) ? 'not-allowed' : 'pointer',
+            cursor: (isLoading || (!SECURITY_CLIENT_BOOTSTRAP_COMPILED && lockoutUntil && Date.now() < lockoutUntil)) ? 'not-allowed' : 'pointer',
             marginTop: '5px',
-            opacity: (isLoading || (lockoutUntil && Date.now() < lockoutUntil)) ? 0.6 : 1,
+            opacity: (isLoading || (!SECURITY_CLIENT_BOOTSTRAP_COMPILED && lockoutUntil && Date.now() < lockoutUntil)) ? 0.6 : 1,
             boxShadow: '0 8px 20px rgba(21,62,102,0.40)'
           }}
         >

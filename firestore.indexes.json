@@ -44,6 +44,20 @@
       ]
     },
     {
+      "collectionGroup": "transports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "createdByUserId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "eocIssues",
       "queryScope": "COLLECTION",
       "fields": [

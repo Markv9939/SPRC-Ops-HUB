@@ -12,6 +12,7 @@ import {
   Timestamp,
   increment
 } from 'firebase/firestore'
+import { performSecurityAccountAction } from './securityAccountActions'
 import {
   GLOBAL_SCOPE,
   isAdminRole,
@@ -204,7 +205,8 @@ export async function grantBackupAccess({
   expiresOn,
   reason,
   grantedByUserId,
-  grantedByName
+  grantedByName,
+  protectedSession = false
 }) {
   const normalizedLocation = normalizeLocationId(locationId)
   const startDate = startOfDay(startsOn)
@@ -217,6 +219,18 @@ export async function grantBackupAccess({
   if (startDate > expiryDate) throw new Error('Expiry must be on or after start date.')
   if (!String(reason || '').trim()) throw new Error('Reason is required.')
   if (!grantedByUserId || !grantedByName) throw new Error('Grant actor is required.')
+
+  if (protectedSession) {
+    const result = await performSecurityAccountAction({
+      action: 'grant_backup_access',
+      targetProfileId: userId,
+      locationId: normalizedLocation,
+      startsAt: startDate.toISOString(),
+      expiresAt: expiryDate.toISOString(),
+      reason: String(reason).trim()
+    })
+    if (result.status !== 'disabled') return { id: result.grantId, protected: true }
+  }
 
   const createdRef = await addDoc(collection(db, 'accessGrants'), {
     userId,
@@ -235,18 +249,28 @@ export async function grantBackupAccess({
     updatedAt: serverTimestamp()
   })
 
-  return createdRef.id
+  return { id: createdRef.id, protected: false }
 }
 
 export async function revokeBackupAccess({
   grantId,
   reason,
   revokedByUserId,
-  revokedByName
+  revokedByName,
+  protectedSession = false
 }) {
   if (!grantId) throw new Error('Grant id is required.')
   if (!String(reason || '').trim()) throw new Error('Revocation reason is required.')
   if (!revokedByUserId || !revokedByName) throw new Error('Revocation actor is required.')
+
+  if (protectedSession) {
+    const result = await performSecurityAccountAction({
+      action: 'revoke_backup_access',
+      grantId,
+      reason: String(reason).trim()
+    })
+    if (result.status !== 'disabled') return { protected: true }
+  }
 
   await updateDoc(doc(db, 'accessGrants', grantId), {
     revoked: true,
@@ -257,4 +281,5 @@ export async function revokeBackupAccess({
     version: increment(1),
     updatedAt: serverTimestamp()
   })
+  return { protected: false }
 }

@@ -22,6 +22,7 @@ import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
 import { writeAuditLog as writeAuditEntry } from '../services/notificationService'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
+import { isSecureSessionUser, performSecurityAccountAction } from '../services/securityAccountActions'
 import useUserScope from '../hooks/useUserScope'
 import useScopedIssues from '../hooks/useScopedIssues'
 import useScopedFleet from '../hooks/useScopedFleet'
@@ -205,14 +206,21 @@ function SupervisorDashboard({
     allowedComplianceSites,
     inTransportScope,
     inComplianceScope,
-    inEocScope
+    inEocScope,
+    inIssueScope,
+    exactIssueLocationIds
   } = useUserScope(user)
 
   // ── Real-time data from shared hooks ──
   // (Must be declared AFTER useUserScope so inEocScope/inComplianceScope are initialized.)
   // Note: eocAlerts and fleetAlerts are passed as props from App.jsx (already subscribed there)
   // to avoid duplicate Firestore listeners.
-  const { issues: eocIssues, overdueTasks: eocOverdueTasks } = useScopedIssues({ inEocScope })
+  const { issues: eocIssues, overdueTasks: eocOverdueTasks } = useScopedIssues({
+    user,
+    inEocScope,
+    inIssueScope,
+    issueLocationIds: exactIssueLocationIds
+  })
   const { overdueTasks: fleetOverdueTasks, upcomingTasks: fleetUpcomingTasks } = useScopedFleet({ inComplianceScope })
 
   const actorRoleOptions = useMemo(
@@ -457,6 +465,7 @@ function SupervisorDashboard({
 
     const isNewUser = editingUser === 'new'
     const hasPinInput = String(userForm.pin || '').trim().length > 0
+    const secureManagement = isSecureSessionUser(user)
 
     if (isNewUser && !isAdminRole(user?.role)) {
       alert('Only admins can create login-capable accounts.')
@@ -572,8 +581,8 @@ function SupervisorDashboard({
         mainLocation: normalizedLocation,
         locationId: normalizedLocationId
       })
-      const pinHash = hasPinInput ? await hashPin(userForm.pin) : null
-      if (hasPinInput) {
+      const pinHash = hasPinInput && !secureManagement ? await hashPin(userForm.pin) : null
+      if (hasPinInput && !secureManagement) {
         const duplicateUser = await findDuplicatePinUser(userForm.pin, {
           excludeUserId: isNewUser ? null : appUserId
         })
@@ -602,6 +611,36 @@ function SupervisorDashboard({
         payload.pinHash = pinHash
         payload.pinVersion = PIN_VERSION
         payload.pinUpdatedAt = serverTimestamp()
+      }
+
+      if (secureManagement) {
+        const profilePatch = {
+          name: payload.name,
+          role: payload.role,
+          site: payload.site,
+          location: payload.location,
+          house: payload.house,
+          locationId: payload.locationId,
+          shiftId: payload.shiftId,
+          vanId: payload.vanId,
+          vanIds: payload.vanIds,
+          active: payload.active,
+          authorizedLocations: payload.authorizedLocations,
+          issueLocationIds: payload.issueLocationIds
+        }
+        const result = await performSecurityAccountAction({
+          action: isNewUser ? 'create_profile' : 'save_profile',
+          targetProfileId: appUserId,
+          ...(isNewUser ? {} : { expectedVersion: Number(userForm._version || 0) }),
+          profilePatch,
+          ...(hasPinInput ? { newPin: userForm.pin } : {})
+        })
+        if (result.status !== 'completed') throw new Error('Protected staff account actions are not enabled yet.')
+        notifySuccess(result.allDevicesRevoked ? 'User saved and active sessions ended' : 'User saved successfully')
+        setEditingUser(null)
+        setShowUserPin(false)
+        loadUsers()
+        return
       }
 
       let userProfileSaved = false
@@ -694,6 +733,18 @@ function SupervisorDashboard({
     const targetUser = users.find(candidate => candidate.id === userId)
 
     try {
+      if (isSecureSessionUser(user)) {
+        const result = await performSecurityAccountAction({
+          action: 'soft_delete',
+          targetProfileId: userId,
+          expectedVersion: getVersionNumber(targetUser),
+          reason
+        })
+        if (result.status !== 'completed') throw new Error('Protected staff account actions are not enabled yet.')
+        notifySuccess('User soft-deleted and active sessions ended')
+        loadUsers()
+        return
+      }
       await updateDoc(doc(db, 'users', userId), {
         deleted: true,
         deletedAt: serverTimestamp(),
@@ -723,6 +774,29 @@ function SupervisorDashboard({
     } catch (error) {
       console.error('Error deleting user:', error)
       alert('Error deleting user: ' + error.message)
+    }
+  }
+
+  const handleEndAllUserSessions = async (managedUser) => {
+    if (blockIfOffline('ending staff sessions')) return
+    if (!(await showConfirmDialog(`Sign ${managedUser.name || managedUser.id} out of every device?`, {
+      title: 'End All Sessions',
+      tone: 'warning',
+      confirmText: 'End Sessions'
+    }))) return
+    try {
+      const result = await performSecurityAccountAction({
+        action: 'end_all_sessions',
+        targetProfileId: managedUser.id,
+        expectedVersion: getVersionNumber(managedUser),
+        reason: 'Supervisor or admin ended all staff sessions'
+      })
+      if (result.status !== 'completed') throw new Error('Protected staff account actions are not enabled yet.')
+      notifySuccess('All active sessions ended')
+      loadUsers()
+    } catch (error) {
+      console.error('Error ending staff sessions:', error)
+      alert(formatVersionConflictMessage(error, 'Unable to end sessions: ' + error.message))
     }
   }
 
@@ -1749,6 +1823,23 @@ function SupervisorDashboard({
                         >
                           Soft Delete
                         </button>
+                        {isSecureSessionUser(user) && (
+                          <button
+                            onClick={() => handleEndAllUserSessions(managedUser)}
+                            style={{
+                              padding: '8px 16px',
+                              backgroundColor: '#355C7D',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: 'bold',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            End Sessions
+                          </button>
+                        )}
                         {isAdmin && (
                           <button
                             onClick={() => handleHardDeleteUser(managedUser.id)}

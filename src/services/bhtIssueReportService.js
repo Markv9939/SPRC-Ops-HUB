@@ -3,6 +3,7 @@ import { db } from '../firebase'
 import { buildIssueRecord, getIssueTypeMeta, ISSUE_TYPES } from '../utils/issueModel'
 import { createIssueWithActivity } from './issueStatusService'
 import { uploadIssuePhotos } from './issueAttachmentService'
+import { shouldUseProtectedOperationalMutation, submitProtectedIssueMutation } from './protectedOperationalMutationService'
 
 export const BHT_HOME_ISSUE_TYPES = ISSUE_TYPES
 
@@ -45,8 +46,26 @@ function buildBhtHomeIssueData({ user, assignment, issueType, description, vanId
 }
 
 export async function submitBhtIssueReportOnline(payload) {
-  const issueData = buildBhtHomeIssueData(payload || {})
+  const issueData = {
+    ...buildBhtHomeIssueData(payload || {}),
+    ...(payload?.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {})
+  }
   const localReportId = safeIdPart(payload?.localReportId)
+  if (await shouldUseProtectedOperationalMutation('issues_feedback_audit')) {
+    const protectedResult = await submitProtectedIssueMutation({
+      action: 'create_report',
+      operationId: localReportId ? `bht_issue_${localReportId}` : undefined,
+      issue: issueData
+    })
+    const photoResults = await uploadIssuePhotos({
+      issueId: protectedResult.issueId,
+      locationId: issueData.locationId,
+      photos: payload?.photos,
+      kind: 'report',
+      uploader: payload?.user
+    })
+    return { issueId: protectedResult.issueId, photoResults }
+  }
   const issueRef = localReportId
     ? doc(db, 'eocIssues', `bht_${localReportId}`)
     : doc(collection(db, 'eocIssues'))

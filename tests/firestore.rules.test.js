@@ -13,6 +13,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
@@ -56,6 +57,21 @@ function authed(uid, email) {
   }).firestore()
 }
 
+function secureAuthed(uid, profileId, sessionId, securityVersion, role, secureWorkflows, scope = {}) {
+  return testEnv.authenticatedContext(uid, {
+    profileId,
+    sessionId,
+    sessionVersion: 2,
+    securityVersion,
+    role,
+    authorizedLocations: scope.authorizedLocations || [],
+    issueLocationIds: scope.issueLocationIds || [],
+    locationId: scope.locationId || '',
+    workflowSecurityVersion: 6,
+    secureWorkflows
+  }).firestore()
+}
+
 test('approved admin mapping can read own profile', async () => {
   await seed('users/admin_owner', {
     name: 'Admin Owner',
@@ -77,6 +93,58 @@ test('approved admin mapping can read own profile', async () => {
 
   const snap = await assertSucceeds(getDoc(doc(authed('admin_uid', 'mark@scottsdaleprovidence.com'), 'users/admin_owner')))
   assert.equal(snap.exists(), true)
+})
+
+test('Phase 2 credentials, identities, sessions, rate limits, audits, and activation boundary are server-only', async () => {
+  await seed('users/admin_owner', {
+    name: 'Admin Owner',
+    role: 'admin',
+    active: true,
+    site: 'GLOBAL',
+    authorizedLocations: [],
+    issueLocationIds: ['lone_mountain', 'mesquite', 'test_house', 'res'],
+    version: 1
+  })
+  await seed('usersByAuthUid/admin_uid', {
+    userId: 'admin_owner',
+    linkedBy: 'test',
+    version: 1
+  })
+  await seed('staffPinCredentials/security_bht', { algorithm: 'scrypt-v1', hash: 'server-only', salt: 'server-only', lookupKey: 'server-only' })
+  await seed('staffAuthIdentities/security_bht', { profileId: 'security_bht', authUid: 'staff_uid' })
+  await seed('staffSessions/security_session', { profileId: 'security_bht', authUid: 'staff_uid' })
+  await seed('securityRateLimits/security_rate', { attemptCount: 1 })
+  await seed('securityLoginAudit/security_audit', { action: 'staff_pin_login_failed' })
+  await seed('staffPinLookup/security_lookup', { profileId: 'security_bht' })
+  await seed('securityAccountAudit/security_account_audit', { action: 'reset_pin' })
+  await seed('securityCleanupJobs/security_cleanup', { status: 'pending' })
+  await seed('securityOfflineReplayAudit/security_replay', { action: 'offline_replay_authorized' })
+  await seed('securityWorkflowLocks/security_lock', { active: true })
+  await seed('securityWorkflowAudit/security_workflow_audit', { action: 'protected_transport_created' })
+
+  const adminDb = authed('admin_uid', 'mark@scottsdaleprovidence.com')
+  const anonymousDb = testEnv.unauthenticatedContext().firestore()
+  for (const path of [
+    'staffPinCredentials/security_bht',
+    'staffAuthIdentities/security_bht',
+    'staffSessions/security_session',
+    'securityRateLimits/security_rate',
+    'securityLoginAudit/security_audit',
+    'staffPinLookup/security_lookup',
+    'securityAccountAudit/security_account_audit',
+    'securityCleanupJobs/security_cleanup',
+    'securityOfflineReplayAudit/security_replay',
+    'securityWorkflowLocks/security_lock',
+    'securityWorkflowAudit/security_workflow_audit'
+  ]) {
+    await assertFails(getDoc(doc(adminDb, path)))
+    await assertFails(getDoc(doc(anonymousDb, path)))
+    await assertFails(setDoc(doc(adminDb, path), { browserWrite: true }))
+  }
+  await assertFails(setDoc(doc(adminDb, 'appSettings/securityFoundation'), {
+    schemaVersion: 2,
+    serverPinLoginEnabled: true
+  }))
 })
 
 test('approved admin can list users and save admin owner email link', async () => {
@@ -2357,5 +2425,215 @@ test('app feedback is owned by the BHT and reviewable only by an admin', async (
   await assertSucceeds(getDoc(doc(adminDb, 'appFeedback/feedback_test')))
   await assertSucceeds(updateDoc(doc(adminDb, 'appFeedback/feedback_test'), {
     status: 'reviewing', adminNote: 'Reviewing this report.', reviewedByUserId: 'feedback_admin', reviewedByName: 'Feedback Admin', reviewedAt: serverTimestamp(), updatedAt: serverTimestamp(), version: 2
+  }))
+})
+
+test('workflow claims enforce current device sessions, roles, ownership, and location scope', async () => {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+  await seed('users/workflow_bht', {
+    name: 'Workflow BHT', role: 'bht', active: true, deleted: false,
+    securityVersion: 8, location: 'OTC', locationId: 'test_house', house: 'test_house',
+    authorizedLocations: ['test_house'], issueLocationIds: ['test_house'], version: 1
+  })
+  await seed('usersByAuthUid/workflow_bht_uid', { userId: 'workflow_bht', version: 2 })
+  await seed('staffSessions/workflow_bht_session', {
+    profileId: 'workflow_bht', authUid: 'workflow_bht_uid', securityVersion: 8,
+    active: true, revokedAt: null, expiresAt
+  })
+  await seed('transports/workflow_transport', {
+    site: 'OTC', createdByUserId: 'workflow_bht', createdByName: 'Workflow BHT',
+    status: 'open', departedAt: new Date(), createdAt: new Date(), updatedAt: new Date(), version: 1
+  })
+  await seed('eocIssues/workflow_issue', { locationId: 'test_house', status: 'open', version: 1 })
+  await seed('eocIssuePatterns/workflow_pattern', {
+    patternId: 'workflow_pattern', locationId: 'test_house', trackingId: 'workflow_tracking',
+    observations: [], recentCount: 0, lifetimeCount: 0, reportedBefore: false,
+    recurringIssue: false, version: 1
+  })
+  await seed('eocTemplateLibrary/workflow_template', {
+    name: 'Workflow Template', eocType: 'house', items: [], status: 'published', version: 1
+  })
+  await seed('shiftDebriefs/workflow_debrief', {
+    locationId: 'test_house', draftByUserId: 'workflow_bht', submittedByUserId: 'workflow_bht',
+    submittedByName: 'Workflow BHT', receivingUserIds: ['workflow_receiver'],
+    receivingUserNames: { workflow_receiver: 'Workflow Receiver' },
+    shiftId: 'shift_1', dateKey: '2026-08-26', mainLocation: 'OTC',
+    status: 'submitted', items: [], extraNotes: [],
+    confirmation: { acknowledgments: {}, confirmedByUserId: null },
+    confirmed: false, createdAt: new Date(), updatedAt: new Date(), version: 1
+  })
+  await seed('alerts/workflow_alert', {
+    audience: 'bht', targetUserId: 'workflow_bht', locationId: 'test_house',
+    type: 'transport_completed', read: false, version: 1
+  })
+  await seed('eocProperties/workflow_property', { mainLocation: 'OTC', locationId: 'test_house', version: 1 })
+  await seed('appSettings/workflowSetting', { enabled: false, version: 1 })
+
+  const workflows = ['identity_users', 'templates_photos', 'eoc', 'debriefs_alerts', 'issues_feedback_audit', 'transports', 'operations_admin', 'settings']
+  const bhtDb = secureAuthed('workflow_bht_uid', 'workflow_bht', 'workflow_bht_session', 8, 'bht', workflows, {
+    authorizedLocations: ['OTC', 'test_house'],
+    issueLocationIds: ['test_house'],
+    locationId: 'test_house'
+  })
+  await assertSucceeds(getDoc(doc(bhtDb, 'users/workflow_bht')))
+  await assertSucceeds(getDoc(doc(bhtDb, 'eocTemplateLibrary/workflow_template')))
+  await assertSucceeds(getDoc(doc(bhtDb, 'eocIssuePatterns/workflow_pattern')))
+  await assertSucceeds(getDoc(doc(bhtDb, 'shiftDebriefs/workflow_debrief')))
+  await assertSucceeds(updateDoc(doc(bhtDb, 'shiftDebriefs/workflow_debrief'), {
+    extraNotes: [{
+      id: 'workflow_correction', note: 'Corrected before incoming signoff.',
+      createdByUserId: 'workflow_bht', createdByName: 'Workflow BHT',
+      createdAtIso: '2026-08-26T08:00:00.000Z'
+    }],
+    updatedAt: new Date(),
+    version: 2
+  }))
+  await assertSucceeds(getDoc(doc(bhtDb, 'alerts/workflow_alert')))
+  await assertSucceeds(getDoc(doc(bhtDb, 'transports/workflow_transport')))
+  await assertSucceeds(getDoc(doc(bhtDb, 'eocIssues/workflow_issue')))
+  await assertSucceeds(getDoc(doc(bhtDb, 'appSettings/workflowSetting')))
+  await assertFails(getDoc(doc(bhtDb, 'eocProperties/workflow_property')))
+  await assertFails(updateDoc(doc(bhtDb, 'appSettings/workflowSetting'), { enabled: true, version: 2 }))
+  await assertFails(setDoc(doc(bhtDb, 'transports/workflow_impersonated'), {
+    site: 'OTC', createdByUserId: 'someone_else', createdByName: 'Someone Else',
+    status: 'open', departedAt: new Date(), createdAt: new Date(), version: 1
+  }))
+
+  await seed('users/workflow_admin', {
+    name: 'Workflow Admin', role: 'admin', active: true, deleted: false,
+    securityVersion: 3, location: 'GLOBAL', authorizedLocations: [], issueLocationIds: [], version: 1
+  })
+  await seed('staffSessions/workflow_admin_session', {
+    profileId: 'workflow_admin', authUid: 'workflow_admin_uid', securityVersion: 3,
+    active: true, revokedAt: null, expiresAt
+  })
+  const secureAdminDb = secureAuthed('workflow_admin_uid', 'workflow_admin', 'workflow_admin_session', 3, 'admin', workflows)
+  await assertFails(setDoc(doc(secureAdminDb, 'accessGrants/direct_strict_grant'), {
+    userId: 'workflow_bht', userName: 'Workflow BHT', locationId: 'RES',
+    startsAt: new Date(), expiresAt, reason: 'Direct strict write must be denied.',
+    revoked: false, revokedAt: null, version: 1, createdAt: new Date(), updatedAt: new Date()
+  }))
+  await assertFails(setDoc(doc(secureAdminDb, 'issueAccess/workflow_bht'), {
+    userId: 'workflow_bht', locationIds: ['res'], active: true, version: 1
+  }))
+
+  await seed('staffSessions/workflow_scope_expired_session', {
+    profileId: 'workflow_bht', authUid: 'workflow_bht_uid', securityVersion: 8,
+    active: true, revokedAt: null, expiresAt, scopeExpiresAt: new Date(Date.now() - 1000)
+  })
+  const expiredScopeDb = secureAuthed('workflow_bht_uid', 'workflow_bht', 'workflow_scope_expired_session', 8, 'bht', workflows, {
+    authorizedLocations: ['OTC', 'test_house'], issueLocationIds: ['test_house'], locationId: 'test_house'
+  })
+  await assertFails(getDoc(doc(expiredScopeDb, 'transports/workflow_transport')))
+
+  await seed('staffSessions/workflow_bht_session', {
+    profileId: 'workflow_bht', authUid: 'workflow_bht_uid', securityVersion: 8,
+    active: false, revokedAt: new Date(), expiresAt
+  })
+  await assertFails(getDoc(doc(bhtDb, 'transports/workflow_transport')))
+  await assertFails(getDoc(doc(bhtDb, 'eocIssues/workflow_issue')))
+  await assertFails(getDoc(doc(bhtDb, 'eocTemplateLibrary/workflow_template')))
+  await assertFails(getDoc(doc(bhtDb, 'eocIssuePatterns/workflow_pattern')))
+  await assertFails(getDoc(doc(bhtDb, 'shiftDebriefs/workflow_debrief')))
+  await assertFails(getDoc(doc(bhtDb, 'alerts/workflow_alert')))
+  await assertFails(getDoc(doc(bhtDb, 'appSettings/workflowSetting')))
+})
+
+test('strict EOC and issue workflows require protected server mutations while drafts and reads remain usable', async () => {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+  await seed('appSettings/securityWorkflows', {
+    schemaVersion: 6,
+    enabled: true,
+    workflows: ['eoc', 'issues_feedback_audit']
+  })
+  await seed('users/server_mutation_bht', {
+    name: 'Server Mutation BHT', role: 'bht', active: true, deleted: false,
+    securityVersion: 2, location: 'OTC', locationId: 'test_house', house: 'test_house',
+    authorizedLocations: ['OTC', 'test_house'], issueLocationIds: ['test_house'], version: 1
+  })
+  await seed('usersByAuthUid/server_mutation_uid', { userId: 'server_mutation_bht', version: 2 })
+  await seed('staffSessions/server_mutation_session', {
+    profileId: 'server_mutation_bht', authUid: 'server_mutation_uid', securityVersion: 2,
+    active: true, revokedAt: null, expiresAt
+  })
+  await seed('eocTasks/server_mutation_task', {
+    taskType: 'house', locationId: 'test_house', shiftId: 'shift_1', dueDate: '2026-08-26',
+    status: 'pending', cycleKey: 'server_mutation_task', eligibleUserIds: ['server_mutation_bht'],
+    templateScope: 'otc_shared', version: 1, createdAt: new Date(), updatedAt: new Date()
+  })
+  await seed('eocIssues/server_mutation_issue', {
+    locationId: 'test_house', eocType: 'house', label: 'Door', status: 'open',
+    reportedByUserId: 'server_mutation_bht', version: 1, createdAt: new Date(), updatedAt: new Date()
+  })
+  await seed('eocIssues/server_mutation_legacy_missing_location', {
+    eocType: 'house', label: 'Malformed legacy issue', status: 'open',
+    reportedByUserId: 'server_mutation_bht', version: 1, createdAt: new Date(), updatedAt: new Date()
+  })
+  const bhtDb = secureAuthed(
+    'server_mutation_uid', 'server_mutation_bht', 'server_mutation_session', 2, 'bht',
+    ['eoc', 'issues_feedback_audit'],
+    { authorizedLocations: ['OTC', 'test_house'], issueLocationIds: ['test_house'], locationId: 'test_house' }
+  )
+  await assertSucceeds(getDoc(doc(bhtDb, 'eocTasks/server_mutation_task')))
+  await assertSucceeds(getDoc(doc(bhtDb, 'eocIssues/server_mutation_issue')))
+  await assertSucceeds(getDocs(query(
+    collection(bhtDb, 'eocIssues'),
+    where('locationId', '==', 'test_house')
+  )))
+  await assertSucceeds(getDocs(query(
+    collection(bhtDb, 'eocIssues'),
+    where('locationId', '==', 'test_house'),
+    where('status', 'in', ['open', 'in_progress', 'pending_supervisor_review']),
+    orderBy('createdAt', 'desc')
+  )))
+  await assertSucceeds(getDocs(query(
+    collection(bhtDb, 'eocIssues'),
+    where('locationId', '==', 'test_house'),
+    where('status', 'in', ['resolved', 'voided']),
+    orderBy('closedAt', 'desc')
+  )))
+  await assertFails(getDoc(doc(bhtDb, 'eocIssues/server_mutation_legacy_missing_location')))
+  await seed('users/server_mutation_admin', {
+    name: 'Server Mutation Admin', role: 'admin', active: true, deleted: false,
+    securityVersion: 1, authorizedLocations: [], issueLocationIds: [], version: 1
+  })
+  await seed('usersByAuthUid/server_mutation_admin_uid', { userId: 'server_mutation_admin', version: 1 })
+  await seed('staffSessions/server_mutation_admin_session', {
+    profileId: 'server_mutation_admin', authUid: 'server_mutation_admin_uid', securityVersion: 1,
+    active: true, revokedAt: null, expiresAt
+  })
+  const adminDb = secureAuthed(
+    'server_mutation_admin_uid', 'server_mutation_admin', 'server_mutation_admin_session', 1, 'admin',
+    ['eoc', 'issues_feedback_audit'],
+    { authorizedLocations: [], issueLocationIds: [] }
+  )
+  await assertSucceeds(getDocs(query(
+    collection(adminDb, 'eocIssues'),
+    orderBy('createdAt', 'desc')
+  )))
+  await assertSucceeds(getDoc(doc(adminDb, 'eocIssues/server_mutation_legacy_missing_location')))
+  await assertSucceeds(setDoc(doc(bhtDb, 'eocSubmissionDrafts/server_mutation_task__server_mutation_bht'), {
+    taskId: 'server_mutation_task', locationId: 'test_house', shiftId: 'shift_1', eocType: 'house',
+    draftByUserId: 'server_mutation_bht', templateScope: 'otc_shared', version: 1,
+    createdAt: new Date(), updatedAt: new Date()
+  }))
+  await assertFails(setDoc(doc(bhtDb, 'eocSubmissions/direct_strict_submission'), {
+    locationId: 'test_house', shiftId: 'shift_1', eocType: 'house', templateScope: 'otc_shared',
+    submittedByUserId: 'server_mutation_bht', submittedByName: 'Server Mutation BHT', version: 1,
+    createdAt: new Date(), updatedAt: new Date()
+  }))
+  await assertFails(updateDoc(doc(bhtDb, 'eocTasks/server_mutation_task'), {
+    status: 'completed', submissionId: 'direct_strict_submission', version: 2, updatedAt: new Date()
+  }))
+  await assertFails(setDoc(doc(bhtDb, 'eocIssues/direct_strict_issue'), {
+    locationId: 'test_house', eocType: 'house', label: 'Direct issue', status: 'open',
+    reportedByUserId: 'server_mutation_bht', version: 1, createdAt: new Date(), updatedAt: new Date()
+  }))
+  await assertFails(updateDoc(doc(bhtDb, 'eocIssues/server_mutation_issue'), {
+    status: 'pending_supervisor_review', version: 2, updatedAt: new Date()
+  }))
+  await assertFails(setDoc(doc(bhtDb, 'eocIssues/server_mutation_issue/activity/direct_strict_activity'), {
+    issueId: 'server_mutation_issue', locationId: 'test_house', eventType: 'bht_follow_up',
+    actorUserId: 'server_mutation_bht', immutable: true, version: 1, createdAt: new Date()
   }))
 })

@@ -55,9 +55,33 @@ import {
   normalizeTransportSite
 } from './utils/orgModel'
 import { toTransportRecordDate } from './utils/transportRecord'
+import {
+  SECURITY_CLIENT_BOOTSTRAP_COMPILED,
+  endSecurityClientSession,
+  restoreSecurityClientSession,
+  subscribeToSecurityClientSession
+} from './services/securityClientRuntime'
+import { createProtectedTransport, shouldUseProtectedTransport } from './services/protectedTransportService'
 
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
 const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
+
+function loadLegacyStoredUser() {
+  const saved = sessionStorage.getItem('bhtUser')
+  if (!saved) return null
+  const lastActivityTime = parseInt(localStorage.getItem('lastActivity') || '0')
+  if (Date.now() - lastActivityTime > AUTO_LOCK_TIMEOUT) {
+    sessionStorage.removeItem('bhtUser')
+    localStorage.removeItem('lastActivity')
+    return null
+  }
+  try {
+    return JSON.parse(saved)
+  } catch {
+    sessionStorage.removeItem('bhtUser')
+    return null
+  }
+}
 const ACTIVE_TRANSPORT_STATUSES = new Set(['open', 'arrived'])
 const DASHBOARD_TABS = new Set([
   'dashboard',
@@ -212,9 +236,17 @@ function normalizeList(values) {
 function toScopeSignature(sessionUser) {
   return JSON.stringify({
     id: sessionUser?.id || '',
+    name: sessionUser?.name || '',
     role: sessionUser?.role || '',
     site: sessionUser?.site || '',
+    location: sessionUser?.location || '',
+    house: sessionUser?.house || '',
+    locationId: sessionUser?.locationId || '',
+    shiftId: sessionUser?.shiftId || '',
+    vanId: sessionUser?.vanId || '',
+    vanIds: normalizeList(sessionUser?.vanIds),
     authorizedLocations: normalizeList(sessionUser?.authorizedLocations),
+    issueLocationIds: normalizeList(sessionUser?.issueLocationIds),
     primaryScopes: normalizeList(sessionUser?.primaryScopes),
     authScopeEnforced: sessionUser?.authScopeEnforced === true,
     activeBackupGrants: Array.isArray(sessionUser?.activeBackupGrants)
@@ -259,22 +291,8 @@ function App() {
     () => parseAppRoute(location.pathname, location.search),
     [location.pathname, location.search]
   )
-  const [user, setUser] = useState(() => {
-    const saved = sessionStorage.getItem('bhtUser')
-    if (!saved) return null
-    const lastActivityTime = parseInt(localStorage.getItem('lastActivity') || '0')
-    if (Date.now() - lastActivityTime > AUTO_LOCK_TIMEOUT) {
-      sessionStorage.removeItem('bhtUser')
-      localStorage.removeItem('lastActivity')
-      return null
-    }
-    try {
-      return JSON.parse(saved)
-    } catch {
-      sessionStorage.removeItem('bhtUser')
-      return null
-    }
-  })
+  const [user, setUser] = useState(() => SECURITY_CLIENT_BOOTSTRAP_COMPILED ? null : loadLegacyStoredUser())
+  const [securityBootstrapPending, setSecurityBootstrapPending] = useState(SECURITY_CLIENT_BOOTSTRAP_COMPILED)
   const [transports, setTransports] = useState([])
   const page = activeRoute.page
   const currentTransportId = activeRoute.currentTransportId || null
@@ -327,6 +345,45 @@ function App() {
   useEffect(() => {
     const restoreAlerts = installAlertDialogBridge()
     return () => restoreAlerts()
+  }, [])
+
+  useEffect(() => {
+    if (!SECURITY_CLIENT_BOOTSTRAP_COMPILED) return undefined
+    let cancelled = false
+    let retryOnReconnect = false
+    let restoreRunning = false
+
+    const restore = async () => {
+      if (cancelled || restoreRunning) return
+      restoreRunning = true
+      setSecurityBootstrapPending(true)
+      try {
+        const result = await restoreSecurityClientSession({ offline: navigator.onLine === false })
+        if (cancelled) return
+        retryOnReconnect = false
+        if (result.status === 'authenticated') setUser(result.user)
+        else if (result.status === 'disabled') setUser(loadLegacyStoredUser())
+        else setUser(null)
+      } catch (error) {
+        if (cancelled) return
+        console.warn('Secure session restore was unavailable:', error)
+        retryOnReconnect = ['offline-cache-unavailable', 'config-unavailable'].includes(error?.code)
+        setUser(null)
+      } finally {
+        restoreRunning = false
+        if (!cancelled) setSecurityBootstrapPending(false)
+      }
+    }
+
+    const retryRestoreWhenOnline = () => {
+      if (retryOnReconnect) restore()
+    }
+    window.addEventListener('online', retryRestoreWhenOnline)
+    restore()
+    return () => {
+      cancelled = true
+      window.removeEventListener('online', retryRestoreWhenOnline)
+    }
   }, [])
 
   useEffect(() => {
@@ -394,9 +451,14 @@ function App() {
   }, [navigate])
 
   function handleLogin(userData) {
-    sessionStorage.setItem('bhtUser', JSON.stringify(userData))
+    if (userData?.securitySessionVersion === 3) {
+      sessionStorage.removeItem('bhtUser')
+      localStorage.removeItem('lastActivity')
+    } else {
+      sessionStorage.setItem('bhtUser', JSON.stringify(userData))
+      localStorage.setItem('lastActivity', Date.now().toString())
+    }
     setUser(userData)
-    localStorage.setItem('lastActivity', Date.now().toString())
     const route = parseAppRoute(location.pathname)
     const isManagement = isSupervisorRole(userData?.role) || isAdminRole(userData?.role)
     const routeMatchesRole = isManagement
@@ -414,20 +476,33 @@ function App() {
     if (!requireOnline('changing PIN')) {
       throw new Error('Offline mode: changing PIN is unavailable. Reconnect and retry.')
     }
-    await changeOwnPin({
+    const result = await changeOwnPin({
       sessionUser: user,
       currentPin,
       newPin,
       confirmPin
     })
     notifySuccess('PIN updated')
+    if (result?.requiresSignIn) {
+      await endSecurityClientSession({ skipRemote: true })
+      sessionStorage.removeItem('bhtUser')
+      setUser(null)
+      setTransports([])
+      setBhtDebriefAssignment(null)
+      localStorage.removeItem('lastActivity')
+      navigate('/', { replace: true })
+    }
   }
 
   const handleLogout = useCallback(async () => {
-    try {
-      await signOut(auth)
-    } catch (err) {
-      console.warn('Firebase signOut failed:', err)
+    if (user?.securitySessionVersion === 3) {
+      await endSecurityClientSession()
+    } else {
+      try {
+        await signOut(auth)
+      } catch (err) {
+        console.warn('Firebase signOut failed:', err)
+      }
     }
     sessionStorage.removeItem('bhtUser')
     setUser(null)
@@ -435,7 +510,7 @@ function App() {
     setBhtDebriefAssignment(null)
     localStorage.removeItem('lastActivity')
     navigate('/', { replace: true })
-  }, [navigate])
+  }, [navigate, user?.securitySessionVersion])
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false)
@@ -524,7 +599,7 @@ function App() {
     if (!user || isOffline) return undefined
     let cancelled = false
     ;(async () => {
-      const result = await syncOfflineOutbox(user.id)
+      const result = await syncOfflineOutbox(user)
       if (cancelled) return
       await refreshOfflineOutboxSummary()
       if (result.synced > 0) {
@@ -539,9 +614,32 @@ function App() {
     return () => { cancelled = true }
   }, [isOffline, refreshOfflineOutboxSummary, user])
 
-  // Track user activity for auto-lock
   useEffect(() => {
-    if (!user) return
+    if (user?.securitySessionVersion !== 3) return undefined
+    return subscribeToSecurityClientSession({
+      onUser: refreshedUser => {
+        setUser(previous => {
+          if (!previous || previous.id !== refreshedUser.id) return previous
+          return toScopeSignature(previous) === toScopeSignature(refreshedUser)
+            ? previous
+            : refreshedUser
+        })
+      },
+      onInvalid: reason => {
+        setUser(null)
+        setTransports([])
+        setBhtDebriefAssignment(null)
+        navigate('/', { replace: true })
+        if (reason === 'absolute_expiry') alert('Your 84-hour session ended. Enter your PIN to continue.')
+        else if (reason !== 'device_signed_out' && reason !== 'firebase_signed_out') alert('Your access changed or this session ended. Enter your PIN again.')
+      },
+      onTransientError: error => console.warn('Secure session will be rechecked after reconnect:', error)
+    })
+  }, [navigate, user?.id, user?.securitySessionVersion])
+
+  // Track user activity for the unchanged legacy 60-minute auto-lock.
+  useEffect(() => {
+    if (!user || user.securitySessionVersion === 3) return
 
     const updateActivity = () => {
       localStorage.setItem('lastActivity', Date.now().toString())
@@ -574,7 +672,7 @@ function App() {
 
   // Keep session scope aligned with live `accessGrants` lifecycle and account deactivation.
   useEffect(() => {
-    if (!user?.id || isOffline) return
+    if (!user?.id || isOffline || user.securitySessionVersion === 3) return
 
     let cancelled = false
     const refreshSessionScope = async () => {
@@ -619,7 +717,7 @@ function App() {
       cancelled = true
       clearInterval(intervalId)
     }
-  }, [user?.id, isOffline, navigate])
+  }, [user?.id, user?.securitySessionVersion, isOffline, navigate])
 
   // Load transports from Firestore — BHT only.
   // Supervisor/Admin manage their own transport state inside SupervisorDashboard,
@@ -981,6 +1079,14 @@ function App() {
         return
       }
 
+      if (user?.securitySessionVersion === 3 && await shouldUseProtectedTransport()) {
+        const created = await createProtectedTransport(transportSite)
+        localStorage.setItem(lastSiteKey, transportSite)
+        navigate(`/transport/${encodeURIComponent(created.transportId)}`)
+        notifySuccess('Transport created')
+        return
+      }
+
       // Write-layer guard (client-enforced in free-tier v1): prevent duplicate active transport creation.
       const userTransportSnapshot = await getDocs(
         query(
@@ -1111,6 +1217,17 @@ function App() {
 
     const debriefId = alert?.debriefId ? `/${encodeURIComponent(alert.debriefId)}` : ''
     navigate(`/debrief/full${debriefId}`)
+  }
+
+  if (securityBootstrapPending) {
+    return (
+      <div className="login-screen" aria-live="polite">
+        <div className="login-panel">
+          <h1 style={{ fontSize: '22px', color: '#FFFFFF', marginBottom: '8px' }}>SPRC Ops Hub</h1>
+          <p style={{ color: 'rgba(255,255,255,0.92)', margin: 0 }}>Checking saved session...</p>
+        </div>
+      </div>
+    )
   }
 
   if (user === null) {

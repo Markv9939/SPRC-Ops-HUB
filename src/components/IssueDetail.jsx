@@ -310,13 +310,14 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
     setSavingRelationship(true)
     try {
       if (actionName === 'separate') {
-        await keepIssueSeparate({ issueId: issue.id, reason: relationshipReason, actorUser: user })
+        await keepIssueSeparate({ issueId: issue.id, expectedIssue: issue, reason: relationshipReason, actorUser: user })
       } else if (actionName === 'link') {
         const parent = relationshipCandidates.find(item => item.id === relationshipTargetId)
         if (!parent) throw new Error('Choose the related active or recently resolved issue.')
         await linkIssueAsFollowUp({
           childIssueId: issue.id,
           parentIssueId: parent.id,
+          expectedIssue: issue,
           reason: relationshipReason,
           reopenParent: parent.status === 'resolved',
           actorUser: user
@@ -326,6 +327,7 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
         if (!choice) throw new Error('Choose a checklist item.')
         await classifyQuickReport({
           issueId: issue.id,
+          expectedIssue: issue,
           trackingId: choice.trackingId,
           checklistLabel: choice.label,
           categoryLabel: choice.category,
@@ -333,7 +335,7 @@ function IssueDetail({ user, issueId, inIssueScope, isOffline = false, onBack })
           actorUser: user
         })
       } else if (actionName === 'unlink') {
-        await unlinkIssueRelationship({ issueId: issue.id, reason: relationshipReason, actorUser: user })
+        await unlinkIssueRelationship({ issueId: issue.id, expectedIssue: issue, reason: relationshipReason, actorUser: user })
       }
       setRelationshipReason('')
       setRelationshipTargetId('')

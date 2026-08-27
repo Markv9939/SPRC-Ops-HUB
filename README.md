@@ -9,7 +9,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Master instruction alignment is documented in `docs/PROJECT_ALIGNMENT.md`.
 - Project-specific session startup instructions are documented in `PROJECT_INSTRUCTIONS.md`.
 - This repo keeps **React + Vite** as an approved project exception to vanilla JS defaults.
-- Cloud Functions are **optional** for current runtime and cutover.
+- Cloud Functions are feature-dependent. Protected template administration, retention, and privacy actions require their deployed Functions; simpler UI-only workflows do not automatically require a Function change.
 - PWA implementation is deferred by owner decision for now.
 
 ## Recent EOC Behavior (Current)
@@ -23,7 +23,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - EOC template workflow now has a two-step admin/supervisor flow:
   - `Library`: create templates, edit owned templates, and clone shared templates to make safe editable copies
   - `Assignments`: set one default template per location + shift (no per-user override path)
-- Reassigning a location+shift default template applies immediately to incomplete/open EOCs for that scope.
+- Reassigning a location+shift default template applies to the next generated EOC cycle; existing EOC tasks keep their pinned template version.
 - Shift model is location-aware:
   - OTC uses `1st Shift` and `2nd Shift`
   - RES uses `1st Shift - Day`, `1st Shift - Night`, `2nd Shift - Day`, `2nd Shift - Night`
@@ -36,7 +36,8 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Staff select their Ops profile with a unique six-digit PIN.
 - The local session locks after 60 minutes of inactivity.
 - PIN login includes timeout guards so degraded connectivity fails clearly instead of staying on `Checking...`.
-- Firebase claim enforcement is off. A future Hub login can provide the outer Google access gate without changing the permanent Ops user IDs used inside this app.
+- Firebase claim enforcement is off. The planned security direction keeps the same PIN screen but moves PIN verification and Firebase identity proof to a staged server-backed custom-token session tied to the permanent Ops profile.
+- Phases 1–8 of that foundation are implemented and tested only in the isolated security branch. This includes protected account/session actions, owner-bound offline replay, named workflow and photo rules, two-device transport conflict protection, monitoring-only App Check hooks, and canary/rollback readiness. Every path remains disabled by exact versioned gates, unconfigured in production, and undeployed; the normal build does not change current staff behavior.
 
 ## Recent Dashboard/Modal Behavior (Current)
 - BHT home is now a tighter action-hub experience:
@@ -77,7 +78,10 @@ SPRC Ops Hub centralizes daily operations across three levels:
   - assignment model remains user/shift-driven from Users flows
 
 ## Source of Truth
-- Blueprint: `plan.md`
+- Living operational blueprint: `MASTER_PLAN.md`
+- Detailed work/release evidence: `PROGRESS_LOG.md`
+- Security foundation evidence: `docs/security/PHASE_1_SECURITY_FOUNDATION_BASELINE.md`, `docs/security/PHASE_2_DORMANT_SERVER_FOUNDATION.md`, `docs/security/PHASE_3_DORMANT_CLIENT_BOOTSTRAP.md`, `docs/security/PHASE_4_TO_8_LOCAL_SECURITY_READINESS.md`, `docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md`, and `docs/security/SECURITY_CANARY_AND_ROLLBACK.md`
+- Older V2 blueprint retained for historical comparison: `plan.md`
 - Instruction alignment + approved exceptions: `docs/PROJECT_ALIGNMENT.md`
 - Session startup + operating rules: `PROJECT_INSTRUCTIONS.md`
 - Change history: `CHANGELOG.md`
@@ -88,7 +92,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 ## Runtime
 - App entry: `src/App.jsx`
 - Active roles: `bht`, `supervisor`, `admin`
-- Data backend: Firestore with anonymous Firebase transport sessions
+- Data backend: Firebase Firestore; current PIN-profile compatibility mode does not yet provide one consistent server-verified Firebase staff session
 - Profile selection: six-digit PIN mapped to permanent `users/{id}` records
 
 ## Commands
@@ -96,6 +100,9 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Dev: `npm run dev`
 - Build: `npm run build`
 - Lint: `npm run lint`
+- Security foundation unit contracts: `npm run test:security-foundation`
+- Security foundation emulator contracts: `npm run test:security-foundation:emulator`
+- Local security readiness audit: `npm run verify:security-readiness`
 - Smoke: `npm run smoke:phase9:full`
 - Preview core reset (read-only): `npm run reset:core:preview`
 - Back up core reset data (read-only): `npm run reset:core:backup`
@@ -107,7 +114,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 Use this sequence for each logical batch so owner testing can happen quickly on phone/tablet:
 1. Make one cohesive change batch.
 2. Run checks needed for that batch (`npm run build`, `npm run lint`, and `npm run smoke:phase9:full` when release-ready).
-3. Deploy:
+3. After explicit owner approval, deploy the authorized layers:
    - Hosting/UI changes: `firebase deploy --only hosting --project sprc-tx-l`
    - Firestore rules changes: `firebase deploy --only firestore:rules --project sprc-tx-l`
 4. Validate on iPhone and iPad critical paths.
@@ -117,4 +124,4 @@ Use this sequence for each logical batch so owner testing can happen quickly on 
 - Firebase Hosting (`sprc-tx-l`) is the only supported deployment target.
 
 ## Operating Rule
-If implementation and docs conflict, update code to match `plan.md` or revise `plan.md` first.
+If implementation and documentation conflict, stop and verify current code/evidence. Update `MASTER_PLAN.md` before treating a changed workflow as the approved blueprint, and record significant implementation/release evidence in `PROGRESS_LOG.md`.

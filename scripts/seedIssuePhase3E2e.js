@@ -12,6 +12,7 @@ process.env.FIRESTORE_EMULATOR_HOST ||= '127.0.0.1:8080'
 
 initializeApp({ projectId: PROJECT_ID })
 const db = getFirestore()
+const securityFoundationEnabled = process.env.SPRC_E2E_SECURITY_MODE !== 'legacy'
 
 function hashPin(pin) {
   return createHash('sha256').update(`${PIN_HASH_PEPPER}:${pin}`).digest('hex')
@@ -22,6 +23,24 @@ const dueDate = getCurrentCycleDueDate(getShiftById('shift_1'))
 const dueDateShift2 = getCurrentCycleDueDate(getShiftById('shift_2'))
 const writes = [
   ['appSettings/authPolicy', { authScopeEnforced: false, version: 1, updatedAt: now }],
+  ['appSettings/securityFoundation', {
+    schemaVersion: 2,
+    serverPinLoginEnabled: securityFoundationEnabled,
+    clientBootstrapVersion: 3,
+    clientBootstrapEnabled: securityFoundationEnabled,
+    protectedAccountActionsVersion: 4,
+    protectedAccountActionsEnabled: securityFoundationEnabled,
+    offlineReplayVersion: 5,
+    offlineReplayEnabled: securityFoundationEnabled,
+    rolloutState: securityFoundationEnabled ? 'emulator_only' : 'disabled',
+    updatedAt: now
+  }],
+  ['appSettings/securityWorkflows', {
+    schemaVersion: 6,
+    enabled: securityFoundationEnabled,
+    workflows: securityFoundationEnabled ? ['eoc', 'issues_feedback_audit'] : [],
+    updatedAt: now
+  }],
   ['appSettings/eocIssueFeatures', {
     flags: { recurrence: true, photos: true, offlinePhotos: true, supervisorTools: true, issueWorkflowV2: true, retention: true, strictAuthentication: false },
     enabledLocationIds: ['test_house'],
@@ -94,10 +113,10 @@ const writes = [
     pinVersion: 'v2_sha256_6digit',
     site: 'OTC',
     location: 'OTC',
-    house: 'TEST_HOUSE_TABLET',
-    authorizedLocations: ['OTC', 'TEST_HOUSE_TABLET'],
-    issueLocationIds: ['test_house_tablet'],
-    locationId: 'test_house_tablet',
+    house: 'TEST_HOUSE',
+    authorizedLocations: ['OTC', 'TEST_HOUSE'],
+    issueLocationIds: ['test_house'],
+    locationId: 'test_house',
     shiftId: 'shift_1',
     vanId: 'van_test',
     vanIds: ['van_test'],
@@ -167,7 +186,7 @@ const writes = [
   ['shiftAssignments/asg_phase3_tablet_bht', {
     bhtUserId: 'phase3_tablet_bht',
     bhtUserName: 'Phase 3 Tablet BHT',
-    locationId: 'test_house_tablet',
+    locationId: 'test_house',
     shiftId: 'shift_1',
     vanId: 'van_test',
     vanIds: ['van_test'],
@@ -283,7 +302,7 @@ const writes = [
     createdAt: now,
     updatedAt: now
   }],
-  ['eocTasks/phase3_house_task', {
+  [`eocTasks/task_test_house_shift_1_house_${dueDate}`, {
     taskType: 'house',
     eocType: 'house',
     locationId: 'test_house',
@@ -303,7 +322,7 @@ const writes = [
     createdAt: now,
     updatedAt: now
   }],
-  ['eocTasks/phase3_house_task_shift2', {
+  [`eocTasks/task_test_house_shift_2_house_${dueDateShift2}`, {
     taskType: 'house',
     eocType: 'house',
     locationId: 'test_house',
@@ -347,34 +366,10 @@ const writes = [
     createdAt: now,
     updatedAt: now
   }],
-  ['eocTemplateAssignments/asg_test_house_tablet_shift_1_house', {
-    locationId: 'test_house_tablet',
-    shiftId: 'shift_1',
-    eocType: 'house',
-    defaultTemplateId: 'phase3_house_template',
-    defaultTemplateName: 'Phase 3 Test House EOC',
-    defaultTemplateVersion: 1,
-    defaultTemplateVersionId: 'phase3_house_template__v1',
-    version: 1,
-    createdAt: now,
-    updatedAt: now
-  }],
-  ['eocTemplateAssignments/asg_test_house_tablet_shift_1_van', {
-    locationId: 'test_house_tablet',
-    shiftId: 'shift_1',
-    eocType: 'van',
-    defaultTemplateId: 'phase3_van_template',
-    defaultTemplateName: 'Phase 3 Test Van EOC',
-    defaultTemplateVersion: 1,
-    defaultTemplateVersionId: 'phase3_van_template__v1',
-    version: 1,
-    createdAt: now,
-    updatedAt: now
-  }],
   ['eocTasks/phase3_house_task_tablet', {
     taskType: 'house',
     eocType: 'house',
-    locationId: 'test_house_tablet',
+    locationId: 'test_house',
     shiftId: 'shift_1',
     dueDate,
     cycleKey: `phase3_house_tablet_${dueDate}`,
@@ -391,7 +386,7 @@ const writes = [
     createdAt: now,
     updatedAt: now
   }],
-  ['eocTasks/phase3_van_task', {
+  [`eocTasks/task_test_house_shift_1_van_van_test_${dueDate}`, {
     taskType: 'van',
     eocType: 'van',
     locationId: 'test_house',
@@ -413,7 +408,7 @@ const writes = [
     createdAt: now,
     updatedAt: now
   }],
-  ['eocTasks/phase3_van_task_shift2', {
+  [`eocTasks/task_test_house_shift_2_van_van_test_${dueDateShift2}`, {
     taskType: 'van',
     eocType: 'van',
     locationId: 'test_house',
@@ -438,7 +433,7 @@ const writes = [
   ['eocTasks/phase3_van_task_tablet', {
     taskType: 'van',
     eocType: 'van',
-    locationId: 'test_house_tablet',
+    locationId: 'test_house',
     shiftId: 'shift_1',
     vanId: 'van_test',
     vehicleId: 'phase3_van_test_vehicle',

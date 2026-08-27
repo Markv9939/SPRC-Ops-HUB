@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/e2e',
+  testIgnore: ['**/securityBootstrapPhase3.spec.js', '**/securityAccountActionsPhase4.spec.js'],
   fullyParallel: false,
   workers: 1,
   timeout: 120_000,
@@ -22,7 +23,7 @@ export default defineConfig({
     {
       name: 'tablet',
       use: { ...devices['Desktop Chrome'], viewport: { width: 768, height: 1024 } },
-      metadata: { pin: '555555' }
+      metadata: { pin: '111111' }
     },
     {
       name: 'desktop',

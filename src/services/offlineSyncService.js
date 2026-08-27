@@ -1,7 +1,6 @@
 import { db } from '../firebase'
 import {
   Timestamp,
-  addDoc,
   collection,
   doc,
   getDoc,
@@ -43,6 +42,9 @@ import { addPatternObservation, buildIssuePatternId } from '../utils/issueRecurr
 import { uploadIssuePhotos } from './issueAttachmentService'
 import { submitAppFeedbackOnline } from './appFeedbackService'
 import { uploadEocResponsePhotos } from './eocSubmissionAttachmentService'
+import { evaluateOfflineActionForCurrentUser } from './offlineSecurityModel'
+import { authorizeOfflineActionReplay } from './offlineReplayAuthorization'
+import { shouldUseProtectedOperationalMutation, submitProtectedEocMutation } from './protectedOperationalMutationService'
 
 export const OFFLINE_ACTION_TYPES = {
   EOC_SUBMISSION: 'eocSubmission',
@@ -354,7 +356,25 @@ export async function submitEocSubmissionOnline(payload) {
   submittedEocSubmissionId = submissionRef.id
   let alreadySubmitted = false
 
-  await runTransaction(db, async (transaction) => {
+  const useProtectedEocMutation = await shouldUseProtectedOperationalMutation('eoc')
+  if (useProtectedEocMutation) {
+    const protectedResult = await submitProtectedEocMutation({
+      operationId: `eoc_submit_${safeIdPart(task.id).slice(0, 48)}_${safeIdPart(normalizedUserId).slice(0, 48)}`,
+      taskId: task.id,
+      expectedTaskVersion: getVersionNumber(task),
+      eocType,
+      vehicleId,
+      vehicleName,
+      vinNumber,
+      odometerReading: eocType === 'van' ? odometerReading.trim() : '',
+      odometerMileage: normalizedOdometerMileage,
+      answers: answersData,
+      draftId: getDraftDocId(task.id, normalizedUserId),
+      ...(payload.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {})
+    })
+    submittedEocSubmissionId = protectedResult.submissionId
+    alreadySubmitted = protectedResult.alreadySubmitted === true
+  } else await runTransaction(db, async (transaction) => {
     const taskRef = doc(db, 'eocTasks', task.id)
     const taskSnap = await transaction.get(taskRef)
     const draftRef = doc(db, 'eocSubmissionDrafts', getDraftDocId(task.id, normalizedUserId))
@@ -414,6 +434,7 @@ export async function submitEocSubmissionOnline(payload) {
       issueSectionNames: [...new Set(issueItems.map(issue => issue.category).filter(Boolean))],
       submittedByUserId: normalizedUserId,
       submittedByName: user?.name || '',
+      ...(payload.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {}),
       version: 1,
       submittedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
@@ -579,7 +600,10 @@ export async function submitEocSubmissionOnline(payload) {
 }
 
 async function submitShiftDebriefOnline(payload) {
-  await submitShiftDebrief(payload.context, payload.items, payload.user)
+  await submitShiftDebrief({
+    ...payload.context,
+    ...(payload.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {})
+  }, payload.items, payload.user)
   await deleteOfflineDraft(getDebriefDraftId(payload?.context?.id))
 }
 
@@ -588,7 +612,10 @@ async function syncShiftDebriefQuickNoteOnline(payload) {
   const itemId = String(payload?.item?.id || '').trim()
   if (!contextId || !itemId) throw new Error('Missing offline debrief note details.')
 
-  const result = await saveQuickDebriefNote(payload.context, payload.item, payload.user)
+  const result = await saveQuickDebriefNote({
+    ...payload.context,
+    ...(payload.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {})
+  }, payload.item, payload.user)
   const draftId = getDebriefQuickDraftId(contextId)
   await mutateOfflineDraft(draftId, 'debriefQuick', localPayload => {
     const remainingItems = (Array.isArray(localPayload?.items) ? localPayload.items : [])
@@ -653,6 +680,7 @@ function normalizeTransportCreateData(payload) {
     notes: typeof snapshot.notes === 'string' ? snapshot.notes : '',
     createdAt: toTimestamp(snapshot.createdAt, createdAtDate),
     updatedAt: toTimestamp(snapshot.updatedAt, updatedAtDate),
+    ...(payload.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {}),
     ...(snapshot.timeCorrections && typeof snapshot.timeCorrections === 'object'
       ? { timeCorrections: snapshot.timeCorrections }
       : {})
@@ -691,7 +719,15 @@ async function applyTransportCreateOnline(payload) {
     }
   }
 
-  const docRef = await addDoc(collection(db, 'transports'), data)
+  const docRef = doc(db, 'transports', `offline_${safeIdPart(localTransportId)}`)
+  await runTransaction(db, async transaction => {
+    const existing = await transaction.get(docRef)
+    if (existing.exists()) {
+      if (existing.data()?.offlineOperationId === localTransportId) return
+      throw new Error('Offline transport operation conflicts with an existing record and needs supervisor review.')
+    }
+    transaction.set(docRef, { ...data, offlineOperationId: localTransportId })
+  })
 
   if (data.status === 'closed' || data.status === 'returned') {
     try {
@@ -724,12 +760,13 @@ async function applyTransportUpdateOnline(payload) {
   const latest = snap.data()
   const latestVersion = Number(latest.version || 1)
   const expectedVersion = Number(payload.expectedVersion || latestVersion)
-  if (latestVersion > expectedVersion && String(latest.status || '').toLowerCase() !== 'open') {
+  if (latestVersion !== expectedVersion) {
     throw new Error('Transport changed while offline and needs supervisor review.')
   }
   const updates = normalizeTransportWriteUpdates(payload.updates || {})
   await updateDoc(doc(db, 'transports', transportId), {
     ...updates,
+    ...(payload.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {}),
     version: increment(1),
     updatedAt: serverTimestamp()
   })
@@ -750,10 +787,14 @@ async function applyTransportCloseOnline(payload) {
   if (String(latest.status || '').toLowerCase() === 'closed') {
     throw new Error('Transport was already closed while this device was offline.')
   }
+  const latestVersion = Number(latest.version || 1)
+  const expectedVersion = Number(payload.expectedVersion || latestVersion)
+  if (latestVersion !== expectedVersion) throw new Error('Transport changed while offline and needs supervisor review.')
 
   const updates = normalizeTransportWriteUpdates(payload.updates || {})
   await updateDoc(doc(db, 'transports', transportId), {
     ...updates,
+    ...(payload.offlineReplayAuthorization ? { offlineReplayAuthorization: payload.offlineReplayAuthorization } : {}),
     status: 'closed',
     returnedAt: updates.returnedAt || serverTimestamp(),
     closedAt: updates.closedAt || serverTimestamp(),
@@ -796,7 +837,26 @@ const SHIFT_DEBRIEF_ACTIONS = new Set([
   OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_CONFIRMATION
 ])
 
-async function processAction(action) {
+async function processAction(action, currentUser = null) {
+  if (currentUser) {
+    const securityDecision = evaluateOfflineActionForCurrentUser(action, currentUser)
+    if (securityDecision.disposition === 'hold_for_owner') {
+      return { id: action.id, status: 'held', reason: securityDecision.reason }
+    }
+    if (securityDecision.disposition === 'needs_review') {
+      await markOfflineActionNeedsReview(action.id, `Offline work needs review (${securityDecision.reason}).`)
+      return { id: action.id, status: 'needsReview', reason: securityDecision.reason }
+    }
+    if (action.securityBinding && Number(currentUser.securitySessionVersion || 0) === 3) {
+      try {
+        const authorization = await authorizeOfflineActionReplay(action)
+        action = { ...action, payload: { ...action.payload, offlineReplayAuthorization: authorization } }
+      } catch (error) {
+        await markOfflineActionNeedsReview(action.id, error?.message || 'Offline replay authorization failed.')
+        return { id: action.id, status: 'needsReview', error }
+      }
+    }
+  }
   if (SHIFT_DEBRIEF_ACTIONS.has(action.type) && !isCurrentDebriefPayload(action.payload)) {
     await deleteOfflineAction(action.id)
     return { id: action.id, status: 'discarded' }
@@ -816,10 +876,14 @@ async function processAction(action) {
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_SUBMISSION) {
       syncResult = await submitShiftDebriefOnline(action.payload)
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_EXTRA_NOTE) {
-      await appendExtraDebriefNote(action.payload.debriefId, action.payload.extraNote)
+      await appendExtraDebriefNote(action.payload.debriefId, {
+        ...action.payload.extraNote,
+        ...(action.payload.offlineReplayAuthorization ? { offlineReplayAuthorization: action.payload.offlineReplayAuthorization } : {})
+      })
     } else if (action.type === OFFLINE_ACTION_TYPES.SHIFT_DEBRIEF_CONFIRMATION) {
       await saveDebriefConfirmation(action.payload.debriefId, action.payload.confirmation, action.payload.user, {
-        expectedCorrectionCount: action.payload.expectedCorrectionCount
+        expectedCorrectionCount: action.payload.expectedCorrectionCount,
+        offlineReplayAuthorization: action.payload.offlineReplayAuthorization || null
       })
     } else if (action.type === OFFLINE_ACTION_TYPES.BHT_ISSUE_REPORT) {
       syncResult = await submitBhtIssueReportActionOnline(hydratedPayload)
@@ -897,16 +961,20 @@ export async function retryOfflinePhotoUploads({ ownerProfileId, uploader }) {
 
 let syncRunning = false
 
-export async function syncOfflineOutbox(ownerProfileId = '') {
+export async function syncOfflineOutbox(currentUserOrProfileId = '') {
   if (syncRunning || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
     return { synced: 0, failed: 0, needsReview: 0 }
   }
   syncRunning = true
   try {
+    const currentUser = currentUserOrProfileId && typeof currentUserOrProfileId === 'object'
+      ? currentUserOrProfileId
+      : null
+    const ownerProfileId = currentUser ? String(currentUser.id || '') : String(currentUserOrProfileId || '')
     const actions = await listOfflineActions(['pending', 'failed', 'syncing'], ownerProfileId)
     const results = []
     for (const action of actions) {
-      results.push(await processAction(action))
+      results.push(await processAction(action, currentUser))
     }
     return results.reduce((acc, result) => {
       if (result.status === 'synced') acc.synced += 1

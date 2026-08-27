@@ -450,6 +450,7 @@ export async function saveDebriefConfirmation(debriefId, confirmation, user, opt
     transaction.update(debriefRef, {
       confirmation: merged.confirmation,
       confirmed: merged.confirmed,
+      ...(options.offlineReplayAuthorization ? { lastOfflineReplayAuthorization: options.offlineReplayAuthorization } : {}),
       updatedAt: serverTimestamp(),
       version: getVersionNumber(debrief) + 1
     })
