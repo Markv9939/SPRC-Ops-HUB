@@ -1,6 +1,6 @@
 # SPRC Ops Hub Master Plan
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 Document status: Active living blueprint
 Application release reference: `c6b0ec1` (`Release guided EOC template builder`)
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
@@ -33,9 +33,9 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | Security-foundation Phases 1–9 are implemented locally behind disabled versioned gates: server PIN/custom-token identity, persistent 84-hour device sessions, revocation/account actions, owner-bound offline replay, named workflow rules/Functions, protected EOC and issue transactions, two-device conflict protection, App Check monitoring readiness, and canary/rollback checks. The normal build and current production PIN login remain unchanged because nothing is enabled, configured, deployed, or merged. |
+| **In progress** | Security-foundation Phases 1–9 are implemented behind disabled versioned gates. The first production release and synthetic Test House canary are approved and being prepared. A profile allowlist now guarantees that only the three named synthetic profiles can enter the canary; every non-enrolled valid PIN remains on the unchanged compatibility login. No live activation has occurred yet. |
 | **Paused** | Operational assignment of custom Guided Canvas EOC templates is paused because normal PIN sessions do not yet satisfy the protected Firebase template and photo paths. |
-| **Next major decision** | After independent code review, decide whether to authorize a synthetic/internal canary and the coordinated production configuration/deployment needed for one named workflow. Node.js 22 parity is locally verified. No canary, production activation, deployment, push, or merge is authorized now. |
+| **Next major decision** | Complete the approved dormant deployment and identity/users Test House canary, prove rollback and real workflows, then make a separate go/no-go decision before adding any second workflow or broader staff cohort. |
 
 Configuration and live release state can drift. Recheck current evidence before using this summary for a production decision.
 

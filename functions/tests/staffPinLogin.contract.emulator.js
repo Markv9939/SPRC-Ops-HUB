@@ -157,6 +157,26 @@ test('valid legacy credentials migrate safely, create a signed custom token, and
   assert.equal((await db.collection('securityLoginAudit').get()).size, 1)
 })
 
+test('production canary enrollment leaves a valid non-enrolled profile on legacy login without creating secure artifacts', async () => {
+  await db.doc('appSettings/securityFoundation').set({
+    schemaVersion: 2,
+    serverPinLoginEnabled: true,
+    clientBootstrapVersion: 3,
+    clientBootstrapEnabled: true,
+    rolloutState: 'production_canary',
+    enabledProfileIds: ['enrolled_canary_bht']
+  })
+  await db.doc('users/not_enrolled_bht').set(bhtProfile('275184'))
+  const result = await begin({ pin: '275184' })
+
+  assert.deepEqual(result, { status: 'not_enrolled' })
+  assert.equal((await db.collection('staffPinCredentials').get()).size, 0)
+  assert.equal((await db.collection('staffAuthIdentities').get()).size, 0)
+  assert.equal((await db.collection('staffSessions').get()).size, 0)
+  assert.equal((await db.collection('usersByAuthUid').get()).size, 0)
+  assert.equal((await auth.listUsers()).users.length, 0)
+})
+
 test('preferred server-only credentials work after migration without a client-readable legacy PIN hash', async () => {
   await enableDormantEndpoint()
   await db.doc('users/server_credential_bht').set(bhtProfile('385104', { pinHash: null }))

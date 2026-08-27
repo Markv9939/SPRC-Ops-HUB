@@ -84,6 +84,7 @@ export async function beginDormantClientPinSession(pin, adapters) {
     } catch (error) {
       throw callableError(error)
     }
+    if (callableResult?.status === 'not_enrolled') return { status: 'disabled' }
     const response = normalizeServerPinLoginResponse(callableResult, adapters.now())
     await adapters.usePersistentAuth()
     const credential = await adapters.signInWithCustomToken(response.customToken)

@@ -25,11 +25,16 @@ function requiredInteger(value) {
 }
 
 export function securityClientConfigEnabled(config, compiledEnabled) {
+  const rolloutState = String(config?.rolloutState || '').trim()
+  const canaryReady = rolloutState === 'production_canary'
+    && Array.isArray(config?.enabledProfileIds)
+    && config.enabledProfileIds.some(value => String(value || '').trim())
   return compiledEnabled === true
     && config?.schemaVersion === SECURITY_SERVER_SESSION_VERSION
     && config?.serverPinLoginEnabled === true
     && config?.clientBootstrapVersion === SECURITY_CLIENT_SESSION_VERSION
     && config?.clientBootstrapEnabled === true
+    && (rolloutState === 'emulator_only' || rolloutState === 'active' || canaryReady)
 }
 
 export function sanitizeSecurityProfile(profileId, profile = {}) {

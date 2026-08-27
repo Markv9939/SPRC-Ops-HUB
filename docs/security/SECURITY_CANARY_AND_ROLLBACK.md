@@ -1,7 +1,7 @@
 # Security Foundation Canary and Rollback Gate
 
-Last updated: 2026-08-26
-Status: Readiness contract only; no canary or production action authorized
+Last updated: 2026-08-27
+Status: Test House canary authorized; guarded release preparation in progress
 
 ## Before any canary
 
@@ -9,10 +9,13 @@ Status: Readiness contract only; no canary or production action authorized
 2. Run the complete local test matrix with the declared Node.js 22 runtime.
 3. Back up the current Firebase rules, Functions, Hosting release, indexes, Auth/provider settings, and the protected configuration documents without changing them.
 4. Select synthetic or explicitly approved canary staff and locations. Never silently enroll real staff.
+   The first approved cohort is exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`. Production configuration must use `rolloutState: production_canary` plus this exact `enabledProfileIds` allowlist. A valid non-enrolled PIN stays on the unchanged compatibility login and creates no secure identity/session artifacts.
 5. Start with the identity/users workflow and protected account actions for every canary staff member and manager. Do not let a legacy profile edit bypass the required session revocation while another workflow trusts the secure session.
 6. Include temporary backup-access creation/revocation/expiry and issue-access changes. Confirm each scope change signs out every affected device and the next PIN login receives only the exact current scope.
 7. Enable only one named workflow for the canary. Do not flip global strict auth.
 8. End the canary users' existing sessions so their next PIN login receives the exact current workflow claims.
+
+Use `npm run security:canary -- --mode=preview --project=sprc-tx-l --backup-dir=<absolute path outside the repo>` before activation. The guarded apply and rollback modes require the verified backup, exact release ID, and exact confirmation phrase; they refuse a changed configuration baseline.
 
 ## Per-workflow go/no-go gate
 

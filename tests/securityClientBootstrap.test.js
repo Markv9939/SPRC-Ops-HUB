@@ -21,7 +21,13 @@ function memoryStorage() {
 }
 
 function enabledConfig() {
-  return { schemaVersion: 2, serverPinLoginEnabled: true, clientBootstrapVersion: 3, clientBootstrapEnabled: true }
+  return {
+    schemaVersion: 2,
+    serverPinLoginEnabled: true,
+    clientBootstrapVersion: 3,
+    clientBootstrapEnabled: true,
+    rolloutState: 'emulator_only'
+  }
 }
 
 function baseProfile(overrides = {}) {
@@ -108,6 +114,14 @@ test('disabled compile/config boundaries preserve legacy fallback without callin
   const configOff = adapters({ loadConfig: async () => ({ ...enabledConfig(), clientBootstrapEnabled: false }) })
   assert.equal((await beginDormantClientPinSession('275184', configOff.adapters)).status, 'disabled')
   assert.equal(configOff.state.callCount, 0)
+})
+
+test('a valid non-enrolled canary PIN returns to the unchanged legacy login path', async () => {
+  const context = adapters({ callServerPinLogin: async () => ({ status: 'not_enrolled' }) })
+  const result = await beginDormantClientPinSession('275184', context.adapters)
+  assert.equal(result.status, 'disabled')
+  assert.equal(context.state.currentUser, null)
+  assert.equal(readStoredSecuritySession(context.storage), null)
 })
 
 test('valid login establishes Firebase first then persists a minimum stable session', async () => {

@@ -1,8 +1,28 @@
 # SPRC Ops Hub Progress Log
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
+
+## 2026-08-27 — Add a true profile-specific production canary boundary
+
+### Purpose
+
+Prevent the first approved security-foundation canary from changing login behavior for staff outside the three synthetic Test House profiles.
+
+### Outcome
+
+- Added an exact `enabledProfileIds` production-canary allowlist to the server PIN endpoint and client configuration gate.
+- A valid non-enrolled PIN returns to the unchanged compatibility login without creating a Firebase Auth user, staff credential, UID mapping, or secure device session. Invalid PINs still fail through the protected server path and never downgrade.
+- Added a guarded `security:canary` preview/activate/rollback command. It requires the exact project, release ID, confirmation phrase, unchanged configuration baseline, verified rollback backup outside the repository, and ready synthetic profiles.
+- First cohort is fixed to `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`; first workflow is `identity_users` only. Broad activation and global strict auth remain prohibited.
+
+### Evidence
+
+- Focused security unit tests: 57 passed, 0 failed.
+- Security Auth/Firestore emulator tests: 41 passed, 0 failed, including proof that a valid non-enrolled canary PIN creates no secure artifacts.
+- Lint and production build passed.
+- No merge, Firebase secret/configuration write, deployment, canary activation, or production data change had occurred when this entry was written.
 
 ## How to Use This Log
 

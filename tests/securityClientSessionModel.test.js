@@ -63,12 +63,15 @@ test('the Phase 3 client boundary requires both compile and exact versioned serv
     schemaVersion: 2,
     serverPinLoginEnabled: true,
     clientBootstrapVersion: 3,
-    clientBootstrapEnabled: true
+    clientBootstrapEnabled: true,
+    rolloutState: 'emulator_only'
   }
   assert.equal(securityClientConfigEnabled(enabled, true), true)
   assert.equal(securityClientConfigEnabled(enabled, false), false)
   assert.equal(securityClientConfigEnabled({ ...enabled, clientBootstrapVersion: 2 }, true), false)
   assert.equal(securityClientConfigEnabled({ ...enabled, serverPinLoginEnabled: false }, true), false)
+  assert.equal(securityClientConfigEnabled({ ...enabled, rolloutState: 'production_canary', enabledProfileIds: [] }, true), false)
+  assert.equal(securityClientConfigEnabled({ ...enabled, rolloutState: 'production_canary', enabledProfileIds: ['test_bht_shift_1'] }, true), true)
 })
 
 test('server login response is minimized and fixed to one absolute 84-hour window', () => {

@@ -40,7 +40,21 @@ function millis(value) {
 }
 
 function activeConfig(data = {}) {
-  return data.schemaVersion === STAFF_PIN_LOGIN_CONFIG_VERSION && data.serverPinLoginEnabled === true
+  const rolloutState = String(data.rolloutState || '').trim()
+  const canaryReady = rolloutState === 'production_canary'
+    && Array.isArray(data.enabledProfileIds)
+    && data.enabledProfileIds.some(value => String(value || '').trim())
+  return data.schemaVersion === STAFF_PIN_LOGIN_CONFIG_VERSION
+    && data.serverPinLoginEnabled === true
+    && (rolloutState === 'emulator_only' || rolloutState === 'active' || canaryReady)
+}
+
+function profileEnrolled(config = {}, profileId) {
+  if (config.rolloutState === 'emulator_only' || config.rolloutState === 'active') return true
+  if (config.rolloutState !== 'production_canary') return false
+  const normalizedProfileId = String(profileId || '').trim()
+  return Array.isArray(config.enabledProfileIds)
+    && config.enabledProfileIds.some(value => String(value || '').trim() === normalizedProfileId)
 }
 
 function validateRequest(data = {}) {
@@ -237,7 +251,7 @@ export async function beginDormantStaffPinSession({
   appCheckPresent = false,
   nowMs = Date.now()
 }) {
-  await requireEnabledConfig(db)
+  const initialConfig = await requireEnabledConfig(db)
   const { pin, deviceId, operationId } = validateRequest(requestData)
   const deviceRateId = derivePrivateIdentifier(deviceId, 'staff-pin-device-rate-v2', secret, 32)
   const networkRateId = derivePrivateIdentifier(sourceAddress || 'unknown', 'staff-pin-network-rate-v2', secret, 32)
@@ -257,6 +271,11 @@ export async function beginDormantStaffPinSession({
     await writeFailureAudit(db, { reason: 'inactive_deleted_or_invalid_profile', deviceRateId, networkRateId, nowMs })
     if (rate.deviceAtLimit) throw new StaffPinLoginError('resource-exhausted', 'Too many failed attempts. Try again later.')
     throw error
+  }
+
+  if (!profileEnrolled(initialConfig, candidate.profileId)) {
+    await resetDeviceRateLimit(db, rate.deviceRef, nowMs)
+    return { status: 'not_enrolled' }
   }
 
   const authUid = await ensureStableAuthUser(auth, candidate.profileId, candidate.profile, secret)
@@ -284,6 +303,9 @@ export async function beginDormantStaffPinSession({
     ])
     if (!configSnapshot.exists || !activeConfig(configSnapshot.data())) {
       throw new StaffPinLoginError('failed-precondition', 'Server PIN login is not enabled.')
+    }
+    if (!profileEnrolled(configSnapshot.data(), candidate.profileId)) {
+      throw new StaffPinLoginError('failed-precondition', 'This profile is not enrolled in the secure-login rollout.')
     }
     const currentProfile = profileSnapshot.data() || {}
     validateCandidate({ profileId: candidate.profileId, profile: currentProfile })
