@@ -6,7 +6,7 @@ import { getVersionNumber } from './versioning'
 import { isSupportedEocAssignment, MISSED_EOC_REASON, shouldMarkEocTaskMissed } from '../utils/eocTaskLifecycle'
 import { commitFirestoreWritesInChunks } from '../utils/firestoreBatching'
 import { loadTemplateAssignmentsByScope, resolveTemplateForScope } from './eocTemplateService'
-import { getAvailableMainLocationsForUser, isAdminRole, isBhtRole, isSupervisorRole, locationIdToMainLocation } from '../utils/orgModel'
+import { getAvailableMainLocationsForUser, getExactOperationalLocationIdsForUser, isAdminRole, isBhtRole, isSupervisorRole, locationIdToMainLocation } from '../utils/orgModel'
 import {
   formatPhoenixDateKey,
   getNextShiftId,
@@ -370,6 +370,13 @@ async function runEocTaskSyncForUserScope(user) {
   if (isBhtRole(user.role)) {
     const assignmentSnap = await getDoc(doc(db, 'shiftAssignments', `asg_${normalizedUserId}`))
     if (assignmentSnap.exists()) assignmentDocs.push(assignmentSnap)
+  } else if (isSupervisorRole(user.role)) {
+    const exactLocationIds = getExactOperationalLocationIdsForUser(user)
+    if (exactLocationIds.length === 0) return { created: 0, updated: 0, scanned: 0, alerts: 0 }
+    const assignmentsSnap = await getDocs(
+      query(collection(db, 'shiftAssignments'), where('locationId', 'in', exactLocationIds))
+    )
+    assignmentDocs.push(...assignmentsSnap.docs)
   } else {
     const assignmentsSnap = await getDocs(
       query(collection(db, 'shiftAssignments'), where('active', '==', true))

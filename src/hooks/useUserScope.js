@@ -17,6 +17,7 @@ import { useMemo, useCallback } from 'react'
 import {
   MAIN_LOCATIONS,
   MAIN_LOCATION_OTC,
+  getExactOperationalLocationIdsForUser,
   getAvailableMainLocationsForUser,
   isAdminRole,
   isBhtRole,
@@ -29,8 +30,6 @@ import {
 
 const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
 const COMPLIANCE_SITES = new Set(MAIN_LOCATIONS)
-const EXACT_ISSUE_LOCATIONS = new Set(['lone_mountain', 'mesquite', 'test_house', 'res'])
-
 function locationScopeAlias(locationId) {
   const normalizedMainLocation = locationIdToMainLocation(locationId)
   if (normalizedMainLocation) return normalizedMainLocation
@@ -40,11 +39,6 @@ function locationScopeAlias(locationId) {
 
 function normalizeComplianceSite(siteId) {
   return locationScopeAlias(siteId)
-}
-
-function normalizeExactIssueLocation(locationId) {
-  const normalized = String(locationId || '').trim().toLowerCase()
-  return EXACT_ISSUE_LOCATIONS.has(normalized) ? normalized : ''
 }
 
 export default function useUserScope(user) {
@@ -76,11 +70,7 @@ export default function useUserScope(user) {
     : []
 
   const exactIssueLocationIds = useMemo(
-    () => [...new Set([
-      ...(Array.isArray(user?.issueLocationIds) ? user.issueLocationIds : []),
-      ...(Array.isArray(user?.authorizedLocations) ? user.authorizedLocations : []),
-      user?.locationId
-    ].map(normalizeExactIssueLocation).filter(Boolean))],
+    () => getExactOperationalLocationIdsForUser(user),
     [user]
   )
 
@@ -130,7 +120,7 @@ export default function useUserScope(user) {
   )
 
   const inIssueScope = useCallback(
-    (locationId) => isAdmin || exactIssueLocationIds.includes(normalizeExactIssueLocation(locationId)),
+    (locationId) => isAdmin || exactIssueLocationIds.includes(String(locationId || '').trim().toLowerCase()),
     [exactIssueLocationIds, isAdmin]
   )
 

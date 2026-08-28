@@ -35,9 +35,13 @@ function SupervisorEocPanel({
   const [filterEndDate, setFilterEndDate] = useState('')
   const [missedNotes, setMissedNotes] = useState({})
   const [highlightedIssueId, setHighlightedIssueId] = useState(null)
-  const { exactIssueLocationIds, inEocScope, inIssueScope } = useUserScope(user)
+  const { exactIssueLocationIds, inEocScope, inIssueScope, isAdmin } = useUserScope(user)
   const pendingPhotos = useOfflinePhotoQueue(user)
-  const { statusRows, historyRows, missingAssignments, loadMoreHistory } = useSupervisorEocOverview(inEocScope)
+  const { statusRows, historyRows, missingAssignments, loadMoreHistory } = useSupervisorEocOverview({
+    inEocScope,
+    exactLocationIds: exactIssueLocationIds,
+    isAdmin
+  })
   const retentionMetrics = usePhotoRetentionMetrics(isAdminRole(user?.role))
   const { issues: activeIssues, resolvedIssues, loadMoreResolved } = useScopedIssues({
     user,
