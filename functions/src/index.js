@@ -145,6 +145,8 @@ export async function establishPinSessionHandler(request) {
 
 export const establishPinSession = onCall({ region: 'us-central1' }, establishPinSessionHandler)
 
+const SECURITY_RUNTIME_SERVICE_ACCOUNT = 'sprc-security-runtime@sprc-tx-l.iam.gserviceaccount.com'
+
 export async function beginStaffPinSessionV2Handler(request, dependencies = {}) {
   try {
     return await beginDormantStaffPinSession({
@@ -175,6 +177,7 @@ export async function beginStaffPinSessionV2Handler(request, dependencies = {}) 
 export const beginStaffPinSessionV2 = onCall({
   region: 'us-central1',
   enforceAppCheck: false,
+  serviceAccount: SECURITY_RUNTIME_SERVICE_ACCOUNT,
   secrets: [STAFF_PIN_AUTH_SECRET]
 }, beginStaffPinSessionV2Handler)
 
@@ -208,6 +211,7 @@ export async function manageStaffSecurityV4Handler(request, dependencies = {}) {
 export const manageStaffSecurityV4 = onCall({
   region: 'us-central1',
   enforceAppCheck: false,
+  serviceAccount: SECURITY_RUNTIME_SERVICE_ACCOUNT,
   secrets: [STAFF_PIN_AUTH_SECRET]
 }, manageStaffSecurityV4Handler)
 
