@@ -82,3 +82,28 @@ test('supervisor keeps the existing edit screen while a protected PIN reset revo
   await expect(targetPage.getByPlaceholder('Enter 6-digit PIN')).toBeVisible({ timeout: 30_000 })
   await targetContext.close()
 })
+
+test('supervisor can create an in-location BHT but cannot see or assign another location', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'One desktop management viewport is sufficient for scoped account creation.')
+  await signIn(page, '395172', /\/dashboard\/dashboard$/)
+  await page.goto('/dashboard/users')
+
+  await expect(page.getByText('Internal ID: phase4_target_bht')).toBeVisible()
+  await expect(page.getByText('Internal ID: phase4_out_of_scope_res_bht')).toHaveCount(0)
+  await page.getByRole('button', { name: '+ Add New User' }).click()
+
+  await expect(page.getByLabel('Staff role')).toHaveValue('bht')
+  await expect(page.getByLabel('Staff location')).toHaveValue('OTC')
+  await expect(page.getByLabel('Staff role').locator('option')).toHaveCount(2)
+  await expect(page.getByLabel('Staff role').locator('option[value="supervisor"]')).toHaveCount(0)
+  await expect(page.getByLabel('Staff role').locator('option[value="admin"]')).toHaveCount(0)
+  await expect(page.getByLabel('Staff location').locator('option')).toHaveCount(2)
+  await page.getByLabel('Staff name').fill('Supervisor Created Browser BHT')
+  await page.getByLabel('Staff PIN').fill('548271')
+  await page.getByLabel('BHT home house').selectOption('TEST_HOUSE')
+  await page.getByRole('button', { name: 'Test Van' }).click()
+  await page.getByLabel('BHT shift').selectOption('shift_1')
+  await page.getByRole('button', { name: 'Save', exact: true }).first().click()
+
+  await expect(page.getByText('Internal ID: supervisor_created_browser_bht')).toBeVisible({ timeout: 30_000 })
+})

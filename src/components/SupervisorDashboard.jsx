@@ -23,6 +23,7 @@ import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
 import { writeAuditLog as writeAuditEntry } from '../services/notificationService'
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { isSecureSessionUser, performSecurityAccountAction } from '../services/securityAccountActions'
+import { buildManagedUserQueryPlan, mergeManagedUserDocumentGroups } from '../services/userManagementQueryModel'
 import useUserScope from '../hooks/useUserScope'
 import useScopedIssues from '../hooks/useScopedIssues'
 import useScopedFleet from '../hooks/useScopedFleet'
@@ -195,6 +196,7 @@ function SupervisorDashboard({
   })
   const [showUserPin, setShowUserPin] = useState(false)
   const [generatingPin, setGeneratingPin] = useState(false)
+  const [userLoadError, setUserLoadError] = useState('')
 
   // ── Scope derivation (extracted to shared hook) ──
   const {
@@ -227,6 +229,22 @@ function SupervisorDashboard({
     () => roleOptionsForActor(user?.role),
     [user?.role]
   )
+
+  const managedUserQueryPlan = useMemo(() => buildManagedUserQueryPlan({
+    isAdmin,
+    managedMainLocations
+  }), [isAdmin, managedMainLocations])
+
+  const managedUserQueries = useMemo(() => managedUserQueryPlan.map((descriptor) => ({
+    ...descriptor,
+    query: descriptor.kind === 'all'
+      ? collection(db, 'users')
+      : query(
+          collection(db, 'users'),
+          where('role', '==', descriptor.role),
+          where('location', '==', descriptor.location)
+        )
+  })), [managedUserQueryPlan])
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 1023px)')
@@ -308,15 +326,27 @@ function SupervisorDashboard({
   }, [isAdmin, managedMainLocations])
 
   const loadUsers = useCallback(async () => {
-    try {
-      const usersSnapshot = await getDocsFromServer(collection(db, 'users'))
-      applyLoadedUsers(usersSnapshot.docs)
-    } catch (error) {
-      console.warn('Server user fetch failed, falling back to default Firestore read:', error)
-      const usersSnapshot = await getDocs(collection(db, 'users'))
-      applyLoadedUsers(usersSnapshot.docs)
+    if (managedUserQueries.length === 0) {
+      setUsers([])
+      setUserLoadError('No authorized staff location is assigned to this supervisor account.')
+      return
     }
-  }, [applyLoadedUsers])
+    try {
+      const snapshots = await Promise.all(managedUserQueries.map(descriptor => getDocsFromServer(descriptor.query)))
+      applyLoadedUsers(mergeManagedUserDocumentGroups(snapshots.map(snapshot => snapshot.docs)))
+      setUserLoadError('')
+    } catch (error) {
+      if (isSecureSessionUser(user)) {
+        setUsers([])
+        setUserLoadError('Unable to securely load staff accounts. Check the connection and try again.')
+        throw error
+      }
+      console.warn('Server user fetch failed, falling back to scoped Firestore reads:', error)
+      const snapshots = await Promise.all(managedUserQueries.map(descriptor => getDocs(descriptor.query)))
+      applyLoadedUsers(mergeManagedUserDocumentGroups(snapshots.map(snapshot => snapshot.docs)))
+      setUserLoadError('')
+    }
+  }, [applyLoadedUsers, managedUserQueries, user])
 
   useEffect(() => {
     // Set default to current month
@@ -329,13 +359,31 @@ function SupervisorDashboard({
   }, [])
 
   useEffect(() => {
-    const unsubUsers = onSnapshot(
-      collection(db, 'users'),
-      (snapshot) => applyLoadedUsers(snapshot.docs),
-      (err) => console.error('User live update failed:', err)
-    )
-    return () => unsubUsers()
-  }, [applyLoadedUsers])
+    if (managedUserQueries.length === 0) {
+      setUsers([])
+      return undefined
+    }
+    const snapshotsByKey = new Map()
+    const publish = () => {
+      if (snapshotsByKey.size !== managedUserQueries.length) return
+      applyLoadedUsers(mergeManagedUserDocumentGroups([...snapshotsByKey.values()]))
+      setUserLoadError('')
+    }
+    const unsubscribers = managedUserQueries.map(descriptor => onSnapshot(
+      descriptor.query,
+      (snapshot) => {
+        if (isSecureSessionUser(user) && snapshot.metadata.fromCache) return
+        snapshotsByKey.set(descriptor.key, snapshot.docs)
+        publish()
+      },
+      (error) => {
+        console.error(`User live update failed for ${descriptor.key}:`, error)
+        setUsers([])
+        setUserLoadError('Unable to securely load staff accounts. Check the connection and try again.')
+      }
+    ))
+    return () => unsubscribers.forEach(unsubscribe => unsubscribe())
+  }, [applyLoadedUsers, managedUserQueries, user])
 
   useEffect(() => {
     loadUsers().catch((error) => {
@@ -386,21 +434,17 @@ function SupervisorDashboard({
     id: '',
     name: '',
     pin: '',
-    role: '',
-    location: '',
+    role: isAdmin ? '' : ROLE_BHT,
+    location: isAdmin ? '' : defaultManagedMainLocation,
     house: '',
     shiftId: '',
     vanId: '',
     vanIds: [],
     issueLocationIds: [],
     active: true
-  }), [])
+  }), [defaultManagedMainLocation, isAdmin])
 
   const handleAddUser = () => {
-    if (!isAdminRole(user?.role)) {
-      alert('Only admins can create login-capable accounts. Supervisors can edit existing BHT operational assignments.')
-      return
-    }
     if (actorRoleOptions.length === 0) {
       alert('Your account does not have permission to manage users.')
       return
@@ -466,11 +510,6 @@ function SupervisorDashboard({
     const isNewUser = editingUser === 'new'
     const hasPinInput = String(userForm.pin || '').trim().length > 0
     const secureManagement = isSecureSessionUser(user)
-
-    if (isNewUser && !isAdminRole(user?.role)) {
-      alert('Only admins can create login-capable accounts.')
-      return
-    }
 
     if (!String(userForm.name || '').trim()) {
       alert('Please fill in the required name field.')
@@ -876,6 +915,7 @@ function SupervisorDashboard({
             Name *
           </label>
           <input
+            aria-label="Staff name"
             type="text"
             value={userForm.name}
             onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
@@ -898,6 +938,7 @@ function SupervisorDashboard({
           </label>
           <div style={{ display: 'flex', gap: '6px' }}>
             <input
+              aria-label="Staff PIN"
               type={showUserPin ? 'text' : 'password'}
               inputMode="numeric"
               value={userForm.pin || ''}
@@ -948,6 +989,7 @@ function SupervisorDashboard({
             Role
           </label>
           <select
+            aria-label="Staff role"
             value={normalizedFormRole || ''}
             onChange={(e) => {
               const nextRole = normalizeRole(e.target.value)
@@ -986,6 +1028,7 @@ function SupervisorDashboard({
             Location
           </label>
           <select
+            aria-label="Staff location"
             value={locationSelectDisabled ? (isAdminFormRole ? GLOBAL_SCOPE : '') : (effectiveLocation || '')}
             onChange={(e) => {
               const nextLocation = normalizeMainLocation(e.target.value)
@@ -1034,6 +1077,7 @@ function SupervisorDashboard({
               OTC House *
             </label>
             <select
+              aria-label="BHT home house"
               value={normalizeHouseId(userForm.house)}
               onChange={(e) => setUserForm({ ...userForm, house: normalizeHouseId(e.target.value) })}
               style={{
@@ -1103,6 +1147,7 @@ function SupervisorDashboard({
               Shift *
             </label>
             <select
+              aria-label="BHT shift"
               value={userForm.shiftId}
               onChange={(e) => setUserForm({ ...userForm, shiftId: e.target.value })}
               style={{
@@ -1128,6 +1173,7 @@ function SupervisorDashboard({
             Active
           </label>
           <select
+            aria-label="Staff active status"
             value={userForm.active}
             onChange={(e) => setUserForm({ ...userForm, active: e.target.value === 'true' })}
             style={{
@@ -1678,6 +1724,12 @@ function SupervisorDashboard({
                 + Add New User
               </button>
             </div>
+
+            {userLoadError && (
+              <div role="alert" style={{ marginBottom: '16px', color: '#9B2C2C', fontSize: '13px', fontWeight: 600 }}>
+                {userLoadError}
+              </div>
+            )}
 
             {editingUser === 'new' && (
               <div style={{

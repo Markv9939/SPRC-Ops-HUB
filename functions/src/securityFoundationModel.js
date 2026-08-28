@@ -39,6 +39,7 @@ const MAIN_LOCATION_ALIASES = Object.freeze({
 })
 
 const SUPERVISOR_BHT_ACTIONS = new Set([
+  'create_profile',
   'reset_pin',
   'deactivate',
   'reactivate',

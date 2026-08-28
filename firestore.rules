@@ -799,14 +799,26 @@ service cloud.firestore {
         || (
           workflowRoleAllowed('identity_users', ['supervisor'])
           && roleIsBht(resource.data.role)
-          && authLocationAllowed(userLocationValue(resource.data))
+          && workflowLocationAllowed('identity_users', ['supervisor'], userLocationValue(resource.data))
         )
         );
-      allow list: if workflowRoleAllowed('identity_users', ['admin', 'supervisor']);
+      allow list: if workflowRoleAllowed('identity_users', ['admin'])
+        || (
+          workflowRoleAllowed('identity_users', ['supervisor'])
+          && roleIsBht(resource.data.role)
+          && workflowLocationAllowed('identity_users', ['supervisor'], userLocationValue(resource.data))
+        );
 
       allow create: if !workflowSecurityEnabled('identity_users')
         && validUserWriteData(request.resource.data)
-        && authRoleAllowed(['admin'])
+        && (
+          authRoleAllowed(['admin'])
+          || (
+            authRoleAllowed(['supervisor'])
+            && roleIsBht(request.resource.data.role)
+            && authLocationAllowed(userLocationValue(request.resource.data))
+          )
+        )
         && validVersionField(request.resource.data);
 
       allow update: if !workflowSecurityEnabled('identity_users')

@@ -86,6 +86,7 @@ const writes = [
   ['users/phase4_supervisor', supervisor('Phase 4 Supervisor', '395172')],
   ['users/phase4_target_bht', bht('Phase 4 Target BHT', '619274', 'shift_1', { house: 'MESQUITE', locationId: 'mesquite', authorizedLocations: ['OTC'], issueLocationIds: ['mesquite'], vanId: 'van_1', vanIds: ['van_1'] })],
   ['users/phase4_end_sessions_bht', bht('Phase 4 End Sessions BHT', '472619', 'shift_2', { house: 'LONE_MOUNTAIN', locationId: 'lone_mountain', authorizedLocations: ['OTC'], issueLocationIds: ['lone_mountain'], vanId: 'van_2', vanIds: ['van_2'] })],
+  ['users/phase4_out_of_scope_res_bht', bht('Out of Scope RES BHT', '851472', 'res_shift_1_day', { site: 'RES', location: 'RES', house: null, locationId: 'res', authorizedLocations: ['RES'], issueLocationIds: ['res'], vanId: 'van_3', vanIds: ['van_3'] })],
   ['accessGrants/phase3_mobile_active_scope', {
     userId: 'phase3_browser_mobile', userName: 'Phase 3 Mobile BHT', locationId: 'RES',
     startsAt: activeGrantStartsAt, expiresAt: activeGrantExpiresAt,
