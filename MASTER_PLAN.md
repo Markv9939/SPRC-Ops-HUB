@@ -37,6 +37,8 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | **Paused** | Operational assignment of custom Guided Canvas EOC templates is paused because normal PIN sessions do not yet satisfy the protected Firebase template and photo paths. |
 | **Next major decision** | Complete the approved dormant deployment and identity/users Test House canary, prove rollback and real workflows, then make a separate go/no-go decision before adding any second workflow or broader staff cohort. |
 
+The first live canary exposes only the server PIN-login and protected account-management entry points. Offline replay, transports, EOC submissions, and issue mutations remain disabled and network-private until their separately verified workflow stages.
+
 Configuration and live release state can drift. Recheck current evidence before using this summary for a production decision.
 
 ## Simple Working Flow
