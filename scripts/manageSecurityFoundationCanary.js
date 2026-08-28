@@ -103,7 +103,7 @@ function activationPayloads(now) {
       protectedAccountActionsVersion: 4,
       protectedAccountActionsEnabled: true,
       offlineReplayVersion: 5,
-      offlineReplayEnabled: true,
+      offlineReplayEnabled: false,
       rolloutState: 'production_canary',
       enabledProfileIds: CANARY_PROFILE_IDS,
       releaseId: RELEASE_ID,

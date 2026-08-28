@@ -11,6 +11,7 @@ Status: Test House canary authorized; guarded release preparation in progress
 4. Select synthetic or explicitly approved canary staff and locations. Never silently enroll real staff.
    The first approved cohort is exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`. Production configuration must use `rolloutState: production_canary` plus this exact `enabledProfileIds` allowlist. A valid non-enrolled PIN stays on the unchanged compatibility login and creates no secure identity/session artifacts.
 5. Start with the identity/users workflow and protected account actions for every canary staff member and manager. Do not let a legacy profile edit bypass the required session revocation while another workflow trusts the secure session.
+   Only `beginStaffPinSessionV2` and `manageStaffSecurityV4` are reachable for this first canary. Protected offline replay, transport creation, EOC submission, and issue mutation remain private and disabled until their own workflow canaries.
 6. Include temporary backup-access creation/revocation/expiry and issue-access changes. Confirm each scope change signs out every affected device and the next PIN login receives only the exact current scope.
 7. Enable only one named workflow for the canary. Do not flip global strict auth.
 8. End the canary users' existing sessions so their next PIN login receives the exact current workflow claims.
