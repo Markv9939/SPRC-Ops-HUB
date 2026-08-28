@@ -4,6 +4,40 @@ Last updated: 2026-08-27
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
+## 2026-08-27 — Release and activate the identity-only Test House security canary
+
+### Purpose
+
+Move the completed security foundation into its first narrowly controlled production proof without changing login behavior for ordinary staff or opening later operational workflows.
+
+### Outcome and exact status
+
+- Pull Requests #3–#6 were merged into case-sensitive `Main`; the current release reference is `e159bf4`.
+- Firestore rules/indexes, Storage rules, Hosting, all existing Functions, and the six dormant security Functions were deployed. The identity-only follow-up keeps offline replay, transports, EOC submission, and issue mutation disabled.
+- Only `beginStaffPinSessionV2` and `manageStaffSecurityV4` accept network requests. The other four security workflow Functions remain network-private and return infrastructure-level 403 responses.
+- Created dedicated runtime identity `sprc-security-runtime@sprc-tx-l.iam.gserviceaccount.com` for the two reachable services. It has Firestore data access, Firebase Authentication administration, PIN-secret access, and self custom-token signing; unrelated Functions did not receive those permissions.
+- Activated release `security-foundation-test-house-v1` for only `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`, with only `identity_users` enabled and offline replay disabled.
+- The first rollback correctly restored both protected settings to their absent baseline and exposed a fixed-name immutable-audit collision during reactivation. The script was corrected to create a new immutable audit document per event, merged through Pull Request #6, and a complete rollback plus reactivation drill then passed. The canary is active again.
+- Live Hosting loads the normal PIN screen without browser errors. A valid Test Supervisor/Test BHT browser journey remains pending because no PIN was bypassed, retrieved, or transmitted by the release process.
+
+### Verification and rollback evidence
+
+- Security foundation tests: 57 passed, 0 failed; lint, Node syntax check, and `git diff --check` passed for the follow-up changes.
+- Both reachable services run as the dedicated runtime identity and return application-level validation errors for malformed requests, proving the network request reached the guarded code.
+- `authorizeOfflineReplayV5`, `createProtectedTransportV6`, `submitProtectedEocV9`, and `mutateProtectedIssueV9` each remain hard 403.
+- Fresh rollback backup: `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-canary-2026-08-28T00-15-39-841Z.json`; SHA-256 `3adeaa3d6b447f2f90037965b14577ef4a3bae16939c6657dad448a5024b0f35`.
+- The final live readback shows `schemaVersion: 2`, `rolloutState: production_canary`, the exact three-profile allowlist, secure PIN/client/account gates enabled, offline replay disabled, and `identity_users` as the only enabled workflow.
+
+### Files and external state
+
+- Source follow-ups: `functions/src/index.js`, `scripts/manageSecurityFoundationCanary.js`, `MASTER_PLAN.md`, and `PROGRESS_LOG.md`.
+- External changes: Firebase/Cloud Run deployment, dedicated runtime identity and least-privilege IAM bindings, existing PIN secret access for that identity, guarded canary configuration, and immutable canary audit events.
+- No Anonymous Authentication, global strict-auth switch, broader profile cohort, operational workflow canary, production record rewrite, or real staff PIN change was performed.
+
+### Remaining gate
+
+Complete the live Test Supervisor and Test BHT identity/users journeys, including reload persistence, scoped user management, logout, revocation, and confirmation that a non-enrolled valid profile stays on the compatibility path. Do not broaden the cohort or enable a second workflow until that evidence passes.
+
 ## 2026-08-27 — Add a true profile-specific production canary boundary
 
 ### Purpose

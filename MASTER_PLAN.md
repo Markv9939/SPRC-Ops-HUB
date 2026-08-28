@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-27
 Document status: Active living blueprint
-Application release reference: `c6b0ec1` (`Release guided EOC template builder`)
+Application release reference: `e159bf4` (`Merge repeatable security canary audit fix`)
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -33,9 +33,9 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | Security-foundation Phases 1–9 are implemented behind disabled versioned gates. The first production release and synthetic Test House canary are approved and being prepared. A profile allowlist now guarantees that only the three named synthetic profiles can enter the canary; every non-enrolled valid PIN remains on the unchanged compatibility login. No live activation has occurred yet. |
+| **In progress** | Security-foundation Phases 1–9 are merged and the dormant Firebase bundle is deployed. The identity/users canary is active only for `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`; every non-enrolled valid PIN remains on the unchanged compatibility login. The guarded production rollback and reactivation drill passed. A live Test Supervisor PIN journey is still required before this canary is considered complete. |
 | **Paused** | Operational assignment of custom Guided Canvas EOC templates is paused because normal PIN sessions do not yet satisfy the protected Firebase template and photo paths. |
-| **Next major decision** | Complete the approved dormant deployment and identity/users Test House canary, prove rollback and real workflows, then make a separate go/no-go decision before adding any second workflow or broader staff cohort. |
+| **Next major decision** | Complete the live Test Supervisor and Test BHT identity/users journeys, then make a separate go/no-go decision before adding any second workflow or broader staff cohort. |
 
 The first live canary exposes only the server PIN-login and protected account-management entry points. Offline replay, transports, EOC submissions, and issue mutations remain disabled and network-private until their separately verified workflow stages.
 
@@ -102,28 +102,28 @@ This section is only for large choices that are difficult to reverse or that con
 - **Decision:** Staff should continue using the simple six-digit PIN screen. The planned security foundation will validate the PIN on the server and issue a stable Firebase identity tied to the existing Ops profile.
 - **Reason:** Staff need a simple login, while protected records, photos, roles, and locations need consistent server proof.
 - **Effect:** Do not enable Anonymous Authentication or strict global enforcement as a shortcut. Build and prove the replacement in staged workflow groups.
-- **Status:** Confirmed direction. Phases 1–8 are implemented locally behind disabled gates; the staff-facing production login and live Firebase trust boundary are not changed.
+- **Status:** Confirmed direction. The secure PIN trust boundary is deployed and active only for the three synthetic Test House canary profiles. All other valid staff PINs remain on the compatibility path, and broader enforcement is still off.
 
 ### Use persistent 84-hour per-device sessions with automatic all-device revocation
 
 - **Decision:** A successful PIN session may persist across browser close/reopen on the same device for an absolute, non-sliding maximum of 84 hours. The same staff member may have independent sessions on multiple devices. Ordinary logout ends only that device's session.
 - **Reason:** Staff need uninterrupted access through a 3.5-day shift while still requiring a bounded session and reliable emergency cutoff.
 - **Effect:** Deactivation, PIN change, role reduction, home-location removal, temporary/issue-access change, and admin end-all-sessions must automatically invalidate every device with audit evidence. A role/location/access change signs the person out everywhere; the next login receives only current access. A temporary grant expiration may end that scoped session before the otherwise absolute 84-hour maximum so expired access cannot linger.
-- **Status:** Confirmed session contract; implemented in the dormant local server/client path and emulator-tested, but not enabled, deployed, or connected to the current production login.
+- **Status:** Confirmed session contract; deployed and enabled only for the three synthetic Test House canary profiles. Live browser proof of persistence, revocation, and multi-device behavior is still required before expansion.
 
 ### Preserve scoped supervisor BHT account management
 
 - **Decision:** Preserve the existing practical supervisor/admin PIN-reset and user-management experience. A supervisor may reset a PIN, deactivate/reactivate, end sessions, and manage operational assignment/access for an existing BHT/tech whose single home location is within that supervisor's authorized main-location scope.
 - **Reason:** Location supervisors must manage day-to-day staffing without sending every account action to an administrator.
 - **Effect:** Supervisors cannot manage supervisor/admin accounts, elevate a BHT to supervisor/admin, grant a location outside their own scope, create new login-capable accounts, or change global security settings. Each active BHT/tech must resolve to exactly one home location; zero or multiple homes are invalid configuration for admin correction.
-- **Status:** Confirmed operating contract. Existing UI behavior is preserved, and the protected server actions, secure administrator account creation, supervisor scope, credential rotation, all-device revocation, and audit evidence are implemented locally behind disabled gates. Production still uses the unchanged compatibility path.
+- **Status:** Confirmed operating contract. Protected account actions are deployed and enabled only for the three synthetic Test House canary profiles; other staff remain on the unchanged compatibility path. Live supervisor-scope verification is still required.
 
 ### Enforce role and location boundaries through the full workflow
 
 - **Decision:** Role and location protection must exist in the UI, service transactions, offline replay, Firebase rules, and protected Functions where applicable.
 - **Reason:** Hiding a tab does not prevent an unauthorized database or Storage request.
 - **Effect:** Every sensitive workflow test must prove the correct role can do normal work and the wrong role/location cannot.
-- **Status:** Confirmed operating contract. Named workflow, Function, Firestore, and Storage boundaries are implemented locally and dormant; current production enforcement remains incomplete because compatibility mode is still active and no workflow has passed a production canary.
+- **Status:** Confirmed operating contract. The `identity_users` workflow is in a three-profile production canary. Offline replay, transports, EOC submissions, issue mutations, and broad strict enforcement remain disabled and network-private pending later workflow canaries.
 
 ### Preserve useful offline work and stop unsafe replay for review
 
