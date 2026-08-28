@@ -19,6 +19,8 @@ export const HOUSE_OPTIONS = [
   { id: HOUSE_TEST, label: 'Test House', locationId: 'test_house' }
 ]
 
+const EXACT_OPERATIONAL_LOCATION_IDS = ['mesquite', 'lone_mountain', 'test_house', 'res']
+
 export const VAN_IDS_BY_MAIN_LOCATION = Object.freeze({
   [MAIN_LOCATION_OTC]: ['van_1', 'van_2', 'van_4', 'van_test'],
   [MAIN_LOCATION_RES]: ['van_3']
@@ -167,6 +169,26 @@ export function getAvailableMainLocationsForUser(user) {
     ...(Array.isArray(user?.authorizedLocations) ? user.authorizedLocations : []),
     ...(Array.isArray(user?.primaryScopes) ? user.primaryScopes : [])
   ])
+}
+
+export function getExactOperationalLocationIdsForUser(user) {
+  if (isAdminRole(user?.role)) return [...EXACT_OPERATIONAL_LOCATION_IDS]
+
+  const explicit = [
+    ...(Array.isArray(user?.issueLocationIds) ? user.issueLocationIds : []),
+    user?.locationId
+  ]
+    .map(value => String(value || '').trim().toLowerCase())
+    .filter(value => EXACT_OPERATIONAL_LOCATION_IDS.includes(value))
+
+  if (isBhtRole(user?.role)) return [...new Set(explicit)]
+
+  const expanded = getAvailableMainLocationsForUser(user).flatMap((mainLocation) => {
+    if (mainLocation === MAIN_LOCATION_OTC) return ['mesquite', 'lone_mountain', 'test_house']
+    if (mainLocation === MAIN_LOCATION_RES) return ['res']
+    return []
+  })
+  return [...new Set([...explicit, ...expanded])]
 }
 
 export function canActorManageRole(actorRole, targetRole) {
