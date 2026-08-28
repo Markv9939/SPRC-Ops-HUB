@@ -133,7 +133,7 @@ async function activate(db, backup, profiles) {
   const payloads = activationPayloads(now)
   const batch = db.batch()
   CONFIG_PATHS.forEach(path => batch.create(db.doc(path), payloads[path]))
-  batch.create(db.doc(`securityWorkflowAudit/${RELEASE_ID}_activated`), {
+  batch.create(db.collection('securityWorkflowAudit').doc(), {
     action: 'security_canary_activated',
     releaseId: RELEASE_ID,
     profileIds: CANARY_PROFILE_IDS,
@@ -161,7 +161,7 @@ async function rollback(db, auth, backup) {
     if (backup.config[path]?.exists) throw new Error('This first-release rollback supports only the verified absent baseline.')
     batch.delete(db.doc(path))
   }
-  batch.create(db.doc(`securityWorkflowAudit/${RELEASE_ID}_rolled_back`), {
+  batch.create(db.collection('securityWorkflowAudit').doc(), {
     action: 'security_canary_rolled_back', releaseId: RELEASE_ID,
     profileIds: CANARY_PROFILE_IDS, revokedSessionCount: sessions.size,
     createdAt: now, immutable: true
