@@ -1,8 +1,31 @@
 # SPRC Ops Hub Progress Log
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
+
+## 2026-08-29 — Corrected Identity/Users release deployed; live canary verification in progress
+
+### Release outcome
+
+- Pushed `codex/security-foundation-completion`, opened PR #9, verified its base `44b6e44`, head `696e3ae`, exact 17-file change set, and mergeability, then merged it to case-sensitive `Main` as `e3f5577`.
+- Captured a verified pre-release configuration backup at `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-canary-2026-08-29T20-09-45-087Z.json`; SHA-256 `f6c8b730d2a79f85ad0129700c878cc56dc331909f0e64c605d58150b119f0ff`.
+- Rebuilt Hosting with `npm run build:security-canary`, independently verified the `v3-enabled` marker, and verified the compiled assets target production project `sprc-tx-l`.
+- Deployed only `manageStaffSecurityV4`, Firestore rules, and Hosting as one Firebase CLI release. Rules compiled successfully; the reported warnings were existing unused-helper/name warnings, not rule errors. The Function update, rules release, Hosting finalization, and Hosting release all completed successfully.
+
+### Post-release evidence
+
+- Live Hosting at `https://sprc-tx-l.web.app` reports `sprc-security-bootstrap=v3-enabled`; a fresh reload displayed the familiar six-digit PIN screen with no browser console errors.
+- `manageStaffSecurityV4` runs on Node.js 22 under `sprc-security-runtime@sprc-tx-l.iam.gserviceaccount.com` with new deployed hash `386f1d122c3e3a6c0583842a47...`. `beginStaffPinSessionV2` retains the same dedicated runtime identity.
+- Unauthenticated probes reached `beginStaffPinSessionV2` and `manageStaffSecurityV4` and returned application-level HTTP 400. `authorizeOfflineReplayV5`, `createProtectedTransportV6`, `submitProtectedEocV9`, and `mutateProtectedIssueV9` each remained network-private with HTTP 403.
+- Live configuration readback remained unchanged: exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`; only `identity_users`; offline replay disabled; release `security-foundation-test-house-v1`.
+- Captured a verified post-release configuration backup at `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-canary-2026-08-29T20-15-06-151Z.json`; SHA-256 `1fe1665e4809cd231845aee8dfd7e2c712ac9d941c50bc0d06cd8d970e6d7718`.
+- The separate Google Cloud CLI session could not refresh non-interactively, so a fresh Authentication-provider readback was not obtained. Firebase CLI deployment authority remained valid, and no Auth provider/configuration change was requested or performed.
+
+### Remaining Stage 3 gate
+
+- The browser was signed out after deployment. Signed-in Test Supervisor EOC and Users checks, both Test BHT journeys, compatibility fallback, session/device behavior, scoped account actions, and rollback proof remain required.
+- No PIN reset, user creation/deactivation, session ending, protected configuration change, broader profile enrollment, or later workflow activation occurred in this checkpoint.
 
 ## 2026-08-28 — Identity/Users completion implementation, local checkpoint
 

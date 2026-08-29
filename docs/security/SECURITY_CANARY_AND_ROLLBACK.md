@@ -1,7 +1,7 @@
 # Security Foundation Canary and Rollback Gate
 
 Last updated: 2026-08-28
-Status: Test House identity/users canary active; corrected coordinated re-release awaiting approval
+Status: Corrected Identity/Users release deployed; signed-in three-profile verification in progress
 
 ## Current Identity/Users re-release checkpoint
 
