@@ -1,8 +1,8 @@
 # SPRC Ops Hub Master Plan
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 Document status: Active living blueprint
-Application release reference: `44b6e44` (`Merge PR #8: Scope EOC canary queries by authorized location`)
+Application release reference: `e3f5577` (`Merge PR #9: Complete Identity/Users security canary corrections`)
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -33,9 +33,9 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | Security-foundation Phases 1–9 are merged and the dormant Firebase bundle is deployed. The identity/users canary configuration remains limited to `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`; every non-enrolled valid PIN remains on the unchanged compatibility login. The guarded production rollback/reactivation drill and the earlier live Test Supervisor secure login/reload journey passed. The later Hosting-only EOC query deployment was compiled without the secure-bootstrap flag, so the current completion branch adds a release guard and corrected Identity/Users implementation before the canary is resumed. |
+| **In progress** | Security-foundation Phases 1–9 are merged and the corrected Identity/Users release is deployed from `e3f5577`. The live Hosting marker is `v3-enabled`; the canary still contains exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`, enables only `identity_users`, and keeps the four later protected endpoints private. The post-deploy browser session is signed out, so Test Supervisor/Test BHT workflow verification is still required before Stage 3 closes. |
 | **Paused** | Operational assignment of custom Guided Canvas EOC templates is paused because normal PIN sessions do not yet satisfy the protected Firebase template and photo paths. |
-| **Next major decision** | After the corrected Identity/Users package is locally complete, obtain a coordinated production release approval, restore the secure Hosting build, and finish the three-profile identity/users regression before adding any second workflow or broader staff cohort. |
+| **Next major decision** | Finish the three-profile Identity/Users live regression and rollback proof, then continue automatically to `templates_photos` only if every Stage 3 gate passes. |
 
 The first live canary exposes only the server PIN-login and protected account-management entry points. Offline replay, transports, EOC submissions, and issue mutations remain disabled and network-private until their separately verified workflow stages.
 
@@ -116,7 +116,7 @@ This section is only for large choices that are difficult to reverse or that con
 - **Decision:** Preserve the existing practical supervisor/admin user-management experience. A supervisor may create a BHT/tech account and may reset a PIN, deactivate/reactivate, end sessions, and manage operational assignment/access for a BHT/tech whose single home location is within that supervisor's authorized main-location scope.
 - **Reason:** Location supervisors must manage day-to-day staffing without sending every account action to an administrator.
 - **Effect:** Supervisors cannot create or manage supervisor/admin accounts, elevate a BHT to supervisor/admin, grant a location outside their own scope, or change global security settings. Each active BHT/tech must resolve to exactly one home location; zero or multiple homes are invalid configuration for admin correction.
-- **Status:** Confirmed operating contract. The corrected protected server, UI, scoped query, and strict-rule behavior is implemented and emulator/browser-tested on `codex/security-foundation-completion`; it is not deployed. Production remains on the three-profile canary/compatibility boundary until a separately approved release.
+- **Status:** Confirmed operating contract. The corrected protected server, UI, scoped query, and strict-rule behavior is merged at `e3f5577` and deployed to the existing three-profile Identity/Users canary. Post-deploy signed-in supervisor/BHT proof remains in progress.
 
 ### Enforce role and location boundaries through the full workflow
 
@@ -553,11 +553,11 @@ These rules apply to current and future work:
 
 | Area | Status | Evidence / limitation |
 |---|---|---|
-| Main application baseline | Released | `origin/Main` and the starting point for the completion branch are `44b6e44`; PR #8 merged the EOC canary location-query fix and its Hosting-only release was reported deployed. |
+| Main application baseline | Released | `origin/Main` is `e3f5577`; PR #9 merged the corrected Identity/Users canary package and its coordinated Function/rules/Hosting release completed on 2026-08-29. |
 | Shift Debrief safeguards | Released | `8339827`; focused tests, emulator/rules tests, lint/build, push, Hosting and Firestore rules deployment were reported. |
 | Issue handoff/app feedback V2 | Released and enabled | `3c11306`; feature flag version 3 was verified for the approved four operational locations at release time. Recheck before future changes because configuration can drift. |
 | Guided EOC template builder | Released with blocker | `c6b0ec1`; normal PIN sessions cannot currently satisfy protected template and Function access. No production templates/assignments were changed in release verification. |
-| Security foundation | Phases 1–9 merged; Identity/Users completion in progress | The three-profile identity/users canary and rollback tooling exist. The current completion branch adds supervisor in-scope BHT creation, backend-scoped Users queries/rules, and a secure-canary Hosting build guard. These corrections pass local unit, Auth/Firestore/Storage/Functions emulator, browser, build/lint, and Node.js 22.23.2 parity checks but are not deployed, pushed, merged, or activated. All later workflows and four protected operational endpoints remain disabled/private. |
+| Security foundation | Phases 1–9 merged; corrected Identity/Users release deployed; live canary in progress | PR #9 (`e3f5577`) is merged and the guarded secure Hosting bundle, Firestore rules, and `manageStaffSecurityV4` were deployed. Live readback confirms the secure marker, unchanged three-profile/one-workflow scope, and four later endpoints still return infrastructure-level 403. Signed-in Test Supervisor/Test BHT regression and rollback proof remain before Stage 3 completes. |
 | Documentation foundation | Restored and locally updated | Authoritative `MASTER_PLAN.md` and `PROGRESS_LOG.md` drafts plus project guidance, README links, and document hierarchy are restored and reconciled in this isolated branch; no production changes. |
 
 Current configuration and live Hosting state can change after this document is written. Recheck before any release or production decision.
