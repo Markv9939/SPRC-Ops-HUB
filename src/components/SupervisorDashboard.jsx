@@ -486,6 +486,15 @@ function SupervisorDashboard({
     if (blockIfOffline('generating a PIN')) return
     setGeneratingPin(true)
     try {
+      // A secure session must not query credential hashes from the browser.
+      // The protected create/reset action performs the authoritative duplicate
+      // check on the server and safely rejects the rare collision at save time.
+      if (isSecureSessionUser(user)) {
+        const candidate = generateSecurePin()
+        setUserForm(prev => ({ ...prev, pin: candidate }))
+        setShowUserPin(true)
+        return
+      }
       for (let attempt = 0; attempt < 12; attempt += 1) {
         const candidate = generateSecurePin()
         const duplicateUser = await findDuplicatePinUser(candidate, {
