@@ -2539,6 +2539,78 @@ test('workflow claims enforce current device sessions, roles, ownership, and loc
   await assertFails(getDoc(doc(bhtDb, 'appSettings/workflowSetting')))
 })
 
+test('strict identity Users queries are backend-scoped for supervisors while admins retain global access', async () => {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+  await seed('appSettings/securityWorkflows', {
+    schemaVersion: 6,
+    enabled: true,
+    workflows: ['identity_users']
+  })
+  await seed('users/identity_scope_supervisor', {
+    name: 'Identity Scope Supervisor', role: 'supervisor', active: true, deleted: false,
+    securityVersion: 4, location: 'OTC', authorizedLocations: ['OTC'], issueLocationIds: [], version: 1
+  })
+  await seed('usersByAuthUid/identity_scope_supervisor_uid', { userId: 'identity_scope_supervisor', version: 1 })
+  await seed('staffSessions/identity_scope_supervisor_session', {
+    profileId: 'identity_scope_supervisor', authUid: 'identity_scope_supervisor_uid', securityVersion: 4,
+    active: true, revokedAt: null, expiresAt
+  })
+  await seed('users/identity_scope_otc_bht', {
+    name: 'OTC BHT', role: 'bht', active: true, deleted: false,
+    securityVersion: 1, location: 'OTC', site: 'OTC', house: 'TEST_HOUSE', locationId: 'test_house',
+    authorizedLocations: ['OTC'], issueLocationIds: ['test_house'], version: 1
+  })
+  await seed('users/identity_scope_res_bht', {
+    name: 'RES BHT', role: 'bht', active: true, deleted: false,
+    securityVersion: 1, location: 'RES', site: 'RES', locationId: 'res',
+    authorizedLocations: ['RES'], issueLocationIds: ['res'], version: 1
+  })
+  await seed('users/identity_scope_other_supervisor', {
+    name: 'Other Supervisor', role: 'supervisor', active: true, deleted: false,
+    securityVersion: 1, location: 'OTC', authorizedLocations: ['OTC'], issueLocationIds: [], version: 1
+  })
+
+  const supervisorDb = secureAuthed(
+    'identity_scope_supervisor_uid', 'identity_scope_supervisor', 'identity_scope_supervisor_session', 4,
+    'supervisor', ['identity_users'], { authorizedLocations: ['OTC'] }
+  )
+  const scopedSnapshot = await assertSucceeds(getDocs(query(
+    collection(supervisorDb, 'users'),
+    where('role', '==', 'bht'),
+    where('location', '==', 'OTC')
+  )))
+  const scopedIds = scopedSnapshot.docs.map(snapshot => snapshot.id)
+  assert.equal(scopedIds.includes('identity_scope_otc_bht'), true)
+  assert.equal(scopedIds.includes('identity_scope_res_bht'), false)
+  assert.equal(scopedIds.includes('identity_scope_other_supervisor'), false)
+  await assertFails(getDocs(collection(supervisorDb, 'users')))
+  await assertFails(getDocs(query(
+    collection(supervisorDb, 'users'),
+    where('role', '==', 'bht'),
+    where('location', '==', 'RES')
+  )))
+  await assertFails(getDocs(query(
+    collection(supervisorDb, 'users'),
+    where('role', '==', 'supervisor'),
+    where('location', '==', 'OTC')
+  )))
+
+  await seed('users/identity_scope_admin', {
+    name: 'Identity Scope Admin', role: 'admin', active: true, deleted: false,
+    securityVersion: 2, location: 'GLOBAL', authorizedLocations: [], issueLocationIds: [], version: 1
+  })
+  await seed('usersByAuthUid/identity_scope_admin_uid', { userId: 'identity_scope_admin', version: 1 })
+  await seed('staffSessions/identity_scope_admin_session', {
+    profileId: 'identity_scope_admin', authUid: 'identity_scope_admin_uid', securityVersion: 2,
+    active: true, revokedAt: null, expiresAt
+  })
+  const adminDb = secureAuthed(
+    'identity_scope_admin_uid', 'identity_scope_admin', 'identity_scope_admin_session', 2,
+    'admin', ['identity_users']
+  )
+  await assertSucceeds(getDocs(collection(adminDb, 'users')))
+})
+
 test('strict EOC and issue workflows require protected server mutations while drafts and reads remain usable', async () => {
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
   await seed('appSettings/securityWorkflows', {

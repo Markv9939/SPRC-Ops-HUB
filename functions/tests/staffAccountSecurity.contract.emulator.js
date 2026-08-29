@@ -133,7 +133,7 @@ test('protected actions fail closed while the Phase 4 boundary is disabled', asy
   assert.equal((await db.collection('securityAccountAudit').get()).size, 0)
 })
 
-test('an administrator can securely create a valid profile while a supervisor cannot create accounts', async () => {
+test('administrators and in-location supervisors can securely create valid BHT profiles', async () => {
   await enablePhase4()
   const adminActor = await seedActor('create_admin', admin())
   const profilePatch = {
@@ -158,13 +158,41 @@ test('an administrator can securely create a valid profile while a supervisor ca
   assert.equal(containsCredentialMaterial(audit), false)
 
   const supervisorActor = await seedActor('create_supervisor', supervisor())
-  await assert.rejects(() => action(supervisorActor.requestAuth, {
+  const supervisorCreated = await action(supervisorActor.requestAuth, {
     ...request,
     targetProfileId: 'supervisor_created_bht',
     newPin: '529374',
-    operationId: 'supervisor_create_deny_01'
+    operationId: 'supervisor_create_allow_01'
+  })
+  assert.equal(supervisorCreated.profile.id, 'supervisor_created_bht')
+  assert.equal(supervisorCreated.profile.locationId, 'mesquite')
+  assert.equal((await db.doc('users/supervisor_created_bht').get()).exists, true)
+})
+
+test('supervisors cannot create elevated or out-of-location profiles', async () => {
+  await enablePhase4()
+  const supervisorActor = await seedActor('restricted_create_supervisor', supervisor())
+  const validBht = {
+    name: 'Scoped BHT', role: 'bht', active: true,
+    site: 'OTC', location: 'OTC', house: 'MESQUITE', locationId: 'mesquite',
+    authorizedLocations: ['OTC'], issueLocationIds: ['mesquite'],
+    shiftId: 'shift_1', vanId: 'van_1', vanIds: ['van_1']
+  }
+
+  await assert.rejects(() => action(supervisorActor.requestAuth, {
+    action: 'create_profile', targetProfileId: 'supervisor_created_admin',
+    profilePatch: { ...validBht, role: 'admin', site: 'GLOBAL', location: 'GLOBAL', house: null, locationId: null, authorizedLocations: [], issueLocationIds: [], shiftId: null, vanId: null, vanIds: [] },
+    newPin: '682491', operationId: 'supervisor_create_admin_deny_01'
   }), error => error.code === 'permission-denied')
-  assert.equal((await db.doc('users/supervisor_created_bht').get()).exists, false)
+
+  await assert.rejects(() => action(supervisorActor.requestAuth, {
+    action: 'create_profile', targetProfileId: 'supervisor_created_res_bht',
+    profilePatch: { ...validBht, site: 'RES', location: 'RES', house: null, locationId: 'res', authorizedLocations: ['RES'], issueLocationIds: ['res'], shiftId: 'res_shift_1_day', vanId: 'van_3', vanIds: ['van_3'] },
+    newPin: '496281', operationId: 'supervisor_create_res_deny_01'
+  }), error => error.code === 'permission-denied')
+
+  assert.equal((await db.doc('users/supervisor_created_admin').get()).exists, false)
+  assert.equal((await db.doc('users/supervisor_created_res_bht').get()).exists, false)
 })
 
 test('an in-location supervisor reset updates server and rollback credentials and revokes every target device', async () => {

@@ -16,7 +16,6 @@
 import { useMemo, useCallback } from 'react'
 import {
   MAIN_LOCATIONS,
-  MAIN_LOCATION_OTC,
   getExactOperationalLocationIdsForUser,
   getAvailableMainLocationsForUser,
   isAdminRole,
@@ -77,10 +76,10 @@ export default function useUserScope(user) {
   const managedMainLocations = useMemo(() => {
     const scopedLocations = getAvailableMainLocationsForUser(user)
     if (isAdmin) return [...MAIN_LOCATIONS]
-    return scopedLocations.length > 0 ? scopedLocations : [MAIN_LOCATION_OTC]
+    return scopedLocations
   }, [isAdmin, user])
 
-  const defaultManagedMainLocation = managedMainLocations[0] || MAIN_LOCATION_OTC
+  const defaultManagedMainLocation = managedMainLocations[0] || ''
 
   const allowedTransportSites = useMemo(
     () => (isAdmin ? [] : normalizedScopes.filter(v => TRANSPORT_SITES.has(v))),

@@ -1,8 +1,8 @@
 # SPRC Ops Hub Master Plan
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 Document status: Active living blueprint
-Application release reference: `e159bf4` (`Merge repeatable security canary audit fix`)
+Application release reference: `44b6e44` (`Merge PR #8: Scope EOC canary queries by authorized location`)
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -33,9 +33,9 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | Security-foundation Phases 1–9 are merged and the dormant Firebase bundle is deployed. The identity/users canary is active only for `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`; every non-enrolled valid PIN remains on the unchanged compatibility login. The guarded production rollback and reactivation drill passed. A live Test Supervisor PIN journey is still required before this canary is considered complete. |
+| **In progress** | Security-foundation Phases 1–9 are merged and the dormant Firebase bundle is deployed. The identity/users canary configuration remains limited to `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`; every non-enrolled valid PIN remains on the unchanged compatibility login. The guarded production rollback/reactivation drill and the earlier live Test Supervisor secure login/reload journey passed. The later Hosting-only EOC query deployment was compiled without the secure-bootstrap flag, so the current completion branch adds a release guard and corrected Identity/Users implementation before the canary is resumed. |
 | **Paused** | Operational assignment of custom Guided Canvas EOC templates is paused because normal PIN sessions do not yet satisfy the protected Firebase template and photo paths. |
-| **Next major decision** | Complete the live Test Supervisor and Test BHT identity/users journeys, then make a separate go/no-go decision before adding any second workflow or broader staff cohort. |
+| **Next major decision** | After the corrected Identity/Users package is locally complete, obtain a coordinated production release approval, restore the secure Hosting build, and finish the three-profile identity/users regression before adding any second workflow or broader staff cohort. |
 
 The first live canary exposes only the server PIN-login and protected account-management entry points. Offline replay, transports, EOC submissions, and issue mutations remain disabled and network-private until their separately verified workflow stages.
 
@@ -111,12 +111,12 @@ This section is only for large choices that are difficult to reverse or that con
 - **Effect:** Deactivation, PIN change, role reduction, home-location removal, temporary/issue-access change, and admin end-all-sessions must automatically invalidate every device with audit evidence. A role/location/access change signs the person out everywhere; the next login receives only current access. A temporary grant expiration may end that scoped session before the otherwise absolute 84-hour maximum so expired access cannot linger.
 - **Status:** Confirmed session contract; deployed and enabled only for the three synthetic Test House canary profiles. Live browser proof of persistence, revocation, and multi-device behavior is still required before expansion.
 
-### Preserve scoped supervisor BHT account management
+### Preserve scoped supervisor BHT account creation and management
 
-- **Decision:** Preserve the existing practical supervisor/admin PIN-reset and user-management experience. A supervisor may reset a PIN, deactivate/reactivate, end sessions, and manage operational assignment/access for an existing BHT/tech whose single home location is within that supervisor's authorized main-location scope.
+- **Decision:** Preserve the existing practical supervisor/admin user-management experience. A supervisor may create a BHT/tech account and may reset a PIN, deactivate/reactivate, end sessions, and manage operational assignment/access for a BHT/tech whose single home location is within that supervisor's authorized main-location scope.
 - **Reason:** Location supervisors must manage day-to-day staffing without sending every account action to an administrator.
-- **Effect:** Supervisors cannot manage supervisor/admin accounts, elevate a BHT to supervisor/admin, grant a location outside their own scope, create new login-capable accounts, or change global security settings. Each active BHT/tech must resolve to exactly one home location; zero or multiple homes are invalid configuration for admin correction.
-- **Status:** Confirmed operating contract. Protected account actions are deployed and enabled only for the three synthetic Test House canary profiles; other staff remain on the unchanged compatibility path. Live supervisor-scope verification is still required.
+- **Effect:** Supervisors cannot create or manage supervisor/admin accounts, elevate a BHT to supervisor/admin, grant a location outside their own scope, or change global security settings. Each active BHT/tech must resolve to exactly one home location; zero or multiple homes are invalid configuration for admin correction.
+- **Status:** Confirmed operating contract. The corrected protected server, UI, scoped query, and strict-rule behavior is implemented and emulator/browser-tested on `codex/security-foundation-completion`; it is not deployed. Production remains on the three-profile canary/compatibility boundary until a separately approved release.
 
 ### Enforce role and location boundaries through the full workflow
 
@@ -164,6 +164,26 @@ These are the current high-level priorities. They guide planning but do not auth
 5. Do not operationally assign custom EOC templates until template access, task generation, checklist loading, photo upload, and fallback protection work under a verified staff session.
 6. Protect offline work while strengthening replay checks so stale, revoked, wrong-user, and conflicting actions stop for review instead of syncing quietly.
 7. Release security work in small workflow groups with role, location, phone, desktop, online, offline, and rollback evidence at every stage.
+
+## Security Foundation Completion Stages
+
+This is the approved sequence for finishing the secure PIN/custom-token update without repeating completed Phases 1–9 or breaking ordinary staff work:
+
+1. Lock the `44b6e44` source/deployment/rollback checkpoint and correct stale documentation.
+2. Complete Identity/Users locally: scoped supervisor BHT creation/management, backend-constrained Users queries, matching rules, and a guarded secure Hosting build.
+3. Release and finish the three-profile Identity/Users canary, including the Test Supervisor, both Test BHTs, compatibility fallback, EOC regression, real query scope, device/session behavior, and rollback.
+4. Enable and prove `templates_photos` for the same cohort.
+5. Enable and prove `eoc`, including protected EOC submission and the first scoped offline-replay operations.
+6. Enable and prove `debriefs_alerts`, including sending, receiving, corrections, reassignment, timing alerts, and offline conflicts.
+7. Enable and prove `issues_feedback_audit`, including protected issue mutations, photos, supervisor review, feedback separation, and immutable audit evidence.
+8. Enable and prove `transports`, including protected creation, corrections, offline replay, and two-device active-transport conflict protection.
+9. Enable and prove `operations_admin`, then separately `settings`, covering Properties, Fleet, Compliance, Cintas, and admin-only global controls.
+10. Run the complete cross-workflow offline/reconnect matrix and observe App Check monitoring without enforcement.
+11. Expand secure login to all active staff in small role/location cohorts after previewing and correcting invalid profiles; do not change PINs merely to simplify migration.
+12. With separate approval, retire browser-trusted PIN/profile behavior and compatibility rule branches while keeping the same six-digit PIN screen and reversible observation window.
+13. Run full production role/workflow/device/offline/negative-security and rollback validation, then close out the Master Plan and Progress Log with exact evidence.
+
+Every stage follows one gate: implement and test locally, capture rollback, deploy dormant, enable only the named cohort/workflow, test positive and negative live behavior, exercise rollback, record evidence, and only then continue. PIN resets, deactivation, session ending, production-data changes, deployments, activation, and compatibility retirement retain their explicit approval boundaries.
 
 ## 1. Purpose of This Plan
 
@@ -414,7 +434,7 @@ Supervisor/admin navigation includes Dashboard, Transports, Debriefs, Users, EOC
 | Role | Normal scope | Can create/change | Cannot do by design |
 |---|---|---|---|
 | BHT / tech | Own active profile, assigned location/shift/vans, own transports, eligible EOCs, location issue handoff | Daily records, assigned EOCs, issue reports/follow-up, debrief notes/submission/assigned incoming signoff, own transport work | Manage users, approve final issue resolution, reassign debrief receivers, manage global settings |
-| Supervisor | Authorized main locations and BHT/tech staff whose one home location belongs to that scope | Review/return/approve issues, reset scoped BHT PINs, deactivate/reactivate scoped BHTs, end their sessions, manage scoped assignments/access, review debriefs/transports, correct debrief receiver assignment, manage scoped operations/templates | Manage supervisors/admins, create login-capable accounts, elevate roles, grant out-of-scope locations, change global security, use global admin-only audit/feedback controls, perform permanent destructive template actions |
+| Supervisor | Authorized main locations and BHT/tech staff whose one home location belongs to that scope | Create scoped BHT/tech accounts; reset scoped BHT PINs; deactivate/reactivate and end sessions; manage scoped assignments/access; review/return/approve issues; review debriefs/transports; correct debrief receiver assignment; manage scoped operations/templates | Create or manage supervisors/admins, elevate roles, grant out-of-scope locations, change global security, use global admin-only audit/feedback controls, perform permanent destructive template actions |
 | Admin | Authorized global operations | User/access governance, global review, sensitive template/privacy/settings actions, audit and feedback review | Bypass required reasons, version checks, audit history, or explicit production change approval |
 
 `tech` is a compatibility role normalized to the BHT operating model where older records still use it.
@@ -522,10 +542,10 @@ These rules apply to current and future work:
 
 ## 10. Open Questions
 
-1. Which internal/Test House profiles will be the first security-foundation canary accounts after the dormant client path and workflow proof are ready?
+1. **Resolved:** The first canary profiles are `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`.
 2. What exact production data classes and photo paths require the highest-priority lockdown before broader authorization work?
 3. Should custom EOC templates remain entirely unassigned until the secure session is complete, or should an internal-only synthetic canary be allowed after emulator proof?
-4. Which existing broad supervisor queries need redesign first so strict location rules will not break the page?
+4. **Resolved:** Identity/Users is first. The Users page must query canonical BHT/tech role plus authorized main location, with Firestore enforcing the same boundary. Other broad queries are corrected within their named workflow stage before activation.
 5. What simple supervisor view should show offline items that stopped as `needsReview`?
 6. What retention periods are operationally and legally appropriate for EOC details, issue photos, issue history, app feedback, and audit records? This requires policy/privacy review before implementation.
 
@@ -533,11 +553,11 @@ These rules apply to current and future work:
 
 | Area | Status | Evidence / limitation |
 |---|---|---|
-| Main application baseline | Released | `origin/Main` and this worktree point to `c6b0ec1`; live release work reported Hosting/rules/indexes/Storage/Functions deployment success. |
+| Main application baseline | Released | `origin/Main` and the starting point for the completion branch are `44b6e44`; PR #8 merged the EOC canary location-query fix and its Hosting-only release was reported deployed. |
 | Shift Debrief safeguards | Released | `8339827`; focused tests, emulator/rules tests, lint/build, push, Hosting and Firestore rules deployment were reported. |
 | Issue handoff/app feedback V2 | Released and enabled | `3c11306`; feature flag version 3 was verified for the approved four operational locations at release time. Recheck before future changes because configuration can drift. |
 | Guided EOC template builder | Released with blocker | `c6b0ec1`; normal PIN sessions cannot currently satisfy protected template and Function access. No production templates/assignments were changed in release verification. |
-| Security foundation | Phases 1–9 locally implemented, pushed for review, and dormant | Server/client identity, protected account/session actions, offline replay ownership, named workflow/rule/Storage boundaries, protected EOC/issue/transport mutations, monitoring-only App Check hooks, canary/rollback readiness, and Node.js 22.23.2 runtime parity are locally tested. The normal build keeps current PIN login; production configuration/data/providers/enforcement are unchanged. No deploy, merge, secret configuration, canary, or activation occurred. |
+| Security foundation | Phases 1–9 merged; Identity/Users completion in progress | The three-profile identity/users canary and rollback tooling exist. The current completion branch adds supervisor in-scope BHT creation, backend-scoped Users queries/rules, and a secure-canary Hosting build guard. These corrections pass local unit, Auth/Firestore/Storage/Functions emulator, browser, build/lint, and Node.js 22.23.2 parity checks but are not deployed, pushed, merged, or activated. All later workflows and four protected operational endpoints remain disabled/private. |
 | Documentation foundation | Restored and locally updated | Authoritative `MASTER_PLAN.md` and `PROGRESS_LOG.md` drafts plus project guidance, README links, and document hierarchy are restored and reconciled in this isolated branch; no production changes. |
 
 Current configuration and live Hosting state can change after this document is written. Recheck before any release or production decision.

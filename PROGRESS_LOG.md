@@ -1,8 +1,45 @@
 # SPRC Ops Hub Progress Log
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
+
+## 2026-08-28 — Identity/Users completion implementation, local checkpoint
+
+### Purpose
+
+Resume from merged `origin/Main` commit `44b6e44` without repeating security-foundation Phases 1–9, correct the approved supervisor account-creation contract, enforce the Users page location boundary in Firebase rather than only in React, and prevent another secure-canary Hosting build from omitting its compile-time bootstrap setting.
+
+### Local implementation outcome
+
+- Created isolated branch `codex/security-foundation-completion` from clean `44b6e44`.
+- Protected account creation now lets a current mapped supervisor create only a valid BHT/tech whose exact one-home-location configuration belongs to the supervisor's authorized main-location scope. Admin authority remains global; supervisor/admin creation, role elevation, out-of-location creation, malformed homes, and inactive/stale actors remain denied.
+- Restored the existing `+ Add New User` experience for supervisors. The supervisor form exposes only BHT and authorized location options while retaining the familiar six-digit PIN, house, shift, van, and active fields.
+- Replaced the supervisor's whole-collection Users listener/read with canonical role-plus-location Firestore queries. Admins retain the global list. Secure sessions do not display cached staff results before a server-authorized result, and a failed scoped query clears the list and shows an error instead of silently presenting partial scope.
+- Tightened strict `users` list/get rules to require BHT/tech role plus the supervisor's signed current workflow location scope. Added direct rule proof that an OTC supervisor can query OTC BHTs but cannot query RES staff or supervisors; admins retain the global query.
+- Removed the unsafe no-scope-to-OTC fallback. A supervisor with no valid staff location receives no Users query and must have the profile corrected.
+- Added `npm run build:security-canary` and `npm run verify:security-canary-build`. The canary build forces the secure compile flag and injects a verifiable `sprc-security-bootstrap=v3-enabled` marker; verification refuses a bundle without it.
+- Added an out-of-scope RES BHT emulator fixture and a protected browser journey proving the supervisor sees only OTC BHTs, cannot select supervisor/admin or RES, and creates a Test House BHT through `manageStaffSecurityV4`.
+
+### Verification evidence
+
+- Focused pure model tests: 17 passed, 0 failed.
+- Full security-foundation pure tests: 60 passed, 0 failed.
+- Auth/Firestore security-foundation emulator: 42 passed, 0 failed, including in-scope supervisor creation and elevated/out-of-location denials.
+- Firestore rules: 36 passed, 0 failed, including backend-scoped Users queries.
+- Storage rules: 4 passed, 0 failed.
+- Functions emulator: 10 passed, 0 failed. The final parity run used the checksum-verified official Node.js `22.23.2` binary and reported `Using node@22 from host`.
+- Secure phone/tablet/desktop browser matrix: 10 applicable cases passed; 14 intentional duplicate-viewport cases skipped. It covered server PIN login, persistence/reload/tabs, independent devices, one-device logout, self-PIN change, supervisor PIN reset, end-all-sessions, live revocation, scoped Users listing, and supervisor BHT creation. The known Windows web-server wrapper was interrupted only after the final case reported.
+- Existing non-emulator regression suites: PIN 4, Shift Debrief 14, debrief-reset 3, EOC/org/batching 29, supervisor EOC 5, Function models 8, issues/photos/feedback 18, reset 4, cutover 2, and protected operational mutations 4 — all passed, 0 failed.
+- Normal compatibility build passed. The guarded secure-canary build passed and its output marker was independently verified. Lint and `git diff --check` passed.
+- `verify:security-readiness` under Node.js 22.23.2 reported `localDormantImplementationReady: true`, `runtimeParity: true`, and `productionReleaseReady: false` only because production release/configuration authority remains separate.
+
+### External-state and release boundary
+
+- No Firebase production read/write, account creation, PIN reset, deactivation, session ending, configuration change, secret change, Auth-provider change, rules/Functions/Hosting deployment, canary expansion, push, merge, or activation occurred.
+- The temporary emulator-only PIN secret file was removed after browser verification. No secret material is tracked.
+- Production still requires a coordinated reviewed release of Functions, Firestore rules/indexes as needed, and the guarded secure Hosting build. Before any live account/session/data action, obtain Mark's explicit approval.
+- Identity/Users production regression and rollback remain Stage 3. Every later protected workflow and `authorizeOfflineReplayV5`, `createProtectedTransportV6`, `submitProtectedEocV9`, and `mutateProtectedIssueV9` remain disabled/private.
 
 ## 2026-08-27 — Release and activate the identity-only Test House security canary
 
@@ -146,7 +183,7 @@ Complete the remaining authorized local security foundation without changing the
 - Added protected server PIN/account/session actions for self PIN change, scoped reset, secure administrator account creation, profile edits, deactivation/reactivation, soft deletion, one-device logout, and end-all-sessions.
 - PIN change/reset, deactivation, role reduction, location removal, reactivation, and end-all-sessions atomically advance `securityVersion`, close all device sessions, write immutable audit/cleanup evidence, and revoke Firebase refresh tokens with idempotent retry handling. Ordinary logout closes only one device.
 - Closed the older temporary backup/issue-access bypass: secure-session grant, revoke, and issue-scope changes now run through protected administrator-only server actions, advance `securityVersion`, revoke every device, and record one server audit. The next login receives active current scope; a temporary grant's earliest expiry also ends the scoped session so access cannot remain cached for the balance of the 84-hour maximum.
-- Preserved the existing supervisor/admin and staff PIN screens. Supervisors remain limited to existing BHT/tech profiles at one valid home location in their own scope; only admins can create login-capable accounts.
+- Preserved the existing supervisor/admin and staff PIN screens. At this earlier checkpoint, supervisors were limited to existing BHT/tech profiles and only admins could create login-capable accounts. **Superseded on 2026-08-28:** the approved/current contract preserves supervisor creation and management of BHT/tech accounts at the supervisor's authorized existing single home location, while supervisor/admin creation and elevation remain admin-only.
 - Bound new offline work to original profile, stable Firebase UID, device session, security version, location, action, and expected record version. Wrong-owner/deactivated/stale/revoked/conflicting work is safely held or moved to review rather than reassigned or forced through.
 - Added exact dormant workflow gates for identity/users, templates/photos, EOC, debriefs/alerts, issues/feedback/audit, transports, operations administration, and settings. Server-issued tokens include only non-secret role/location scope and rules accept it only with a current matching server device session.
 - Added protected transport creation with deterministic operation IDs, a per-profile active-transport lock, exact-version replay, and a server transaction that permits only one active transport when two devices race.

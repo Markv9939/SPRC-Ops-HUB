@@ -223,9 +223,6 @@ async function createDormantStaffProfile({
   appCheckPresent,
   nowMs
 }) {
-  if (normalizeSecurityRole(currentActor.role) !== 'admin') {
-    throw new StaffAccountSecurityError('permission-denied', 'Only administrators may create login-capable staff profiles.')
-  }
   let profilePatch
   let nextPin
   let credential
@@ -243,6 +240,16 @@ async function createDormantStaffProfile({
   }
   if (!validateManagedProfile(profile).valid) {
     throw new StaffAccountSecurityError('failed-precondition', 'The staff profile has an invalid role or BHT home-location configuration.')
+  }
+  const authority = evaluateStaffAccountManagement({
+    actor: currentActor,
+    target: profile,
+    action: STAFF_ACCOUNT_ACTIONS.CREATE_PROFILE,
+    requestedRole: profile.role,
+    requestedLocationId: requestedLocation(profile)
+  })
+  if (!authority.allowed) {
+    throw new StaffAccountSecurityError('permission-denied', `This staff account action is not allowed (${authority.reason}).`)
   }
 
   const timestamp = Timestamp.fromMillis(nowMs)

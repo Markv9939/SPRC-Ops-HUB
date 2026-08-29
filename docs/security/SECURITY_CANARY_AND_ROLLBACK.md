@@ -1,7 +1,21 @@
 # Security Foundation Canary and Rollback Gate
 
-Last updated: 2026-08-27
-Status: Test House canary authorized; guarded release preparation in progress
+Last updated: 2026-08-28
+Status: Test House identity/users canary active; corrected coordinated re-release awaiting approval
+
+## Current Identity/Users re-release checkpoint
+
+The original Test House canary has already been activated for exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`, with only `identity_users` enabled. The 2026-08-28 correction is therefore a **code re-release**, not a first activation:
+
+1. Start from merged production baseline `44b6e44`; release candidate `4662776` contains the local Identity/Users corrections.
+2. Read back and back up the current deployed Functions, Firestore rules/indexes, Hosting release, Auth/provider state, and both protected configuration documents before changing anything.
+3. Confirm the protected configuration still names only the same three profiles and only `identity_users`. Do not rewrite or broaden it as part of the code release.
+4. Deploy the reviewed Functions, Firestore rules, and Hosting bundle as one coordinated set. Build Hosting only with `npm run build:security-canary`, then require `npm run verify:security-canary-build` to pass before deployment.
+5. Keep `authorizeOfflineReplayV5`, `createProtectedTransportV6`, `submitProtectedEocV9`, and `mutateProtectedIssueV9` network-private and disabled.
+6. Run non-mutating Test Supervisor EOC and Users location-scope checks first. Obtain Mark's explicit approval immediately before any live PIN reset, account creation/deactivation, session ending, or other production-data mutation.
+7. Finish Test Supervisor and both Test BHT identity/users journeys plus a non-enrolled compatibility login. If any required query, listener, login, reload, role/location boundary, or rollback check fails, restore the coordinated `44b6e44` release set before proceeding.
+
+The guarded `security:canary` **activate** mode was designed for the original absent-configuration baseline and must not be reused for this already-active re-release. Its preview output may be used only as read-only evidence plus a verified backup; no activation or rollback command may run without confirming that its assumptions match current production state.
 
 ## Before any canary
 
@@ -16,7 +30,7 @@ Status: Test House canary authorized; guarded release preparation in progress
 7. Enable only one named workflow for the canary. Do not flip global strict auth.
 8. End the canary users' existing sessions so their next PIN login receives the exact current workflow claims.
 
-Use `npm run security:canary -- --mode=preview --project=sprc-tx-l --backup-dir=<absolute path outside the repo>` before activation. The guarded apply and rollback modes require the verified backup, exact release ID, and exact confirmation phrase; they refuse a changed configuration baseline.
+For the original first activation, `npm run security:canary -- --mode=preview --project=sprc-tx-l --backup-dir=<absolute path outside the repo>` captured the protected settings. For any re-release, capture a fresh coordinated rollback package and compare it with live readback, but do not use the original absent-baseline activation mode. The guarded mutation and rollback modes require the verified backup, exact release ID, and exact confirmation phrase; verify their current-state assumptions before use.
 
 ## Per-workflow go/no-go gate
 
