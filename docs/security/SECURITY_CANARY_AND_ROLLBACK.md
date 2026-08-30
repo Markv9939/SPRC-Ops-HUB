@@ -1,19 +1,19 @@
 # Security Foundation Canary and Rollback Gate
 
-Last updated: 2026-08-28
-Status: Corrected Identity/Users release deployed; signed-in three-profile verification in progress
+Last updated: 2026-08-29
+Status: Compatibility login/reload passed live; remaining Identity/Users revocation, RES, and rollback gates pending
 
 ## Current Identity/Users re-release checkpoint
 
 The original Test House canary has already been activated for exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`, with only `identity_users` enabled. The 2026-08-28 correction is therefore a **code re-release**, not a first activation:
 
-1. Start from merged production baseline `44b6e44`; release candidate `4662776` contains the local Identity/Users corrections.
+1. The corrected Identity/Users source is merged through `f067ccc`; the approved Hosting-only compatibility-reload patch is reconciled by this focused change.
 2. Read back and back up the current deployed Functions, Firestore rules/indexes, Hosting release, Auth/provider state, and both protected configuration documents before changing anything.
 3. Confirm the protected configuration still names only the same three profiles and only `identity_users`. Do not rewrite or broaden it as part of the code release.
 4. Deploy the reviewed Functions, Firestore rules, and Hosting bundle as one coordinated set. Build Hosting only with `npm run build:security-canary`, then require `npm run verify:security-canary-build` to pass before deployment.
 5. Keep `authorizeOfflineReplayV5`, `createProtectedTransportV6`, `submitProtectedEocV9`, and `mutateProtectedIssueV9` network-private and disabled.
 6. Run non-mutating Test Supervisor EOC and Users location-scope checks first. Obtain Mark's explicit approval immediately before any live PIN reset, account creation/deactivation, session ending, or other production-data mutation.
-7. Finish Test Supervisor and both Test BHT identity/users journeys plus a non-enrolled compatibility login. If any required query, listener, login, reload, role/location boundary, or rollback check fails, restore the coordinated `44b6e44` release set before proceeding.
+7. Test Supervisor, both Test BHTs, independent-device behavior, and the non-enrolled compatibility login/reload/no-secure-artifact gate passed live. Finish all-device revocation, RES-side account creation, and final rollback proof. If any remaining query, listener, role/location boundary, revocation, or rollback check fails, stop before enabling another workflow and restore the verified coordinated prior release set.
 
 The guarded `security:canary` **activate** mode was designed for the original absent-configuration baseline and must not be reused for this already-active re-release. Its preview output may be used only as read-only evidence plus a verified backup; no activation or rollback command may run without confirming that its assumptions match current production state.
 

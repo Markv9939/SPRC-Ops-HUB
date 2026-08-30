@@ -4,6 +4,22 @@ Last updated: 2026-08-29
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
+## 2026-08-29 — Compatibility reload correction released and reconciled
+
+### Outcome
+
+- A valid synthetic BHT outside the exact three-profile secure allowlist correctly used the compatibility login but the previous client returned to the PIN screen after reload.
+- Added an exact versioned compatibility marker only after successful compatibility login. Reload restores only a marked valid compatibility profile; malformed, unmarked, or secure-session browser state does not enter this fallback.
+- Preserved the marker through the existing live scope refresh and added focused model plus production-shaped browser coverage for login, reload, and absence of secure-session artifacts.
+
+### Verification and live evidence
+
+- From a clean detached `origin/Main` baseline at `f067ccc`: 61 security contracts passed, lint passed, and the guarded `v3-enabled` production build passed with the correct `sprc-tx-l` project ID.
+- The Node.js 22.23.2 Firestore/Auth/Functions emulator browser gate passed: the non-enrolled BHT remained on Home after reload and received no secure local session.
+- After explicit approval, Firebase Hosting-only deployment completed. The live site loaded `App-BH_gTpSZ.js`; login and normal reload stayed on the correctly scoped BHT Home.
+- A read-only production check confirmed the active compatibility profile had no `staffAuthIdentities` mapping, zero `staffSessions` records, and zero active secure sessions.
+- No Function, rule, index, protected setting, workflow, endpoint, cohort, account, PIN, or production record update was included in the Hosting deployment. Later protected workflows and four protected endpoints remain disabled.
+
 ## 2026-08-29 — Corrected Identity/Users release deployed; live canary verification in progress
 
 ### Release outcome
