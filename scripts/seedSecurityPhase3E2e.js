@@ -9,6 +9,7 @@ const db = getFirestore(app)
 const now = Timestamp.now()
 const activeGrantStartsAt = Timestamp.fromMillis(now.toMillis() - (60 * 1000))
 const activeGrantExpiresAt = Timestamp.fromMillis(now.toMillis() + (7 * 24 * 60 * 60 * 1000))
+const compatibilityCanary = process.argv.includes('--compatibility-canary')
 
 function hashPin(pin) {
   return createHash('sha256').update(`sprc-pin-v2-6digit:${pin}`).digest('hex')
@@ -70,7 +71,8 @@ const writes = [
     clientBootstrapEnabled: true,
     protectedAccountActionsVersion: 4,
     protectedAccountActionsEnabled: true,
-    rolloutState: 'emulator_only',
+    rolloutState: compatibilityCanary ? 'production_canary' : 'emulator_only',
+    enabledProfileIds: compatibilityCanary ? ['phase3_browser_mobile'] : [],
     updatedAt: now
   }],
   ['appSettings/securityWorkflows', {

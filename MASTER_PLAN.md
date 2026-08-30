@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-29
 Document status: Active living blueprint
-Application release reference: `e3f5577` (`Merge PR #9: Complete Identity/Users security canary corrections`)
+Application release reference: `f067ccc` plus the 2026-08-29 Hosting-only compatibility-reload patch; this focused change reconciles that deployed source into `Main`
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -33,9 +33,9 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | Security-foundation Phases 1–9 are merged and the corrected Identity/Users release is deployed from `e3f5577`. The live Hosting marker is `v3-enabled`; the canary still contains exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`, enables only `identity_users`, and keeps the four later protected endpoints private. The post-deploy browser session is signed out, so Test Supervisor/Test BHT workflow verification is still required before Stage 3 closes. |
+| **In progress** | Security-foundation Phases 1–9 are merged and the corrected Identity/Users release is deployed through `f067ccc`, followed by the approved Hosting-only compatibility-reload patch. The live marker is `v3-enabled`; the canary still contains exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`, enables only `identity_users`, and keeps the four later protected endpoints private. Test Supervisor EOC/Users scope and scoped BHT creation, both Test BHT secure-login/reload/scope journeys, independent two-device plus one-device logout, and the non-enrolled compatibility login/reload gate have passed. The non-enrolled BHT has no secure identity mapping and zero secure sessions. All-device revocation, RES-side account creation, and final rollback proof remain before Stage 3 closes. |
 | **Paused** | Operational assignment of custom Guided Canvas EOC templates is paused because normal PIN sessions do not yet satisfy the protected Firebase template and photo paths. |
-| **Next major decision** | Finish the three-profile Identity/Users live regression and rollback proof, then continue automatically to `templates_photos` only if every Stage 3 gate passes. |
+| **Next major decision** | Finish the remaining Identity/Users all-device-revocation, RES-side, and rollback gates before advancing to `templates_photos`. |
 
 The first live canary exposes only the server PIN-login and protected account-management entry points. Offline replay, transports, EOC submissions, and issue mutations remain disabled and network-private until their separately verified workflow stages.
 

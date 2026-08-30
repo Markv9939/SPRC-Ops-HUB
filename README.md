@@ -103,6 +103,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Security foundation unit contracts: `npm run test:security-foundation`
 - Security foundation emulator contracts: `npm run test:security-foundation:emulator`
 - Local security readiness audit: `npm run verify:security-readiness`
+- Non-enrolled compatibility login/reload gate: `npm run test:security-compatibility:emulator` (inside the Node 22 Firestore/Auth/Functions emulator wrapper)
 - Smoke: `npm run smoke:phase9:full`
 - Preview core reset (read-only): `npm run reset:core:preview`
 - Back up core reset data (read-only): `npm run reset:core:backup`

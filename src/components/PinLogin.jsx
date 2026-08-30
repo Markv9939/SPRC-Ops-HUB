@@ -11,6 +11,7 @@ import {
   SECURITY_CLIENT_BOOTSTRAP_COMPILED,
   beginSecurityClientPinLogin
 } from '../services/securityClientRuntime'
+import { toSecurityCompatibilityUser } from '../services/securityClientSessionModel'
 import { isOfflineMode } from '../utils/networkGuard'
 import { PIN_LENGTH, isValidPin, normalizePin } from '../utils/pinPolicy'
 import {
@@ -297,11 +298,11 @@ function PinLogin({ onLogin }) {
           }
         }
 
-        onLogin({
+        onLogin(toSecurityCompatibilityUser({
           ...scopedSessionUser,
           authScopeEnforced,
           ...authSession
-        })
+        }))
       }
     } catch (err) {
       console.error('Login error:', err)

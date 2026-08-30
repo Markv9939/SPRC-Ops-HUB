@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  SECURITY_COMPATIBILITY_SESSION_VERSION,
   SECURITY_SESSION_MAX_MS,
   buildStoredSecuritySession,
   clearStoredSecuritySession,
@@ -11,6 +12,8 @@ import {
   readStoredSecuritySession,
   sanitizeSecurityProfile,
   securityClientConfigEnabled,
+  isSecurityCompatibilityUser,
+  toSecurityCompatibilityUser,
   toSecureSessionUser,
   validateStoredSecuritySession
 } from '../src/services/securityClientSessionModel.js'
@@ -72,6 +75,21 @@ test('the Phase 3 client boundary requires both compile and exact versioned serv
   assert.equal(securityClientConfigEnabled({ ...enabled, serverPinLoginEnabled: false }, true), false)
   assert.equal(securityClientConfigEnabled({ ...enabled, rolloutState: 'production_canary', enabledProfileIds: [] }, true), false)
   assert.equal(securityClientConfigEnabled({ ...enabled, rolloutState: 'production_canary', enabledProfileIds: ['test_bht_shift_1'] }, true), true)
+})
+
+test('only an explicitly marked legacy login can use compatibility reload restoration', () => {
+  const compatibilityUser = toSecurityCompatibilityUser({
+    id: 'phase3_compatibility_bht',
+    name: 'Compatibility BHT',
+    role: 'bht',
+    locationId: 'test_house'
+  })
+  assert.equal(compatibilityUser.securityCompatibilityVersion, SECURITY_COMPATIBILITY_SESSION_VERSION)
+  assert.equal(isSecurityCompatibilityUser(compatibilityUser), true)
+  assert.equal(isSecurityCompatibilityUser({ ...compatibilityUser, securitySessionVersion: 3 }), false)
+  assert.equal(isSecurityCompatibilityUser({ ...compatibilityUser, securityCompatibilityVersion: 2 }), false)
+  assert.equal(isSecurityCompatibilityUser({ ...compatibilityUser, id: '' }), false)
+  assert.equal(isSecurityCompatibilityUser({ ...compatibilityUser, role: 'unknown' }), false)
 })
 
 test('server login response is minimized and fixed to one absolute 84-hour window', () => {

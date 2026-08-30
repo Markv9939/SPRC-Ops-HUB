@@ -61,6 +61,7 @@ import {
   restoreSecurityClientSession,
   subscribeToSecurityClientSession
 } from './services/securityClientRuntime'
+import { isSecurityCompatibilityUser } from './services/securityClientSessionModel'
 import { createProtectedTransport, shouldUseProtectedTransport } from './services/protectedTransportService'
 
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
@@ -81,6 +82,11 @@ function loadLegacyStoredUser() {
     sessionStorage.removeItem('bhtUser')
     return null
   }
+}
+
+function loadSecurityCompatibilityUser() {
+  const storedUser = loadLegacyStoredUser()
+  return isSecurityCompatibilityUser(storedUser) ? storedUser : null
 }
 const ACTIVE_TRANSPORT_STATUSES = new Set(['open', 'arrived'])
 const DASHBOARD_TABS = new Set([
@@ -363,6 +369,7 @@ function App() {
         retryOnReconnect = false
         if (result.status === 'authenticated') setUser(result.user)
         else if (result.status === 'disabled') setUser(loadLegacyStoredUser())
+        else if (result.status === 'signed_out') setUser(loadSecurityCompatibilityUser())
         else setUser(null)
       } catch (error) {
         if (cancelled) return
@@ -696,7 +703,8 @@ function App() {
           const mergedUser = {
             ...refreshedUser,
             authUid: prev.authUid || null,
-            authScopeEnforced: prev.authScopeEnforced === true
+            authScopeEnforced: prev.authScopeEnforced === true,
+            securityCompatibilityVersion: prev.securityCompatibilityVersion
           }
 
           if (toScopeSignature(prev) === toScopeSignature(mergedUser)) return prev
