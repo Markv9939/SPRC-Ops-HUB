@@ -24,6 +24,7 @@ import { writeAuditLog as writeAuditEntry } from '../services/notificationServic
 import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { isSecureSessionUser, performSecurityAccountAction } from '../services/securityAccountActions'
 import { buildManagedUserQueryPlan, mergeManagedUserDocumentGroups } from '../services/userManagementQueryModel'
+import { subscribeMergedQueryRows } from '../services/scopedSnapshotService'
 import useUserScope from '../hooks/useUserScope'
 import useScopedIssues from '../hooks/useScopedIssues'
 import useScopedFleet from '../hooks/useScopedFleet'
@@ -212,6 +213,10 @@ function SupervisorDashboard({
     inIssueScope,
     exactIssueLocationIds
   } = useUserScope(user)
+  const operationsAdminSecurityEnabled = user?.authScopeEnforced !== true
+    || (Number(user?.workflowSecurityVersion || 0) === 6
+      && Array.isArray(user?.secureWorkflows)
+      && user.secureWorkflows.includes('operations_admin'))
 
   // ── Real-time data from shared hooks ──
   // (Must be declared AFTER useUserScope so inEocScope/inComplianceScope are initialized.)
@@ -223,7 +228,12 @@ function SupervisorDashboard({
     inIssueScope,
     issueLocationIds: exactIssueLocationIds
   })
-  const { overdueTasks: fleetOverdueTasks, upcomingTasks: fleetUpcomingTasks } = useScopedFleet({ inComplianceScope })
+  const { overdueTasks: fleetOverdueTasks, upcomingTasks: fleetUpcomingTasks } = useScopedFleet({
+    inComplianceScope,
+    scopeSites: isAdmin ? null : allowedComplianceSites,
+    isAdmin,
+    enabled: operationsAdminSecurityEnabled
+  })
 
   const actorRoleOptions = useMemo(
     () => roleOptionsForActor(user?.role),
@@ -234,6 +244,11 @@ function SupervisorDashboard({
     isAdmin,
     managedMainLocations
   }), [isAdmin, managedMainLocations])
+  const scopedTransportSites = useMemo(
+    () => [...new Set(allowedComplianceSites.map(normalizeTransportSite).filter(Boolean))].sort(),
+    [allowedComplianceSites]
+  )
+  const scopedTransportSiteSignature = scopedTransportSites.join('|')
 
   const managedUserQueries = useMemo(() => managedUserQueryPlan.map((descriptor) => ({
     ...descriptor,
@@ -280,12 +295,15 @@ function SupervisorDashboard({
 
   // Compliance items listener (not yet extracted to a hook)
   useEffect(() => {
-    const unsubCompliance = onSnapshot(
-      collection(db, 'complianceItems'),
-      (snap) => setComplianceItems(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    )
+    const complianceQueries = isAdmin
+      ? [collection(db, 'complianceItems')]
+      : allowedComplianceSites.flatMap(site => [
+          query(collection(db, 'complianceItems'), where('targetType', '==', 'employee'), where('employeeSite', '==', site)),
+          query(collection(db, 'complianceItems'), where('targetType', '==', 'location'), where('mainLocation', '==', site))
+        ])
+    const unsubCompliance = subscribeMergedQueryRows(complianceQueries, setComplianceItems)
     return () => unsubCompliance()
-  }, [])
+  }, [allowedComplianceSites, isAdmin])
 
   const applyLoadedUsers = useCallback((userDocs) => {
     const usersData = userDocs
@@ -1207,42 +1225,64 @@ function SupervisorDashboard({
   useEffect(() => {
     if (!startDate || !endDate) return undefined
     setTransportsLoaded(false)
+    if (!isAdmin && scopedTransportSites.length === 0) {
+      setTransports([])
+      setDrivers([])
+      setTransportsLoaded(true)
+      return undefined
+    }
 
     const transportsRef = collection(db, 'transports')
 
     const startTimestamp = Timestamp.fromDate(new Date(startDate + 'T00:00:00'))
     const endTimestamp = Timestamp.fromDate(new Date(endDate + 'T23:59:59'))
 
-    const q = query(
-      transportsRef,
-      where('departedAt', '>=', startTimestamp),
-      where('departedAt', '<=', endTimestamp),
-      orderBy('departedAt', 'desc')
-    )
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      let data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })).map(item => ({
-        ...item,
-        site: normalizeTransportSite(item.site)
-      }))
-
-      data = data.filter(t => inTransportScope(t.site))
+    const transportQueries = isAdmin
+      ? [query(
+          transportsRef,
+          where('departedAt', '>=', startTimestamp),
+          where('departedAt', '<=', endTimestamp),
+          orderBy('departedAt', 'desc')
+        )]
+      : scopedTransportSites.map(site => query(
+          transportsRef,
+          where('site', '==', site),
+          where('departedAt', '>=', startTimestamp),
+          where('departedAt', '<=', endTimestamp),
+          orderBy('departedAt', 'desc')
+        ))
+    const buckets = transportQueries.map(() => [])
+    const publish = () => {
+      const merged = new Map()
+      buckets.flat().forEach(item => merged.set(item.id, item))
+      const data = Array.from(merged.values())
+        .map(item => ({ ...item, site: normalizeTransportSite(item.site) }))
+        .filter(item => inTransportScope(item.site))
+        .sort((left, right) => ((right.departedAt?.toMillis?.() || 0) - (left.departedAt?.toMillis?.() || 0)))
       setTransports(data)
 
       // Extract unique drivers
       const uniqueDrivers = [...new Set(data.map(t => t.createdByName))].filter(Boolean)
       setDrivers(uniqueDrivers)
       setTransportsLoaded(true)
-    }, (error) => {
-      console.error('Transport live update failed:', error)
-      setTransportsLoaded(true)
-    })
+    }
+    const unsubscribes = transportQueries.map((scopedQuery, index) => onSnapshot(
+      scopedQuery,
+      (snapshot) => {
+        buckets[index] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+        publish()
+      },
+      (error) => {
+        console.error('Transport live update failed:', error)
+        buckets[index] = []
+        publish()
+      }
+    ))
 
-    return () => unsubscribe()
-  }, [startDate, endDate, inTransportScope])
+    return () => unsubscribes.forEach(unsubscribe => unsubscribe())
+  // The signature keeps this listener stable when callers rebuild an equivalent array.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDate, endDate, inTransportScope, isAdmin, scopedTransportSiteSignature])
 
   useEffect(() => {
     let filtered = [...transports]
@@ -1614,6 +1654,8 @@ function SupervisorDashboard({
           user={user}
           isOffline={isOffline}
           inEocScope={inEocScope}
+          exactLocationIds={exactIssueLocationIds}
+          isAdmin={isAdmin}
           focusedDebriefId={focusedDebriefId}
         />
       )}

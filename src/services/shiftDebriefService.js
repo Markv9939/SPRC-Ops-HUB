@@ -621,7 +621,8 @@ export async function reassignShiftDebriefReceivers({ debriefId, receivingUserId
     collection(db, 'alerts'),
     where('audience', '==', 'bht'),
     where('type', '==', 'shift_debrief_submitted'),
-    where('debriefId', '==', debriefId)
+    where('debriefId', '==', debriefId),
+    where('locationId', '==', initialDebrief.locationId)
   ))
   const auditRef = doc(collection(db, 'auditLogs'))
   const newAlertRefs = selectedUsers.map(() => doc(collection(db, 'alerts')))

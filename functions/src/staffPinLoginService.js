@@ -222,7 +222,14 @@ async function ensureStableAuthUser(auth, profileId, profile, secret) {
     authUser = await auth.getUser(authUid)
   } catch (error) {
     if (error?.code !== 'auth/user-not-found') throw error
-    authUser = await auth.createUser({ uid: authUid, displayName: String(profile.name || '').slice(0, 128) || undefined })
+    try {
+      authUser = await auth.createUser({ uid: authUid, displayName: String(profile.name || '').slice(0, 128) || undefined })
+    } catch (createError) {
+      // Two devices can complete the initial PIN check at the same time. If the
+      // other request created the deterministic UID first, converge on it.
+      if (createError?.code !== 'auth/uid-already-exists') throw createError
+      authUser = await auth.getUser(authUid)
+    }
   }
   if (authUser.disabled === true) throw publicLoginFailure()
   return authUid

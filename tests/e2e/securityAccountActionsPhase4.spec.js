@@ -108,3 +108,59 @@ test('supervisor can create an in-location BHT but cannot see or assign another 
 
   await expect(page.getByText('Internal ID: supervisor_created_browser_bht')).toBeVisible({ timeout: 30_000 })
 })
+
+test('secure admin can create one-home RES BHT and the new account receives only RES scope', async ({ page, browser }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'One desktop admin viewport is sufficient for the RES creation journey.')
+  await signIn(page, '737373', /\/dashboard\/dashboard$/)
+  await page.goto('/dashboard/users')
+  await page.getByRole('button', { name: '+ Add New User' }).click()
+
+  await page.getByLabel('Staff name').fill('RES Browser Canary BHT')
+  await page.getByRole('button', { name: 'Generate secure PIN' }).click()
+  const generatedPin = await page.getByLabel('Staff PIN').inputValue()
+  expect(generatedPin).toMatch(/^\d{6}$/)
+  await page.getByLabel('Staff role').selectOption('bht')
+  await page.getByLabel('Staff location').selectOption('RES')
+  await expect(page.getByLabel('BHT home house')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Van 3' }).click()
+  await page.getByLabel('BHT shift').selectOption('res_shift_1_day')
+  await page.getByRole('button', { name: 'Save', exact: true }).first().click()
+  await expect(page.getByText('Internal ID: res_browser_canary_bht')).toBeVisible({ timeout: 30_000 })
+
+  const bhtContext = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const bhtPage = await bhtContext.newPage()
+  bhtPage.on('dialog', dialog => dialog.accept())
+  await bhtPage.addInitScript(() => localStorage.setItem('sprc_ops_onboarding_done', 'true'))
+  await signIn(bhtPage, generatedPin, /\/home$/)
+  const evidence = await bhtPage.evaluate(async () => {
+    const { auth } = await import('/src/firebase.js')
+    const { restoreSecurityClientSession } = await import('/src/services/securityClientRuntime.js')
+    const restored = await restoreSecurityClientSession()
+    const claims = (await auth.currentUser.getIdTokenResult()).claims
+    return {
+      status: restored.status,
+      profileId: restored.user?.id,
+      locationId: restored.user?.locationId,
+      authorizedLocations: restored.user?.authorizedLocations,
+      issueLocationIds: restored.user?.issueLocationIds,
+      claimRole: claims.role,
+      claimLocationId: claims.locationId,
+      claimAuthorizedLocations: claims.authorizedLocations,
+      claimIssueLocationIds: claims.issueLocationIds,
+      legacySession: sessionStorage.getItem('bhtUser')
+    }
+  })
+  expect(evidence).toEqual({
+    status: 'authenticated',
+    profileId: 'res_browser_canary_bht',
+    locationId: 'res',
+    authorizedLocations: ['RES'],
+    issueLocationIds: ['res'],
+    claimRole: 'bht',
+    claimLocationId: 'res',
+    claimAuthorizedLocations: ['RES'],
+    claimIssueLocationIds: ['res'],
+    legacySession: null
+  })
+  await bhtContext.close()
+})

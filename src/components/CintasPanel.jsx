@@ -5,17 +5,18 @@ import {
   collection,
   deleteDoc,
   doc,
-  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   Timestamp,
-  updateDoc
+  updateDoc,
+  where
 } from 'firebase/firestore'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
 import { MAIN_LOCATIONS, normalizeMainLocation } from '../utils/orgModel'
 import { getStatus } from '../utils/complianceStatus'
+import { subscribeMergedQueryRows } from '../services/scopedSnapshotService'
 
 const LOCATION_ITEM_CATEGORIES = {
   fire_safety: { label: 'Fire Safety', icon: '\u{1F9EF}' },
@@ -176,27 +177,32 @@ function CintasPanel({ user, scopeSites = null }) {
   useEffect(() => {
     if (!hasScope) return () => {}
 
-    const unsubServices = onSnapshot(
-      query(collection(db, 'cintasServices'), orderBy('siteAddress', 'asc')),
-      (snap) => {
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        setServices(rows)
-      }
-    )
-
-    const unsubItems = onSnapshot(
-      collection(db, 'complianceItems'),
-      (snap) => {
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        setLocationItems(rows.filter(isLocationComplianceItem))
-      }
-    )
+    const serviceQueries = isAdmin
+      ? [query(collection(db, 'cintasServices'), orderBy('siteAddress', 'asc'))]
+      : normalizedScopeSites.map(mainLocation => query(
+          collection(db, 'cintasServices'),
+          where('mainLocation', '==', mainLocation),
+          orderBy('siteAddress', 'asc')
+        ))
+    const itemQueries = isAdmin
+      ? [query(collection(db, 'complianceItems'), where('targetType', '==', 'location'))]
+      : normalizedScopeSites.map(mainLocation => query(
+          collection(db, 'complianceItems'),
+          where('targetType', '==', 'location'),
+          where('mainLocation', '==', mainLocation)
+        ))
+    const unsubServices = subscribeMergedQueryRows(serviceQueries, setServices, {
+      sort: (a, b) => String(a.siteAddress || '').localeCompare(String(b.siteAddress || ''))
+    })
+    const unsubItems = subscribeMergedQueryRows(itemQueries, (rows) => {
+      setLocationItems(rows.filter(isLocationComplianceItem))
+    })
 
     return () => {
       unsubServices()
       unsubItems()
     }
-  }, [hasScope])
+  }, [hasScope, isAdmin, normalizedScopeSites])
 
   const visibleServices = useMemo(() => {
     return services.filter(row => {

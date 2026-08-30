@@ -255,7 +255,14 @@ function DebriefDetail({ debrief, nowMs, user, isOffline }) {
   )
 }
 
-export default function SupervisorDebriefsPanel({ user, isOffline = false, inEocScope, focusedDebriefId = null }) {
+export default function SupervisorDebriefsPanel({
+  user,
+  isOffline = false,
+  inEocScope,
+  exactLocationIds = [],
+  isAdmin = false,
+  focusedDebriefId = null
+}) {
   const now = useMemo(() => new Date(), [])
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [startDate, setStartDate] = useState(() => dateKey(new Date(now.getFullYear(), now.getMonth(), 1)))
@@ -265,6 +272,12 @@ export default function SupervisorDebriefsPanel({ user, isOffline = false, inEoc
   const [confirmationFilter, setConfirmationFilter] = useState('all')
   const [debriefs, setDebriefs] = useState([])
   const [expandedId, setExpandedId] = useState(null)
+  const scopedLocationIds = useMemo(() => [...new Set(
+    (Array.isArray(exactLocationIds) ? exactLocationIds : [])
+      .map(value => String(value || '').trim().toLowerCase())
+      .filter(Boolean)
+  )].sort(), [exactLocationIds])
+  const scopedLocationSignature = scopedLocationIds.join('|')
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setNowMs(Date.now()), 60 * 1000)
@@ -273,23 +286,52 @@ export default function SupervisorDebriefsPanel({ user, isOffline = false, inEoc
 
   useEffect(() => {
     if (!startDate || !endDate) return undefined
+    if (!isAdmin && scopedLocationIds.length === 0) {
+      setDebriefs([])
+      return undefined
+    }
     const start = Timestamp.fromDate(new Date(`${startDate}T00:00:00`))
     const end = Timestamp.fromDate(new Date(`${endDate}T23:59:59`))
-    const q = query(
-      collection(db, DEBRIEFS_COLLECTION),
-      where('submittedAt', '>=', start),
-      where('submittedAt', '<=', end),
-      orderBy('submittedAt', 'desc')
-    )
-
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const rows = snap.docs
-        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-        .filter(row => inEocScope(row.locationId))
-      setDebriefs(rows)
-    })
-    return () => unsubscribe()
-  }, [endDate, inEocScope, startDate])
+    const locationQueries = isAdmin
+      ? [query(
+          collection(db, DEBRIEFS_COLLECTION),
+          where('submittedAt', '>=', start),
+          where('submittedAt', '<=', end),
+          orderBy('submittedAt', 'desc')
+        )]
+      : scopedLocationIds.map(locationId => query(
+          collection(db, DEBRIEFS_COLLECTION),
+          where('locationId', '==', locationId),
+          where('submittedAt', '>=', start),
+          where('submittedAt', '<=', end),
+          orderBy('submittedAt', 'desc')
+        ))
+    const buckets = locationQueries.map(() => [])
+    const applyRows = () => {
+      const merged = new Map()
+      buckets.flat().forEach(row => {
+        if (inEocScope(row.locationId)) merged.set(row.id, row)
+      })
+      setDebriefs(Array.from(merged.values()).sort((left, right) => (
+        (toDate(right.submittedAt)?.getTime() || 0) - (toDate(left.submittedAt)?.getTime() || 0)
+      )))
+    }
+    const unsubscribes = locationQueries.map((scopedQuery, index) => onSnapshot(
+      scopedQuery,
+      (snap) => {
+        buckets[index] = snap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
+        applyRows()
+      },
+      (error) => {
+        console.error('Scoped supervisor debrief listener failed:', error)
+        buckets[index] = []
+        applyRows()
+      }
+    ))
+    return () => unsubscribes.forEach(unsubscribe => unsubscribe())
+  // The signature keeps this listener stable when callers rebuild an equivalent array.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endDate, inEocScope, isAdmin, scopedLocationSignature, startDate])
 
   const filtered = debriefs.filter(debrief => {
     if (houseFilter !== 'all' && debrief.locationId !== houseFilter) return false

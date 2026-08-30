@@ -10,6 +10,33 @@ const requiredFiles = [
   'docs/security/PHASE_4_TO_8_LOCAL_SECURITY_READINESS.md',
   'docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md',
   'docs/security/SECURITY_CANARY_AND_ROLLBACK.md',
+  'scripts/manageSecurityFoundationCanary.js',
+  'scripts/appCheckObservationModel.js',
+  'scripts/securityCanaryEvidenceModel.js',
+  'scripts/securityCanaryStageModel.js',
+  'scripts/startSecurityE2eServer.js',
+  'playwright.security.templates.config.js',
+  'tests/e2e/securityTemplatesPhotosStage.spec.js',
+  'playwright.security.eoc.config.js',
+  'tests/e2e/securityEocOfflineStage.spec.js',
+  'playwright.security.debriefs.config.js',
+  'tests/e2e/securityDebriefsAlertsStage.spec.js',
+  'playwright.security.issues.config.js',
+  'tests/e2e/securityIssuesFeedbackAuditStage.spec.js',
+  'playwright.security.transports.config.js',
+  'tests/e2e/securityTransportsStage.spec.js',
+  'playwright.security.operations.config.js',
+  'tests/e2e/securityOperationsAdminStage.spec.js',
+  'playwright.security.settings.config.js',
+  'tests/e2e/securitySettingsStage.spec.js',
+  'playwright.security.offline.config.js',
+  'tests/e2e/securityOfflineReconnectMatrix.spec.js',
+  'playwright.security.compatibility.config.js',
+  'tests/e2e/securityCompatibilityCanary.spec.js',
+  'tests/e2e/support/securityViteGlobalServer.js',
+  'tests/offlineReconnectMatrix.test.js',
+  'tests/appCheckObservationModel.test.js',
+  'tests/securityCanaryEvidenceModel.test.js',
   'functions/src/staffPinLoginService.js',
   'functions/src/staffAccountSecurityService.js',
   'functions/src/accessScopeSecurityService.js',
@@ -18,8 +45,10 @@ const requiredFiles = [
   'functions/src/transportSecurityService.js',
   'functions/src/operationalMutationSecurityService.js',
   'src/services/securityClientRuntime.js',
+  'src/services/offlineActionCatalog.js',
   'src/services/offlineSecurityModel.js',
   'src/services/protectedOperationalMutationService.js',
+  'src/services/scopedSnapshotService.js',
   'src/services/appCheckMonitoringModel.js'
 ]
 
@@ -29,6 +58,7 @@ const packageJson = JSON.parse(readFileSync('package.json', 'utf8'))
 const indexSource = readFileSync('functions/src/index.js', 'utf8')
 const firebaseSource = readFileSync('src/firebase.js', 'utf8')
 const ruleSource = readFileSync('firestore.rules', 'utf8')
+const canaryManagerSource = readFileSync('scripts/manageSecurityFoundationCanary.js', 'utf8')
 const declaredNode = String(functionsPackage.engines?.node || '')
 const currentNode = process.versions.node
 const nodeMajor = currentNode.split('.')[0]
@@ -39,9 +69,36 @@ const checks = {
   runtimeParity: nodeMajor === declaredNode,
   securityUnitCommandPresent: Boolean(packageJson.scripts?.['test:security-foundation']),
   securityEmulatorCommandPresent: Boolean(packageJson.scripts?.['test:security-foundation:emulator']),
+  guardedStageTransitionPresent: Boolean(packageJson.scripts?.['test:security-canary-stage'])
+    && canaryManagerSource.includes("mode === 'stage-preview'")
+    && canaryManagerSource.includes("mode === 'stage-advance'")
+    && canaryManagerSource.includes("mode === 'stage-rollback'")
+    && canaryManagerSource.includes('closeCanarySessions')
+    && canaryManagerSource.includes('revokeCanaryRefreshTokens'),
+  operationsDataPreflightPresent: canaryManagerSource.includes('requireOperationsAdminDataReadiness')
+    && canaryManagerSource.includes('Correct it through a separately approved, backed-up data migration before advancing.'),
+  templatesPhotosBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-templates-photos:browser']),
+  eocOfflineBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-eoc-offline:browser']),
+  debriefsAlertsBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-debriefs-alerts:browser']),
+  issuesFeedbackAuditBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-issues-feedback-audit:browser']),
+  transportsBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-transports:browser']),
+  operationsAdminBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-operations-admin:browser']),
+  settingsBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-settings:browser']),
+  completeOfflineReconnectMatrixPresent: Boolean(packageJson.scripts?.['test:security-offline-matrix:browser'])
+    && Boolean(packageJson.scripts?.['test:security-offline-matrix:emulator'])
+    && readFileSync('src/services/offlineActionCatalog.js', 'utf8').includes('SUPPORTED_SECURE_OFFLINE_ACTION_TYPES'),
+  secureClientAndCompatibilityBrowserGatesPresent: Boolean(packageJson.scripts?.['test:security-client:emulator'])
+    && Boolean(packageJson.scripts?.['test:security-compatibility:emulator'])
+    && readFileSync('tests/e2e/securityCompatibilityCanary.spec.js', 'utf8').includes('stableProfileClaim'),
   appCheckNotEnforced: indexSource.includes('enforceAppCheck: false') && !indexSource.includes('enforceAppCheck: true'),
   appCheckClientExactGate: firebaseSource.includes('VITE_APP_CHECK_MONITORING_VERSION')
     && firebaseSource.includes('VITE_ENABLE_APP_CHECK_MONITORING'),
+  appCheckReadOnlyObservationGatePresent: canaryManagerSource.includes("mode === 'app-check-observe'")
+    && canaryManagerSource.includes('summarizeAppCheckObservation')
+    && canaryManagerSource.includes('Monitoring-only observation refuses to continue.'),
+  identityReadOnlyStatusGatePresent: canaryManagerSource.includes("mode === 'identity-status'")
+    && canaryManagerSource.includes('summarizeIdentityCanaryEvidence')
+    && canaryManagerSource.includes('Identity status requires the verified --backup path'),
   serverIssuedWorkflowScopeClaims: indexSource.includes('manageStaffSecurityV4')
     && readFileSync('functions/src/staffPinLoginService.js', 'utf8').includes('authorizedLocations')
     && readFileSync('functions/src/staffPinLoginService.js', 'utf8').includes('issueLocationIds'),
@@ -60,13 +117,14 @@ const checks = {
 
 const releaseBlockers = []
 if (!checks.runtimeParity) releaseBlockers.push(`Node runtime parity not verified: declared ${declaredNode}, local ${currentNode}.`)
-releaseBlockers.push('Production release approval, Firebase configuration, secrets, canary selection, activation, deployment, and rollback authority are intentionally absent.')
+releaseBlockers.push('Broad staff rollout and compatibility-retirement approval are intentionally outside this local verifier; the completed synthetic canary does not authorize either change.')
 
 const report = {
   generatedAt: new Date().toISOString(),
   localDormantImplementationReady: Object.entries(checks)
     .filter(([name]) => name !== 'runtimeParity')
     .every(([, passed]) => passed),
+  productionReleaseScope: 'broad_staff_rollout',
   productionReleaseReady: false,
   declaredNode,
   currentNode,

@@ -349,6 +349,19 @@ test('replaying the same login operation is idempotent and never extends absolut
   assert.equal((await db.collection('securityLoginAudit').get()).size, 1)
 })
 
+test('two devices racing the first login converge on one stable Firebase identity', async () => {
+  await enableDormantEndpoint()
+  await db.doc('users/concurrent_login_bht').set(bhtProfile('583106'))
+  const [first, second] = await Promise.all([
+    begin({ pin: '583106', deviceId: 'concurrent_device_0001', operationId: 'concurrent_operation_0001' }),
+    begin({ pin: '583106', deviceId: 'concurrent_device_0002', operationId: 'concurrent_operation_0002' })
+  ])
+  assert.equal(decodeJwtPayload(first.customToken).uid, decodeJwtPayload(second.customToken).uid)
+  assert.notEqual(first.session.id, second.session.id)
+  assert.equal((await db.collection('staffSessions').where('profileId', '==', 'concurrent_login_bht').get()).size, 2)
+  assert.equal((await auth.listUsers(100)).users.length, 1)
+})
+
 test('security-version changes invalidate sessions and revoked operation IDs cannot be replayed', async () => {
   await enableDormantEndpoint()
   await db.doc('users/revoked_bht').set(bhtProfile('728394', { securityVersion: 3 }))

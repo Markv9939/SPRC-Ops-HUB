@@ -6,7 +6,6 @@ import {
   collection,
   doc,
   getDoc,
-  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -16,6 +15,7 @@ import {
 import { LOCATIONS, VANS } from '../data/eocConstants'
 import { notifySuccess } from '../utils/toast'
 import { getVersionNumber } from '../services/versioning'
+import { subscribeMergedQueryRows } from '../services/scopedSnapshotService'
 import { logFleetServiceRecord, syncFleetTasksForUserScope, syncFleetTasksForVehicle } from '../services/fleetTaskEngine'
 import {
   DEFAULT_MILESTONE_SOON_WINDOW_MILES,
@@ -220,85 +220,45 @@ function FleetPanel({ user, scopeSites = null }) {
   useEffect(() => {
     if (allowedMainLocations.length === 0) return () => {}
 
-    const unsubVehicles = onSnapshot(
-      query(collection(db, 'eocVehicles'), orderBy('name', 'asc')),
-      (snap) => {
-        const rows = snap.docs
-          .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-          .filter((row) => {
-            const mainLocation = normalizeMainLocation(row.mainLocation) || locationIdToMainLocation(row.locationId)
-            return mainLocation && allowedMainLocationSet.has(mainLocation)
-          })
-        setVehicles(rows)
-      }
+    const scopedQueries = (collectionName, constraints = []) => isAdmin
+      ? [query(collection(db, collectionName), ...constraints)]
+      : allowedMainLocations.map(mainLocation => query(
+          collection(db, collectionName),
+          where('mainLocation', '==', mainLocation),
+          ...constraints
+        ))
+    const unsubVehicles = subscribeMergedQueryRows(
+      scopedQueries('eocVehicles', [orderBy('name', 'asc')]),
+      setVehicles,
+      { sort: (a, b) => String(a.name || '').localeCompare(String(b.name || '')) }
     )
-
-    const unsubTemplates = onSnapshot(
-      query(collection(db, 'fleetMaintenanceTemplates'), orderBy('dueMileage', 'asc')),
-      (snap) => {
-        const rows = snap.docs
-          .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-          .filter(row => allowedMainLocationSet.has(normalizeMainLocation(row.mainLocation)))
-        setTemplates(rows)
-      }
+    const unsubTemplates = subscribeMergedQueryRows(
+      scopedQueries('fleetMaintenanceTemplates', [orderBy('dueMileage', 'asc')]),
+      setTemplates,
+      { sort: (a, b) => Number(a.dueMileage || 0) - Number(b.dueMileage || 0) }
     )
-
-    const unsubRuntime = onSnapshot(
-      collection(db, 'fleetVehicleRuntime'),
-      (snap) => {
-        const map = {}
-        snap.docs.forEach((docSnap) => {
-          map[docSnap.id] = { id: docSnap.id, ...docSnap.data() }
-        })
-        setRuntimeMap(map)
-      }
+    const unsubRuntime = subscribeMergedQueryRows(
+      scopedQueries('fleetVehicleRuntime'),
+      (rows) => setRuntimeMap(Object.fromEntries(rows.map(row => [row.id, row])))
     )
-
-    const unsubOverdueTasks = onSnapshot(
-      query(collection(db, 'fleetTasks'), where('status', '==', 'overdue')),
-      (snap) => {
-        const rows = snap.docs
-          .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-          .filter(row => allowedMainLocationSet.has(normalizeMainLocation(row.mainLocation)))
-        setOpenFleetTasks(prev => {
-          const upcoming = prev.filter(item => item.status === 'upcoming')
-          return [...upcoming, ...rows]
-        })
-      }
+    const unsubFleetTasks = subscribeMergedQueryRows(
+      ['overdue', 'upcoming'].flatMap(status => scopedQueries('fleetTasks', [where('status', '==', status)])),
+      setOpenFleetTasks
     )
-
-    const unsubUpcomingTasks = onSnapshot(
-      query(collection(db, 'fleetTasks'), where('status', '==', 'upcoming')),
-      (snap) => {
-        const rows = snap.docs
-          .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-          .filter(row => allowedMainLocationSet.has(normalizeMainLocation(row.mainLocation)))
-        setOpenFleetTasks(prev => {
-          const overdue = prev.filter(item => item.status === 'overdue')
-          return [...overdue, ...rows]
-        })
-      }
-    )
-
-    const unsubServiceRecords = onSnapshot(
-      query(collection(db, 'vehicleServiceRecords'), orderBy('serviceDate', 'desc')),
-      (snap) => {
-        const rows = snap.docs
-          .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-          .filter(row => allowedMainLocationSet.has(normalizeMainLocation(row.mainLocation)))
-        setServiceRecords(rows)
-      }
+    const unsubServiceRecords = subscribeMergedQueryRows(
+      scopedQueries('vehicleServiceRecords', [orderBy('serviceDate', 'desc')]),
+      setServiceRecords,
+      { sort: (a, b) => String(b.serviceDate || '').localeCompare(String(a.serviceDate || '')) }
     )
 
     return () => {
       unsubVehicles()
       unsubTemplates()
       unsubRuntime()
-      unsubOverdueTasks()
-      unsubUpcomingTasks()
+      unsubFleetTasks()
       unsubServiceRecords()
     }
-  }, [allowedMainLocationSet, allowedMainLocations.length])
+  }, [allowedMainLocations, isAdmin])
 
   const templatesByMainLocation = useMemo(() => {
     const map = {}

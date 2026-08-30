@@ -1,24 +1,257 @@
 # SPRC Ops Hub Progress Log
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
-## 2026-08-29 — Compatibility reload correction released and reconciled
+## 2026-08-30 — Complete three-profile security canary closed out through Settings
 
-### Outcome
+### Final production boundary
 
-- A valid synthetic BHT outside the exact three-profile secure allowlist correctly used the compatibility login but the previous client returned to the PIN screen after reload.
-- Added an exact versioned compatibility marker only after successful compatibility login. Reload restores only a marked valid compatibility profile; malformed, unmarked, or secure-session browser state does not enter this fallback.
-- Preserved the marker through the existing live scope refresh and added focused model plus production-shaped browser coverage for login, reload, and absence of secure-session artifacts.
+- The production canary still contains exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`. The cumulative signed workflow list now contains the approved full order: `identity_users`, `templates_photos`, `eoc`, `debriefs_alerts`, `issues_feedback_audit`, `transports`, `operations_admin`, and `settings`.
+- Secure owner-bound offline replay is enabled only inside that exact canary boundary. Ordinary non-enrolled staff still use the familiar compatibility PIN path. Global strict authorization, the Anonymous Authentication shortcut, App Check enforcement, broad staff enrollment, and compatibility retirement remain off.
+- The four workflow callables needed after Identity/Users are now network-reachable only where their stage required it: `authorizeOfflineReplayV5`, `submitProtectedEocV9`, `mutateProtectedIssueV9`, and `createProtectedTransportV6`. Each still rejects requests unless the application-level Firebase identity, current device session, signed workflow claim, role/location scope, ownership, and record-version contract passes.
+- The final guarded Settings reactivation used external rollback snapshot `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-canary-2026-08-30T17-40-46-357Z.json`, SHA-256 `77c264534fab063f5aa6861c8f913b398c2a8f29b09b6ca495a5eb54b70a56da`. Protected workflow configuration read back with update time `2026-08-30T17:41:00.853Z`. The final rollback/re-advance ended existing canary device sessions, so the next canary use starts with a fresh PIN login and current claims.
 
-### Verification and live evidence
+### Production workflow evidence
 
-- From a clean detached `origin/Main` baseline at `f067ccc`: 61 security contracts passed, lint passed, and the guarded `v3-enabled` production build passed with the correct `sprc-tx-l` project ID.
-- The Node.js 22.23.2 Firestore/Auth/Functions emulator browser gate passed: the non-enrolled BHT remained on Home after reload and received no secure local session.
-- After explicit approval, Firebase Hosting-only deployment completed. The live site loaded `App-BH_gTpSZ.js`; login and normal reload stayed on the correctly scoped BHT Home.
-- A read-only production check confirmed the active compatibility profile had no `staffAuthIdentities` mapping, zero `staffSessions` records, and zero active secure sessions.
-- No Function, rule, index, protected setting, workflow, endpoint, cohort, account, PIN, or production record update was included in the Hosting deployment. Later protected workflows and four protected endpoints remain disabled.
+- EOC: Test Supervisor loaded the live EOC page without a permission error and retained OTC/Test House scope. Protected EOC submission and offline replay passed the signed-session/location/idempotency gate. Both EOC endpoints were proven network-private during rollback, then restored to the app-layer-protected boundary during reactivation.
+- Debriefs/Alerts: the live Test Supervisor loaded the scoped Test House/OTC debrief and alert listeners without RES exposure. The complete emulator/browser journey separately passed outgoing corrections, wrong-owner denial, incoming acknowledgment, matching-alert handling, eligible reassignment, late-handoff evidence, stale offline confirmation review, and backend-scoped listeners.
+- Issues/Feedback/Audit: Test BHT Shift 2 submitted a clearly synthetic issue resolution and Test Supervisor approved it. The local role/location matrix also passed deterministic replay, wrong-location denial, staff-owned feedback, and admin-only sanitized audit/feedback review. `mutateProtectedIssueV9` became HTTP 403 during rollback and was restored afterward.
+- Transports: Test BHT Shift 2 created and completed a clearly synthetic transport; Test Supervisor saw it in the OTC-scoped list without RES exposure. The emulator contract and browser matrix proved that two independent devices racing the same BHT create exactly one active transport and one safe conflict. `createProtectedTransportV6` became HTTP 403 during rollback and was restored afterward.
+- Operations Administration: Properties, Fleet, Compliance, and Cintas loaded for Test Supervisor through backend OTC/Test House scope with no RES records. The guarded production preflight initially blocked one `eocVehicles` record and its matching `fleetVehicleRuntime` record because each lacked `mainLocation`. With Mark's explicit approval, backup `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-operations-metadata-2026-08-30T17-29-04-848Z.json` (SHA-256 `c7f90a8dd611041fbb86afce86bfa0f36577790d412f8e08eb374bf7631e7274`) was captured and only `mainLocation: OTC` was added atomically to those two already-OTC fleet records. The nine-collection preflight then passed with 3 records scanned and 0 invalid.
+- Settings: Test BHT Shift 1 completed secure login, Home loading, and reload under the cumulative Settings claim. The local gate proved BHT/supervisor runtime-setting reads, denial of their writes, admin ordinary-setting writes, and denial of browser writes to `securityFoundation`, `securityWorkflows`, and `appCheckMonitoring`.
+- Every stage from EOC through Settings completed its guarded rollback and fresh reactivation. Rollback ended canary sessions, restored the prior cumulative workflow/configuration boundary, and made any newly required endpoint private where applicable before reactivation restored the reviewed state.
+
+### Defects found and corrected before closeout
+
+- Secure supervisors were starting Fleet listeners before `operations_admin` appeared in the signed workflow claims, producing a permission error on earlier stages. The client now carries the server-issued workflow version/list in its minimal session state and starts secure Fleet listeners only when `operations_admin` is signed; compatibility behavior is unchanged.
+- Two devices performing the first secure login at the same time could race while creating the stable Firebase UID. The server now converges on the deterministic existing UID after `auth/uid-already-exists`. A new emulator contract proves both devices receive the same stable identity and independent sessions.
+- The final offline Playwright check exposed a Vite-development-only cache timing problem. The harness now waits for service-worker control, caches the already-loaded development module graph, and verifies IndexedDB records directly after offline reload without allowing an online reload to replay them.
+
+### Final verification evidence
+
+- Security pure/unit contracts: 86 passed, 0 failed.
+- Firestore/Auth security emulator contracts: 43 passed, 0 failed, including simultaneous first login, all-device revocation, supervisor BHT limits, offline replay, and same-user two-device transport conflict protection.
+- Firestore rules: 40 passed, 0 failed. Storage rules: 4 passed, 0 failed. Firebase CLI then emitted its known local updater-cache error after each successful product-test summary; the wrapper exit code is recorded separately from the green tests.
+- Complete offline/reconnect browser matrix: 1 passed, covering all 11 supported queued actions through offline reload plus allow, reauthorize, hold-for-owner, and removed-scope-review results. Non-enrolled compatibility browser matrix: 1 passed and created no secure artifacts.
+- Workflow regressions: Shift Debrief 14, EOC/org/batching 29, issues/photos/feedback 18, debrief reset 3 — all passed. ESLint passed. Guarded security-canary build passed with 1,913 modules and the `v3-enabled` marker.
+- Readiness verifier reports every required security artifact/boundary present and `localDormantImplementationReady: true`. On this workstation it correctly reports `runtimeParity: false` because the host is Node `24.13.0` while Functions declare Node 22. The relevant production Functions were deployed on their declared Node 22 runtime; this closeout does not misstate the current local emulator run as Node 22 parity.
+- App Check 24-hour aggregate observation covered 63 protected callable samples across all required groups: login 37, account/access 21, offline replay 1, transport 1, EOC 1, issues 2. All 63 correctly recorded token absence; no sample was malformed, enforcement remained false, and no production key/setting was enabled. This completes monitoring evidence but does not authorize or prove enforcement readiness.
+
+### Release and remaining boundary
+
+- Hosting, the reviewed Firestore rules/indexes, and the required Node 22 Functions were released only as explicitly authorized during the staged canary. No production PIN is documented here, no real staff account was reset/deactivated, and no real staff cohort was enrolled.
+- The completed canary implementation and this closeout remain uncommitted/unmerged on `codex/security-foundation-stage3-evidence`. `origin/Main` remains the merged `1028347` baseline; do not treat this isolated branch as merged source until a separate reviewed PR/merge occurs.
+- The synthetic all-workflow canary is complete. The next distinct production project is broad staff enrollment in small role/location cohorts. It requires separate approval and must preserve compatibility fallback until those cohorts are observed and rollback-ready. Compatibility retirement is a later separate approval.
+
+## 2026-08-30 — Templates/photos production canary activated for live verification (historical stage; superseded above)
+
+### Approved guarded advance
+
+- After Mark explicitly approved the `templates_photos` stage, a fresh `stage-preview` confirmed current stage `identity_users`, target cumulative workflows `identity_users` plus `templates_photos`, the same three valid Test House profiles, no foundation changes, and no protected endpoint to open.
+- Saved fresh rollback backup `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-canary-2026-08-30T07-01-47-440Z.json`; SHA-256 `61e50e4b1b9367aa2d12ed339eccf60e89c731710a3828a34c0463b65782d10e`.
+- The guarded stage advance completed and read back exactly the two cumulative workflows. Offline replay remained disabled. The exact three-profile allowlist and release ID were unchanged.
+- The immutable `security_canary_stage_advanced` audit records previous stage `identity_users`, target stage `templates_photos`, the two exact workflows, three profiles, and zero revoked sessions because no secure canary session was active at the transition.
+
+### Immediate boundary checks
+
+- Direct network probes confirmed `authorizeOfflineReplayV5`, `createProtectedTransportV6`, `submitProtectedEocV9`, and `mutateProtectedIssueV9` all still return infrastructure-level `403`.
+- The non-enrolled RES BHT remained on its correctly scoped RES Home after reload, confirming the workflow advance did not pull it into secure enrollment or break compatibility behavior.
+- The Test Supervisor opened the live EOC template library without a permission error and saw four shared templates. Its assignment controls offered only Mesquite, Lone Mountain, and Test House; RES did not appear. No assignment was changed.
+- Test BHT Shift 2 completed the existing synthetic Test House House EOC through the normal staff UI. The stored submission contains the expected Test House/Shift 2 ownership, `standard_fallback_house` template, all 35 answers, and no issue answer.
+- The same BHT used the normal `Report issue` flow to attach and upload the approved synthetic JPEG. Readback confirmed one uploaded attachment in the matching Test House Storage path with JPEG content type and location metadata; no real workplace photo or client data was used.
+- A full browser reload restored the same secure Test BHT Shift 2 session, Test House scope, completed House EOC, and one open synthetic issue without another PIN prompt.
+- A read-only canary status check after these journeys confirmed the exact three-profile cohort, cumulative `identity_users` plus `templates_photos` stage, and exactly one active browser session. Two initial helper-token approaches failed before any upload request because the local credential cannot sign Firebase custom tokens; neither changed configuration, sessions, accounts, or Storage.
+- With Mark's explicit permission, a controlled live client probe used the normal server PIN-login path for Test BHT Shift 2, attempted an EOC response-photo upload to Mesquite, received `storage/unauthorized`, and verified that no Storage object was created. The first probe exposed a test-harness field-name error and left its temporary device session active; the corrected retry used the protected one-device closure action to close both that earlier temporary session and the retry session. Final readback showed seven historical Test BHT Shift 2 session records, six inactive and only Mark's original browser session active. The browser remained on the correctly scoped Test House Home screen.
+- The live `templates_photos` positive, negative, compatibility, and reload gates passed. The rollback/reactivation evidence immediately below completes the stage. No `eoc` or later stage is active.
+
+### Completed rollback/reactivation gate
+
+- With Mark's standing authorization to continue the approved rollout without repeated pauses, the guarded `templates_photos` rollback restored exactly `identity_users`, kept the same three-profile cohort, left offline replay disabled, recorded immutable rollback evidence, revoked the one active Test BHT session, and returned the browser to the familiar PIN screen after reload.
+- A new `stage-preview` then revalidated all three synthetic profiles and produced rollback snapshot `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-canary-2026-08-30T07-26-44-776Z.json` with SHA-256 `0e69b0558861e941669fa8f3aa9f18fc29ca4e04f00252ef7ac5c33fabec9206`.
+- The guarded reactivation restored exactly `identity_users` plus `templates_photos`, changed no foundation flag, and ended no additional session. Test BHT Shift 2 immediately signed in through the normal PIN screen, returned to the same Test House Home state, and survived a full reload.
+- `templates_photos` is complete. Production remains at this cumulative stage; offline replay remains off and the EOC, issue, and transport protected endpoints remain infrastructure-private.
+
+### EOC coordinated release readiness
+
+- Added the already-approved dedicated security runtime identity to only `authorizeOfflineReplayV5` and `submitProtectedEocV9`; the issue and transport endpoints remain unchanged/private.
+- Node.js `22.23.2` verification passed 42 Auth/Firestore security-emulator contracts and all 37 applicable pure Functions tests. The separate retention emulator module was initially invoked without its required bucket and was correctly excluded from that pure-test claim.
+- The cumulative EOC browser/emulator journey passed on its one applicable phone project with two intentional duplicate viewport skips. It proved original-owner/Firebase/session/location replay authorization, wrong-owner denial, protected EOC submission, idempotent retry, completed task state, sanitized attribution, and retained authorization evidence. An initial run used the contract-test emulator project instead of the browser-test project and correctly failed login against the empty database; the matching-project rerun passed.
+- ESLint, the guarded secure Hosting build, its `v3-enabled` marker verification, and `git diff --check` passed. No Hosting or rule deployment is needed for this boundary.
+- After Mark explicitly approved the selective production deployment, `authorizeOfflineReplayV5` and `submitProtectedEocV9` updated successfully on Node.js 22 under `sprc-security-runtime@sprc-tx-l.iam.gserviceaccount.com`, both with deployed hash prefix `9be439bc...`. No other Function or Firebase product was deployed.
+- Post-deploy probes showed Firebase preserved the existing infrastructure-private IAM rule: both updated EOC endpoints still return `403`, as do the untouched issue and transport endpoints. Production workflow configuration therefore remains at `templates_photos`. Source now declares an explicit public invoker only for the two EOC callable entry points, but the external safety gate blocked that persistent IAM change before execution pending separate explicit approval.
+
+## 2026-08-29 — Identity/Users live canary completed without repeating its rollback drill
+
+### Rollback evidence reconciliation
+
+- The existing 2026-08-27 release entry records that the exact `security-foundation-test-house-v1` canary was rolled back to its absent protected-configuration baseline, exposed and corrected an immutable-audit document-name collision, then completed a second rollback plus reactivation drill successfully.
+- A new privacy-minimized production readback directly confirmed five immutable audit events for the exact release: activation, rollback, activation, rollback, and final activation. Both rollback events covered the same three approved profiles and both successful activations restored only `identity_users`.
+- The latest guarded `identity-status` readback still confirms the exact three-profile cohort, valid `identity_users`-only foundation/workflow boundary, and an exact current match to the verified rollback anchor. Today's separate all-device test proves active sessions are cut off through security-version enforcement and preserved inactive-session/audit evidence.
+- Repeating the production rollback would temporarily disable the now-working secure canary and sign out its users while duplicating completed evidence. Consistent with Mark's instruction not to repeat finished work, no new rollback/configuration mutation was performed.
+
+### Stage 3 outcome
+
+- Identity/Users is complete. Live evidence now covers Test Supervisor login/reload, EOC regression, OTC-only Users listing, scoped OTC BHT creation, both Test BHT login/reload/scope journeys, two active devices, one-device logout, supervisor all-device revocation, non-enrolled compatibility login/reload/no-secure-artifact behavior, admin-created RES BHT scope/login/reload, BHT denial from Users, immutable audit, cleanup, and rollback/reactivation.
+- Production remains unchanged at exactly the three approved profiles and only `identity_users`. `templates_photos`, every later workflow, offline replay, and the four private protected endpoints remain disabled/unactivated.
+- The next production decision is whether to run the guarded `templates_photos` stage advance for the same three profiles. That change requires Mark's explicit approval and will end any active canary sessions so new workflow claims are issued on the next PIN login.
+
+## 2026-08-29 — RES account scope and compatibility login passed live
+
+### Approved production account and direct behavior
+
+- With Mark's explicit approval, Mark created one synthetic active BHT through the normal administrator Users flow: internal ID `test_rtc_shift_1`, RES, `res_shift_1_day`, and `van_3`. The display name retains Mark's `Test RTC Shift 1` wording; the authoritative operational location is RES.
+- Using the PIN Mark supplied for this test, the account reached the familiar BHT Home screen with exactly `RES - 1st Shift - Day - Van 3`. A normal navigation reload remained on the correctly scoped RES Home screen.
+- Direct navigation to `/dashboard/users` redirected the BHT back to `/home`, proving the BHT cannot open staff-account administration.
+
+### Read-only boundary evidence
+
+- A privacy-minimized profile readback confirmed the account exists, is active, has role `bht`, location `res`, shift `res_shift_1_day`, and only `van_3`. It has no `staffAuthIdentities` mapping, zero secure session records, and zero active secure sessions, as required for a profile outside the secure canary allowlist.
+- The guarded `identity-status` readback still confirmed the exact original cohort (`test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`), only `identity_users`, valid foundation/workflow boundaries, and an exact match to the verified rollback anchor. The RES account creation did not broaden secure activation or open any later workflow/endpoint.
+- No PIN was reset, no account was deactivated, and no Firebase/Auth setting, protected configuration, rule, deployment, secure cohort, workflow, or private endpoint changed during verification. The test PIN is intentionally omitted from project documentation.
+
+### Identity/Users gate status
+
+- **Superseded by the newer Identity/Users closeout entry above:** RES-side production behavior passed, and the already-completed rollback/reactivation drill was directly confirmed from immutable production audit evidence. Identity/Users is complete.
+
+## 2026-08-29 — Supervisor all-device revocation passed live
+
+### Approved live action
+
+- With Mark's explicit approval immediately before the action, `test_bht_shift_2` was signed in concurrently on this computer and Mark's phone. The pre-action privacy-minimized status readback confirmed two stored sessions and two active sessions for that synthetic BHT at security version `1`.
+- A separately signed-in Test Supervisor used the normal Users-page **End All Sessions** control for that Test House BHT. No PIN was changed or reset, no profile was activated/deactivated or created, and no protected configuration, workflow, endpoint, Auth provider, rule, deployment, or unrelated production record was changed.
+
+### Direct evidence
+
+- This computer returned immediately to the familiar PIN screen. After Mark refreshed the original non-private phone tab, the phone also returned to the PIN screen.
+- The post-action read-only canary status confirmed the exact three-profile cohort and `identity_users`-only boundary still matched the verified rollback anchor. The four later protected endpoints remained outside the active workflow boundary.
+- `test_bht_shift_2` advanced from security version `1` to `2`; both of its stored sessions remained preserved as evidence but zero were active. The only active canary session after the test was the separate Test Supervisor session.
+- A privacy-minimized read-only audit check found the supervisor `end_all_sessions` action with `allDevicesRevoked: true`, result security version `2`, and a completed cleanup record after one attempt with no recorded cleanup error. App Check was observed as absent, consistent with the current monitoring-only, non-enforced boundary.
+
+### Remaining Identity/Users gates
+
+- **Superseded by the newer RES entry above:** all-device revocation and the RES-side live admin-creation plus non-enrolled compatibility-login check have passed. The exact three-profile secure allowlist was not broadened; secure RES custom-token scope remains locally proven and receives live proof only in a later approved enrollment cohort.
+- The rollback exercise remains a production-changing action that requires Mark's explicit approval immediately before it runs.
+
+## 2026-08-29 — Non-enrolled compatibility reload regression corrected and passed live
+
+### Live evidence and blocker
+
+- With Mark's explicit approval, the valid synthetic non-enrolled OTC BHT completed the familiar compatibility PIN login and reached the correctly scoped BHT Home screen.
+- Read-only production evidence confirmed the profile was not in the three-profile secure allowlist and had no stable secure identity mapping, secure device-session record, or active secure session.
+- A normal same-tab reload returned that staff member to the PIN screen. This is a real compatibility regression, so the Identity/Users canary stopped and every later workflow plus the four private protected endpoints remained disabled.
+
+### Local correction
+
+- The secure bootstrap had treated every browser with no saved secure session as signed out. That incorrectly discarded a valid non-enrolled compatibility session after reload.
+- Added an exact versioned compatibility-session marker only after a successful compatibility login. The bootstrap may restore the legacy session on reload only when that marker, a valid profile ID, and a recognized role are present; a secure-session user or malformed/unmarked browser record still fails closed.
+- Preserved the marker when the existing compatibility scope refreshes. No PIN, token, secret, credential, or server security decision is stored in the marker.
+- Extended the production-shaped compatibility browser gate to reload the page, remain on BHT Home, and recheck that no secure local session was created.
+
+### Verification, Hosting release, and live evidence
+
+- Focused compatibility model: 9 passed, 0 failed. Complete security-foundation pure suite: 86 passed, 0 failed.
+- Node.js 22.23.2 Firestore/Auth/Functions emulator plus browser gate: 1 passed, 0 failed; Functions reported `Using node@22 from host`. The valid non-enrolled BHT survived reload with only the compatibility session and no secure local session.
+- ESLint, normal production build, guarded `v3-enabled` canary build and independent marker verification, readiness artifact checks, `git diff --check`, and temporary-secret absence passed. Firebase CLI emitted its known updater-cache warning only after the browser test exited successfully.
+- After explicit approval, created a temporary detached release worktree from freshly fetched `origin/Main` at `f067ccc` and applied only the three production source files plus the focused unit test. This prevented the broader unfinished security branch from entering the release.
+- The clean release repeated 61 security tests, lint, guarded `v3-enabled` build, production-project-ID inspection, and the Node.js 22.23.2 compatibility login/reload browser gate. The deployed `dist/index.html` SHA-256 was `CC0C3D801B7453BD1041EDE7CBB5F6DE9948B89039488060AEE64A10FD52BE5B`; the live app loaded the matching `App-BH_gTpSZ.js` asset.
+- Firebase Hosting-only deployment to `sprc-tx-l` completed successfully. No Function, Firestore/Storage rule, index, protected configuration, Auth-provider, workflow, endpoint, cohort, account, PIN, or production record update was included in the deployment.
+- With Mark's explicit approval, the synthetic non-enrolled BHT logged in through the live compatibility path, reached the correctly scoped BHT Home, and remained on Home after a normal reload. A read-only backend check then confirmed the active profile still had no `staffAuthIdentities` mapping, zero `staffSessions` records, and zero active secure sessions.
+- The compatibility gate is passed. With Mark's approval, focused commit `97139ef` was pushed, verified as one commit and 13 expected code/test/documentation files over `f067ccc`, opened as PR #12, and merged to case-sensitive `Main` as `1028347`. `origin/Main` now matches the deployed compatibility source.
+
+## 2026-08-29 — Cross-workflow offline and App Check observation gates completed locally
+
+### Purpose
+
+Close the remaining local Stage 10 evidence gaps without changing production, broadening the live Identity/Users canary, opening the four protected endpoints, or enabling App Check enforcement.
+
+### Local implementation outcome
+
+- Replaced three duplicated offline-action allowlists with an auditable client catalog and an exported server catalog covering the same 11 supported actions: EOC submission; four debrief actions; issue report, feedback, and attachment upload; and transport create, update, and close.
+- Added an exhaustive client/server contract matrix for every action. Each action proves its original profile owner, stable Firebase UID, device session, security version, location, expected record version, current-owner allowance, new-session reauthorization, wrong-owner/wrong-UID hold, and removed-location review behavior.
+- Added a real secure-client browser/emulator persistence gate. It signs in through the custom-token path, queues all 11 actions, reloads while offline, reads them back from IndexedDB, proves their bindings and reconnect dispositions, and removes only the synthetic test records before reconnecting.
+- Added a read-only App Check observation model and guarded `app-check-observe` canary-manager mode. It reports aggregate present/missing/malformed counts only for login, account/access, offline replay, transport, EOC, and issue protected callables; it exposes no staff/profile/document contents, refuses monitoring-only use if enforcement is active, and does not claim readiness when any endpoint group lacks a valid boolean sample.
+- Made the EOC and issue callable test dependency injection match the other four security callables so App Check presence can be proved consistently in emulator tests. Runtime enforcement remains `false`.
+- Extended the readiness verifier to require the offline matrix artifacts/commands and App Check observation gate.
+
+### Verification evidence
+
+- Declared Functions runtime: Node.js `22.23.2` used directly; Functions emulator reported `Using node@22 from host`.
+- Full security-foundation pure suite: 83 passed, 0 failed.
+- Firestore/Auth security emulator suite: 42 passed, 0 failed under Node.js `22.23.2`.
+- Complete offline browser/emulator matrix: 1 applicable mobile journey passed. All 11 actions survived offline reload with the approved owner/session/location safeguards.
+- Production build: passed; 1,913 Vite modules transformed.
+- ESLint, syntax checks, all 21 tracked Markdown-file links, `git diff --check`, and temporary-secret absence: passed.
+- Readiness verifier: `localDormantImplementationReady: true`, `runtimeParity: true`, `completeOfflineReconnectMatrixPresent: true`, and `appCheckReadOnlyObservationGatePresent: true`; `productionReleaseReady: false` remains intentional.
+- The Firebase emulator product test exited successfully. Firebase CLI then emitted its known local updater-cache permission warning; that post-test warning does not change the passing browser result.
+- The first browser harness iteration revealed a test-only missing `house` override in the removed-scope fixture; that assertion was corrected. A separate Windows web-server teardown hang was eliminated by running Vite through Playwright global setup/teardown. The final counted run exited Playwright successfully before emulator shutdown.
+- No production read/write, account/session/PIN action, deployment, protected endpoint opening, workflow/cohort activation, App Check key/enforcement change, commit, push, or merge occurred. The temporary emulator-only secret was removed.
+
+### Remaining gate
+
+- Actual App Check production observation requires a separately approved monitoring-ready client build/key and real samples from each protected endpoint group. The new command is prepared but was not run against production.
+- Live work remains at the incomplete Identity/Users canary: Test BHT/compatibility/RES/device-session/rollback evidence must pass before any later workflow is activated.
+
+### Additional Identity/Users live-canary rehearsal
+
+- Added a secure admin browser journey for the exact RES gap Mark identified. In the emulator, the admin created one active RES BHT through the normal Users form without a house assignment, selected a valid RES shift and van, and the new staff member then signed in through the server PIN/custom-token path with only `RES`/`res` profile and token scope.
+- The cumulative secure client/account browser suite now exits cleanly through shared Playwright/Vite setup and reported 11 applicable journeys passed with 16 intentional duplicate-viewport skips. This includes familiar self-PIN change, supervisor reset/end-all-sessions, scoped supervisor creation, secure RES admin creation/login, reload/offline/tabs, independent devices, invalid PIN, and live revocation response.
+- Added a separate production-canary-shaped browser gate with only one enrolled profile. A valid non-enrolled RES BHT successfully used the unchanged compatibility path, retained its legacy session, created no `sprc_staff_session_v3` record, and received no stable `profileId`, device `sessionId`, or version-6 workflow claims. The emulator's existing Anonymous Auth support supplied only the temporary compatibility identity; it was not used as the secure foundation.
+- The compatibility gate reported 1 passed, 0 failed. The complete 11-action offline gate was rerun after consolidating all focused browser servers into one clean global setup/teardown helper and again reported 1 passed, 0 failed.
+- Added a privacy-minimized, read-only `identity-status` mode. It requires an exact external rollback path and SHA-256 before reading the protected cohort, and returns only the approved synthetic profile IDs, roles, validity/security-version state, mapping booleans, and aggregate session counts. It cannot create backups or write Firebase.
+- Verified all three existing rollback files directly. Their calculated SHA-256 values match the recorded pre-release, post-release, and `templates_photos` stage-preview evidence: `f6c8b730d2a79f85ad0129700c878cc56dc331909f0e64c605d58150b119f0ff`, `1fe1665e4809cd231845aee8dfd7e2c712ac9d941c50bc0d06cd8d970e6d7718`, and `bce10d208cfba8aa68a9c8a347cbee63cb8a1f1618f61ab8a691c3b7612f5b42`.
+- Ran `identity-status` against production with the verified post-release snapshot. It confirmed the exact three-profile cohort, only `identity_users`, valid versioned foundation/workflow boundaries, offline replay disabled, and an exact current-configuration match to the rollback anchor. All three synthetic profiles are valid. `test_supervisor` is mapped with one active session; `test_bht_shift_1` and `test_bht_shift_2` remain unmapped with zero sessions and security version `0`, proving their first secure PIN logins are the next live action rather than a data/configuration repair.
+- Full security-foundation pure suite after the status gate: 85 passed, 0 failed. ESLint and Node 22 readiness passed; `identityReadOnlyStatusGatePresent: true`, `localDormantImplementationReady: true`, and `productionReleaseReady: false`.
+- No production account was created and no live PIN, profile, session, provider, configuration, endpoint, workflow, deployment, or data changed. Temporary emulator secret material was removed.
+
+## 2026-08-29 — Guarded later-workflow canary transitions prepared locally
+
+### Purpose
+
+Prepare the remaining production workflow stages while the live Identity/Users canary awaits Test BHT, compatibility, RES, session, and rollback checks. Do not activate or broaden production.
+
+### Local implementation outcome
+
+- Added a pure stage model with the approved cumulative order: `identity_users`, `templates_photos`, `eoc`, `debriefs_alerts`, `issues_feedback_audit`, `transports`, `operations_admin`, and `settings`.
+- Extended the existing guarded canary manager with separate `stage-preview`, `stage-advance`, and `stage-rollback` modes. The original first-activation mode remains restricted to an absent configuration and is not reused.
+- A stage preview requires the exact active release and three-profile cohort, refuses malformed configuration, refuses skipped/repeated stages, and creates a verified rollback backup outside the repository.
+- Each preview now names the exact currently private protected endpoint(s) required by its target stage: offline replay plus protected EOC submission for `eoc`, protected issue mutation for `issues_feedback_audit`, and protected transport creation for `transports`. Stages with no new private endpoint report an empty list.
+- Stage advance and rollback require the exact stage backup path and SHA-256 checksum, release ID, and confirmation phrase. Both end active canary device sessions, write immutable audit evidence, and revoke mapped Firebase refresh tokens so old workflow claims cannot persist. Refresh-token cleanup retries three times; remaining sanitized failures are audited and fail closed.
+- The transition to `eoc` is the first stage that also enables the existing versioned owner-bound offline-replay flag. The tool does not change network access, deploy code, enable App Check enforcement, expand staff enrollment, or retire compatibility behavior.
+- Updated the security canary runbook and README so the documented release sequence matches the implemented guardrails.
+
+### Verification evidence
+
+- Canary stage model: 6 passed, 0 failed.
+- Full security-foundation unit suite after integration: 66 passed, 0 failed.
+- `node --check scripts/manageSecurityFoundationCanary.js`: passed.
+- The stage-transition tests and readiness verifier also passed under the declared Node.js `22.23.2` runtime; `runtimeParity: true` and `guardedStageTransitionPresent: true`.
+- ESLint: passed.
+- Ran the new `templates_photos` stage preview against production as a read-only configuration/profile check. It confirmed the current stage is exactly `identity_users`, all three approved Test House profiles are still valid, the next cumulative workflow list would be `identity_users` plus `templates_photos`, and no foundation flag changes are part of that transition.
+- Saved and independently verified rollback snapshot `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-canary-2026-08-29T21-54-56-845Z.json`; SHA-256 `bce10d208cfba8aa68a9c8a347cbee63cb8a1f1618f61ab8a691c3b7612f5b42`. Its metadata records previous stage `identity_users`, target stage `templates_photos`, one current workflow, and three enabled profiles.
+- Added a cumulative `templates_photos` browser/emulator seed and focused Playwright gate. It uses the same stable secure PIN/custom-token login, a synthetic shared template, and a synthetic Test House EOC submission.
+- The first focused run used a mismatched emulator project ID and correctly rejected both PINs against the empty project. The next aligned run exposed a second harness flaw: the new browser configs had not compiled the secure client boundary and therefore exercised compatibility login. That result was invalidated and is not counted as secure evidence.
+- Added one shared security E2E server launcher that always compiles `VITE_ENABLE_SECURITY_BOOTSTRAP_V3=true`, updated all security browser configs to use it, and added an explicit browser assertion that the secure client is compiled before entering a PIN. The corrected `templates_photos` rerun invoked `beginStaffPinSessionV2`; two applicable secure journeys passed and four duplicate viewports were skipped. The secure supervisor loaded the shared template library while still seeing no out-of-scope RES BHT, and the secure BHT uploaded an authorized Test House EOC response photo while a wrong-location upload failed with permission denied.
+- Added the cumulative `eoc` browser/emulator gate. One applicable phone journey passed and two duplicate viewports were skipped. It proved owner/Firebase/session/location-bound offline replay authorization, wrong-owner denial, protected EOC submission through `submitProtectedEocV9`, idempotent retry, completed task state, sanitized original-owner submission identity, and retained offline authorization evidence.
+- Added the cumulative `debriefs_alerts` browser/emulator gate. It revealed and corrected two strict-mode query gaps before any production activation: the supervisor alert listener requested every location and filtered in React, and the supervisor Debriefs panel did the same. Both now issue exact backend-scoped location queries while admins retain the approved global view.
+- Tightened strict Firestore debrief listing so a supervisor list is authorized only for documents in the signed current location scope. Optimized the strict alert read path to validate the current server device session once and then apply signed role/profile/location claims, avoiding Firestore's expression ceiling without weakening legacy compatibility behavior.
+- The corrected Stage 6 browser run invoked `beginStaffPinSessionV2` for every applicable role and reported 4 applicable journeys passed with 8 intentional duplicate-viewport skips: outgoing correction, same-house wrong-owner denial, assigned incoming signoff plus targeted-alert acknowledgment, and OTC supervisor Test House visibility with no RES exposure or listener permission errors.
+- A completion audit found that the first Stage 6 gate had not yet directly exercised the already-approved reassignment, late-handoff, and stale offline-confirmation paths. Added separate synthetic records and expanded the same cumulative gate without changing the staff-facing debrief flow.
+- The expanded Stage 6 gate exposed two strict-mode defects before production activation: the incoming-shift assignment list exceeded Firestore's expression budget, and supervisor reassignment could not read the old location-scoped BHT alert it needed to retire. The assignment rule now evaluates one current secure-session claim path, and the old-alert query includes the exact debrief location. Supervisors may read targeted BHT alerts only inside their signed location scope for this operational correction; admins retain global review and BHTs retain only their own targeted alerts.
+- The final expanded Stage 6 browser run reported 7 applicable journeys passed with 14 intentional duplicate-viewport skips across phone, tablet, and desktop. It proved eligible reassignment with reason/version/reset behavior, late status plus scoped late alert, and a stale owner-bound offline confirmation becoming `needsReview`, in addition to the original four journeys. The 40-case Firestore rules suite passed with new location-scoped supervisor assignment/BHT-alert query positives and wrong-location/broad-query negatives; 68 security contracts, 14 debrief models, ESLint, and the production build also passed.
+- Added the cumulative `issues_feedback_audit` seed/config/browser gate. The corrected run reported 4 applicable secure-client journeys passed with 8 intentional duplicate-viewport skips. It invoked `mutateProtectedIssueV9` for deterministic/idempotent BHT reporting, original-reporter resolution submission, scoped supervisor approval, and wrong-location denials; it separately proved BHT-owned app feedback and admin-only feedback/audit visibility without rendering PIN/hash/secret fields.
+- Added the cumulative `transports` seed/config/browser gate. It found and corrected a strict-mode read gap before production activation: supervisors requested all transport sites and filtered in React, while the strict rule allowed every signed workflow role to read every transport. The listener now queries each authorized backend site, and strict rules limit BHT/tech reads to their own records, supervisors to signed authorized sites, and admins to the approved global view.
+- The corrected transport run reported 4 applicable secure-client journeys passed with 8 intentional duplicate-viewport skips: two independent devices signed in as the same BHT produced exactly one active transport plus one safe conflict; wrong-site creation was denied; the OTC supervisor loaded only Test House/OTC transports with no RES exposure or listener error; and admin retained the all-site view.
+- Added the cumulative `operations_admin` gate after finding broad client-side filtering in Properties, Fleet, Compliance, Cintas, the dashboard compliance summary, and fleet summary listeners. All strict supervisor listeners now issue backend `mainLocation`, `site`, or exact location queries. Strict rules use the signed current session scope, not an editable browser profile or a separate database-profile fallback.
+- The corrected operations run reported 3 applicable secure-client journeys passed with 6 intentional duplicate-viewport skips. The OTC supervisor loaded all four operations screens without RES exposure or listener errors, created an authorized OTC property, and was denied an RES write; a BHT was denied the supervisor collection; admin retained both sites. The first browser probe used an unresolved bare package import and was invalidated; the corrected test-only Vite probe rerun is the counted evidence.
+- Added and passed the cumulative `settings` gate: 3 applicable secure-client journeys passed with 6 intentional duplicate-viewport skips. BHT and supervisor read the existing runtime settings and could not write them; admin could update an ordinary setting but could not write the protected foundation, workflow-rollout, or App Check boundary documents.
+- Added a read-only operations-data preflight to both `operations_admin` preview/advance and the following `settings` preview/advance. It audits nine collections for exact OTC/RES location metadata and valid employee/location compliance types, reports only aggregate counts, and fails closed before activation. Corrections are deliberately outside the tool and require a separately approved backup/migration. Two new pure contracts passed for valid and malformed/legacy data.
+- The corrected Functions emulator loaded all current callables under Node.js `22.23.2`. App Check verification reported `MISSING` as expected because monitoring remains non-enforcing. The Windows Playwright/Firebase wrappers were interrupted only after every applicable case reported `ok`; the temporary emulator-only secret was then removed.
+- Current Storage rules: 4 passed, 0 failed, including the live-session-bound `templates_photos` file path. Current Firestore rules: 40 passed, 0 failed, including published-template read/browser-write denial, private supervisor drafts, EOC photo metadata scope, current-session workflow claims, strict protected-mutation boundaries, scoped debrief/alert/transport/operations queries, and settings read/write negatives.
+- Final local closeout reran the complete 68-test security-foundation unit suite, 42-test Firestore/Auth security emulator, 40-test Firestore rules suite, 10-test Functions emulator, 4-test Storage rules suite, ESLint, and production build successfully. Functions loaded under Node.js `22.23.2`. The readiness verifier reported `localDormantImplementationReady: true`, `runtimeParity: true`, every focused browser-command/artifact check true, and `productionReleaseReady: false` because production approval and activation remain intentionally absent. The later Stage 6 completion audit reran its changed 40-rule, 68-security, 14-debrief, lint, and build gates successfully. JSON parsing, script syntax, Markdown links, `git diff --check`, and temporary-secret absence also passed.
+- Firebase CLI emitted its local update-check permissions warning after each emulator test process had already exited successfully. This is a workstation CLI-cache nuisance, not a failed rule assertion; the exact passing test counts above were preserved.
+- No Firebase configuration, session, PIN, account, Auth provider, IAM, deployment, or workflow gate changed. The preview only read current protected state and wrote the external rollback snapshot.
 
 ## 2026-08-29 — Corrected Identity/Users release deployed; live canary verification in progress
 
@@ -38,10 +271,37 @@ Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 - Captured a verified post-release configuration backup at `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-canary-2026-08-29T20-15-06-151Z.json`; SHA-256 `1fe1665e4809cd231845aee8dfd7e2c712ac9d941c50bc0d06cd8d970e6d7718`.
 - The separate Google Cloud CLI session could not refresh non-interactively, so a fresh Authentication-provider readback was not obtained. Firebase CLI deployment authority remained valid, and no Auth provider/configuration change was requested or performed.
 
+### Live Test Supervisor canary evidence
+
+- Merged the deployment-evidence documentation through PR #10, then signed in through the familiar six-digit PIN screen as `test_supervisor`. The secure session survived a full page reload and a second same-device tab.
+- The live EOC page loaded its shared templates without a permission error. The live Users page loaded only the supervisor's OTC scope: five OTC BHT/tech profiles before the synthetic account check, with no supervisor, admin, or RES profile exposed.
+- The supervisor Add User form exposed only the BHT role and OTC location, matching the approved existing supervisor workflow. It did not offer supervisor/admin roles or RES.
+- The first live Generate secure PIN attempt correctly exposed a release defect: secure supervisors were still making a browser-side duplicate-PIN query that strict rules denied. No account was created by that failed attempt.
+- Corrected `SupervisorDashboard` so a secure-session supervisor generates the candidate PIN locally and lets the protected server action remain authoritative for uniqueness; the legacy compatibility path keeps its existing duplicate check. Updated the protected browser test to use the real Generate secure PIN control.
+- Verified the correction with lint, 60 passing security-foundation tests, a guarded secure build/marker check, diff checks, and the focused Firestore/Auth/Functions emulator browser journey for in-location supervisor BHT creation. The temporary emulator-only secret was removed afterward.
+- Merged the fix through PR #11 as `f067ccc`, deployed Hosting only, and reverified the live `v3-enabled` marker and persistent Test Supervisor session. No Function, rule, configuration, provider, workflow, or cohort change accompanied this Hosting correction.
+- With Mark's explicit approval, the live OTC supervisor created synthetic profile `security_canary_otc_bht` as an active OTC BHT assigned to Test House, 1st Shift, and Test Van. The Users page increased from five to six OTC BHTs. A read-only edit review showed only BHT and OTC remained available to this supervisor.
+- The new OTC profile is intentionally outside the three-profile secure allowlist. Its future login is therefore the required non-enrolled compatibility check, not a secure BHT canary login.
+- A later read-only recheck in Mark's still-authenticated Test Supervisor browser session reconfirmed the live boundary: the Users page showed exactly six OTC BHT profiles, including both Test House BHTs and the synthetic compatibility profile, with no RES/supervisor/admin profile exposed; the supervisor-facing `+ Add New User` control remained available. Direct navigation to the live EOC page loaded four shared templates and produced no captured browser-console permission error. No button that mutates data was used during this recheck.
+
+### Live Test BHT canary evidence
+
+- With Mark's explicit approval, the current Test Supervisor device session was ended and each existing Test House BHT signed in through the familiar six-digit PIN screen. No PIN was changed, reset, disclosed in documentation, or bypassed.
+- `test_bht_shift_1` completed its intended first-login migration: the protected status readback showed one stable identity mapping, security version `1`, and one active device-session record. The browser's first handoff returned the generic retry message after the server had completed that migration; one controlled retry reused the same profile/device session path and succeeded. This did not repeat for Shift 2 and is retained as canary evidence rather than treated as a proven code defect.
+- Shift 1 displayed only the BHT Home navigation and the exact `Test House - 1st Shift - Test Van` assignment. A full page reload restored the same secure session and assignment without another login prompt.
+- `test_bht_shift_2` signed in successfully on its first submitted PIN. It displayed only the BHT Home navigation and the exact `Test House - 2nd Shift - Test Van` assignment, including its current Test House EOC task cards. A full page reload restored the same secure session and assignment without another login prompt or new console warning.
+- Ordinary logout ended only the active browser device session before switching canary identities. Firestore briefly logged stale-listener permission warnings during two logout/login handoffs, then the intended session and assignment loaded; neither warning repeated after reload. This cleanup noise remains observable evidence and must not be represented as a failed role/location boundary.
+- The post-journey read-only production status check retained the exact three-profile cohort, `identity_users` as the only enabled workflow, the matching rollback anchor, and no missing profiles or mappings. It reported exactly three per-profile device-session records: Shift 2 active in the current browser, with Shift 1 and Test Supervisor inactive after their approved ordinary logouts.
+- Mark then signed Shift 2 into a separate physical phone while the computer browser remained signed in. Read-only backend evidence showed four total canary session records and exactly two active Shift 2 device sessions, proving one stable staff identity can hold independent simultaneous sessions.
+- With Mark's immediate approval, the computer used the ordinary Sign Out control. The computer returned to the PIN screen; the next read-only backend check showed the same four total records but only one active Shift 2 session. The computer record closed and the phone record remained active, proving ordinary logout is device-specific rather than an all-device revocation.
+- Mark refreshed the phone after the computer logout and confirmed it returned directly to the Shift 2 Home screen without another PIN prompt. This is the staff-facing proof that the surviving device remains usable, not only a backend session-count observation.
+- Node.js 22.23.2 verification after the live observation passed all 42 Auth/Firestore security-emulator contracts, all 85 focused security contracts, all 10 Functions emulator contracts, ESLint, and the guarded `v3-enabled` Hosting build. Firebase CLI again emitted only its known updater-cache warning after each emulator product script had exited successfully.
+
 ### Remaining Stage 3 gate
 
-- The browser was signed out after deployment. Signed-in Test Supervisor EOC and Users checks, both Test BHT journeys, compatibility fallback, session/device behavior, scoped account actions, and rollback proof remain required.
-- No PIN reset, user creation/deactivation, session ending, protected configuration change, broader profile enrollment, or later workflow activation occurred in this checkpoint.
+- **Superseded by the newer 2026-08-29 entry above:** the non-enrolled synthetic OTC compatibility login/reload gate is now complete. Source reconciliation, all-device revocation, approved synthetic RES account actions, and final rollback proof remain required. Both enrolled Test BHT secure-login/reload/scope journeys and independent two-device/one-device-logout behavior are complete.
+- A synthetic RES BHT should be created through the same normal scoped UI flow, but the current session is an OTC supervisor and is correctly unable to create RES users. That check is deferred until Mark can provide an admin or RES-authorized supervisor session; do not bypass this boundary through a production script.
+- At this checkpoint, no PIN reset, deactivation, session ending, protected configuration change, broader profile enrollment, later workflow activation, or RES production-data change had occurred. The only production profile created was the explicitly approved synthetic OTC BHT described above. The newer entry records the later Hosting-only compatibility correction and read-only live proof.
 
 ## 2026-08-28 — Identity/Users completion implementation, local checkpoint
 

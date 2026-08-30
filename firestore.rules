@@ -603,7 +603,13 @@ service cloud.firestore {
         && data.mainLocation.size() > 0
       )
         ? normalizedMainLocation(data.mainLocation)
-        : normalizedShiftMainLocation(data.locationId);
+        : (
+            ('locationId' in data)
+            && data.locationId is string
+            && data.locationId.size() > 0
+          )
+            ? normalizedShiftMainLocation(data.locationId)
+            : '';
     }
 
     function fleetLocationAllowed(data) {
@@ -865,14 +871,31 @@ service cloud.firestore {
           && resource.data.bhtUserId == authAppUserId()
         );
 
-      allow list: if workflowRoleAllowed('identity_users', ['admin'])
-        || (
-          workflowRoleAllowed('identity_users', ['supervisor'])
-          && authLocationAllowed(resource.data.locationId)
+      allow list: if workflowSecurityEnabled('identity_users')
+        ? (
+          hasCurrentSecuritySession()
+          && (
+            workflowTokenRole() == 'admin'
+            || (
+              workflowTokenRole() == 'supervisor'
+              && workflowTokenLocationAllowed(resource.data.locationId)
+            )
+            || (
+              workflowTokenRole() in ['bht', 'tech']
+              && resource.data.locationId in workflowTokenIssueLocations()
+            )
+          )
         )
-        || (
-          workflowRoleAllowed('identity_users', ['bht', 'tech'])
-          && resource.data.locationId in authIssueLocations()
+        : (
+          authRoleAllowed(['admin'])
+          || (
+            authRoleAllowed(['supervisor'])
+            && authLocationAllowed(resource.data.locationId)
+          )
+          || (
+            authRoleAllowed(['bht', 'tech'])
+            && resource.data.locationId in authIssueLocations()
+          )
         );
 
       allow create: if request.resource.data.keys().hasAll([
@@ -1114,7 +1137,11 @@ service cloud.firestore {
             && authAppUserId() in resource.data.receivingUserIds
           )
         );
-      allow list: if workflowRoleAllowed('debriefs_alerts', ['supervisor', 'admin']);
+      allow list: if workflowRoleAllowed('debriefs_alerts', ['supervisor', 'admin'])
+        && (
+          !workflowSecurityEnabled('debriefs_alerts')
+          || workflowExactIssueLocationAllowed('debriefs_alerts', resource.data.locationId)
+        );
 
       allow create: if validSubmittedShiftDebriefData(request.resource.data)
         && ((!workflowSecurityEnabled('debriefs_alerts') && hasLegacyAuthSession()) || request.resource.data.submittedByUserId == authAppUserId())
@@ -1426,27 +1453,59 @@ service cloud.firestore {
 
     // Supervisor Alerts
     match /alerts/{docId} {
-      allow read: if workflowSessionReady('debriefs_alerts') && (
-        (!workflowSecurityEnabled('debriefs_alerts') && hasLegacyAuthSession())
+      allow read: if workflowSecurityEnabled('debriefs_alerts')
+        ? (
+          hasCurrentSecuritySession()
+          && (
+            resource.data.audience == 'bht'
+            && (
+              (
+                ('targetUserId' in resource.data)
+                && resource.data.targetUserId == request.auth.token.profileId
+              )
+              || (
+                workflowTokenRole() == 'admin'
+                || (
+                  workflowTokenRole() == 'supervisor'
+                  && ('locationId' in resource.data)
+                  && workflowTokenLocationAllowed(resource.data.locationId)
+                )
+              )
+            )
+            || (
+              resource.data.audience == 'supervisor'
+              && (
+                workflowTokenRole() == 'admin'
+                || (
+                  workflowTokenRole() == 'supervisor'
+                  && ('locationId' in resource.data)
+                  && workflowTokenLocationAllowed(resource.data.locationId)
+                )
+              )
+            )
+          )
+        )
+        : (
+          hasLegacyAuthSession()
           || (
             resource.data.audience == 'bht'
             && resource.data.targetUserId == authAppUserId()
           )
           || (
             resource.data.audience == 'supervisor'
-            && workflowRoleAllowed('debriefs_alerts', ['supervisor', 'admin'])
+            && authRoleAllowed(['supervisor', 'admin'])
             && (
               (
                 resource.data.type in ['eoc_issue', 'eoc_issue_update', 'shift_debrief_submitted', 'shift_debrief_missing', 'shift_debrief_no_receivers', 'shift_debrief_incoming_ack_late']
-                && workflowExactIssueLocationAllowed('debriefs_alerts', resource.data.locationId)
+                && exactIssueLocationAllowed(resource.data.locationId)
               )
               || (
                 !(resource.data.type in ['eoc_issue', 'eoc_issue_update', 'shift_debrief_submitted', 'shift_debrief_missing', 'shift_debrief_no_receivers', 'shift_debrief_incoming_ack_late'])
-                && workflowLocationAllowed('debriefs_alerts', ['supervisor', 'admin'], resource.data.locationId)
+                && authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.locationId)
               )
             )
           )
-      );
+        );
 
       allow create: if workflowSessionReady('debriefs_alerts') && request.resource.data.keys().hasAll([
         'type', 'message', 'read', 'audience'
@@ -1624,57 +1683,64 @@ service cloud.firestore {
     // EOC Vehicles
     match /eocVehicles/{docId} {
       allow read: if !workflowSecurityEnabled('operations_admin')
-        || workflowRoleAllowed('operations_admin', ['bht', 'tech', 'supervisor', 'admin']);
+        || (
+          workflowRoleAllowed('operations_admin', ['bht', 'tech', 'supervisor', 'admin'])
+          && workflowOperationsLocationAllowed(resource.data)
+        );
       allow create: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(request.resource.data)
+        && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data);
       allow update: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(request.resource.data)
+        && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
       allow delete: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(resource.data);
+        && workflowOperationsLocationAllowed(resource.data);
     }
 
     // Property profiles
     match /eocProperties/{docId} {
       allow read: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(resource.data);
+        && workflowOperationsLocationAllowed(resource.data);
       allow create: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(request.resource.data)
+        && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data);
       allow update: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(request.resource.data)
+        && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
       allow delete: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(resource.data);
+        && workflowOperationsLocationAllowed(resource.data);
     }
 
     // Fleet maintenance templates
     match /fleetMaintenanceTemplates/{docId} {
       allow read: if !workflowSecurityEnabled('operations_admin')
-        || workflowRoleAllowed('operations_admin', ['bht', 'tech', 'supervisor', 'admin']);
+        || (
+          workflowRoleAllowed('operations_admin', ['bht', 'tech', 'supervisor', 'admin'])
+          && workflowOperationsLocationAllowed(resource.data)
+        );
       allow create: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(request.resource.data)
+        && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data);
       allow update: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(request.resource.data)
+        && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
       allow delete: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(resource.data);
+        && workflowOperationsLocationAllowed(resource.data);
     }
 
     // Fleet runtime (strict mileage update path for BHT/tech)
     match /fleetVehicleRuntime/{docId} {
-      allow read: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin']);
+      allow read: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
+        && workflowOperationsLocationAllowed(resource.data);
 
       allow create: if workflowRoleAllowed('operations_admin', ['bht', 'tech', 'supervisor', 'admin'])
         && request.resource.data.vehicleId is string
         && request.resource.data.lastKnownMileage is int
         && request.resource.data.lastKnownMileage >= 0
-        && fleetRuntimeLocationAllowed(request.resource.data)
+        && workflowOperationsRuntimeLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data);
 
       allow update: if workflowRoleAllowed('operations_admin', ['bht', 'tech', 'supervisor', 'admin'])
@@ -1697,7 +1763,7 @@ service cloud.firestore {
             'version',
             'updatedAt'
           ])
-        && fleetRuntimeLocationAllowed(request.resource.data)
+        && workflowOperationsRuntimeLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
@@ -1706,72 +1772,75 @@ service cloud.firestore {
 
     // Fleet task queue
     match /fleetTasks/{docId} {
-      allow read: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin']);
+      allow read: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
+        && workflowOperationsLocationAllowed(resource.data);
 
       allow create: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
         && validFleetTaskType(request.resource.data.taskType)
         && validFleetTaskStatus(request.resource.data.status)
         && validFleetTriggerMode(request.resource.data.triggerMode)
-        && fleetLocationAllowed(request.resource.data)
+        && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data);
 
       allow update: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
         && validFleetTaskType(request.resource.data.taskType)
         && validFleetTaskStatus(request.resource.data.status)
         && validFleetTriggerMode(request.resource.data.triggerMode)
-        && fleetLocationAllowed(request.resource.data)
+        && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
       allow delete: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(resource.data);
+        && workflowOperationsLocationAllowed(resource.data);
     }
 
     // Vehicle service records
     match /vehicleServiceRecords/{docId} {
       allow read: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(resource.data);
+        && workflowOperationsLocationAllowed(resource.data);
 
       allow create: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(request.resource.data)
+        && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data);
 
       allow update: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && fleetLocationAllowed(request.resource.data)
+        && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data)
         && createdAtUnchanged();
 
       allow delete: if workflowRoleAllowed('operations_admin', ['admin'])
-        && fleetLocationAllowed(resource.data);
+        && workflowOperationsLocationAllowed(resource.data);
     }
 
     // Compliance collections
     match /complianceEmployees/{employeeId} {
       allow read: if !workflowSecurityEnabled('operations_admin')
-        || workflowRoleAllowed('operations_admin', ['supervisor', 'admin']);
-      allow write: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin']);
+        || workflowLocationAllowed('operations_admin', ['supervisor', 'admin'], resource.data.site);
+      allow create, update: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
+        && (!workflowSecurityEnabled('operations_admin')
+          || workflowTokenLocationAllowed(request.resource.data.site));
+      allow delete: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
+        && (!workflowSecurityEnabled('operations_admin')
+          || workflowTokenLocationAllowed(resource.data.site));
     }
     match /complianceItems/{itemId} {
       allow read: if !workflowSecurityEnabled('operations_admin')
-        || workflowRoleAllowed('operations_admin', ['supervisor', 'admin']);
+        || workflowOperationsComplianceLocationAllowed(resource.data);
       allow create, update: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
         && (
-          authLocationAllowed(request.resource.data.employeeSite)
-          || authLocationAllowed(request.resource.data.mainLocation)
-          || authLocationAllowed(request.resource.data.locationId)
+          !workflowSecurityEnabled('operations_admin')
+          || workflowOperationsComplianceLocationAllowed(request.resource.data)
         );
       allow delete: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
         && (
-          authLocationAllowed(resource.data.employeeSite)
-          || authLocationAllowed(resource.data.mainLocation)
-          || authLocationAllowed(resource.data.locationId)
+          !workflowSecurityEnabled('operations_admin')
+          || workflowOperationsComplianceLocationAllowed(resource.data)
         );
     }
     match /cintasServices/{serviceId} {
       allow read: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
         && (
-          authLocationAllowed(resource.data.mainLocation)
-          || authLocationAllowed(resource.data.locationId)
+          workflowOperationsLocationAllowed(resource.data)
         )
         || (
           workflowRoleAllowed('operations_admin', ['admin'])
@@ -1780,15 +1849,14 @@ service cloud.firestore {
         );
       allow write: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
         && (
-          authLocationAllowed(request.resource.data.mainLocation)
-          || authLocationAllowed(request.resource.data.locationId)
+          workflowOperationsLocationAllowed(request.resource.data)
         );
     }
 
     // Transports collection
     match /transports/{transportId} {
       allow read: if !workflowSecurityEnabled('transports')
-        || workflowRoleAllowed('transports', ['bht', 'tech', 'supervisor', 'admin']);
+        || workflowTransportReadAllowed(resource.data);
 
       allow create: if request.resource.data.keys().hasAll([
         'site', 'createdByUserId', 'createdByName', 'status', 'departedAt', 'createdAt'
@@ -1915,6 +1983,66 @@ service cloud.firestore {
         : authRoleAndLocationAllowed(roles, locationId);
     }
 
+    function workflowOperationsLocationAllowed(data) {
+      return workflowSecurityEnabled('operations_admin')
+        ? (
+            workflowTokenRole() == 'admin'
+            || (
+              ('mainLocation' in data)
+              && data.mainLocation is string
+              && data.mainLocation.size() > 0
+              && workflowTokenLocationAllowed(data.mainLocation)
+            )
+          )
+        : fleetLocationAllowed(data);
+    }
+
+    function workflowOperationsRuntimeLocationAllowed(data) {
+      return workflowSecurityEnabled('operations_admin')
+        ? (
+            (
+              ('mainLocation' in data)
+              && data.mainLocation is string
+              && data.mainLocation.size() > 0
+              && workflowTokenLocationAllowed(data.mainLocation)
+            )
+            || (
+              data.vehicleId is string
+              && exists(/databases/$(database)/documents/eocVehicles/$(data.vehicleId))
+              && workflowTokenLocationAllowed(
+                fleetMainLocationFromData(get(/databases/$(database)/documents/eocVehicles/$(data.vehicleId)).data)
+              )
+            )
+          )
+        : fleetRuntimeLocationAllowed(data);
+    }
+
+    function workflowOperationsComplianceLocationAllowed(data) {
+      return workflowSecurityEnabled('operations_admin')
+        ? (
+            workflowTokenRole() == 'admin'
+            || (
+              ('targetType' in data)
+              && data.targetType == 'employee'
+              && ('employeeSite' in data)
+              && data.employeeSite is string
+              && workflowTokenLocationAllowed(data.employeeSite)
+            )
+            || (
+              ('targetType' in data)
+              && data.targetType == 'location'
+              && ('mainLocation' in data)
+              && data.mainLocation is string
+              && workflowTokenLocationAllowed(data.mainLocation)
+            )
+          )
+        : (
+            (('employeeSite' in data) && authLocationAllowed(data.employeeSite))
+            || (('mainLocation' in data) && authLocationAllowed(data.mainLocation))
+            || (('locationId' in data) && authLocationAllowed(data.locationId))
+          );
+    }
+
     function workflowExactIssueLocationAllowed(workflowId, locationId) {
       return workflowSecurityEnabled(workflowId)
         ? (
@@ -1934,6 +2062,17 @@ service cloud.firestore {
             && (workflowTokenRole() in ['supervisor', 'admin'] || data.createdByUserId == request.auth.token.profileId)
           )
         : authTransportWriteAllowed(data);
+    }
+
+    function workflowTransportReadAllowed(data) {
+      let role = workflowTokenRole();
+      return hasCurrentSecuritySession()
+        && role in ['bht', 'tech', 'supervisor', 'admin']
+        && (
+          role == 'admin'
+          || (role in ['bht', 'tech'] && data.createdByUserId == request.auth.token.profileId)
+          || (role == 'supervisor' && workflowTokenLocationAllowed(data.site))
+        );
     }
 
     function workflowTransportDeleteAllowed(data) {

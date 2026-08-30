@@ -5,25 +5,30 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('sprc_ops_onboarding_done', 'true'))
 })
 
-test('a valid non-enrolled profile keeps the compatibility login through reload without secure artifacts', async ({ page }) => {
+test('a valid non-enrolled profile keeps the unchanged compatibility login through reload without secure artifacts', async ({ page }) => {
   await page.goto('/')
   await page.getByPlaceholder('Enter 6-digit PIN').fill('851472')
   await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 })
 
-  const initialState = await page.evaluate(async () => {
+  const state = await page.evaluate(async () => {
     const { auth } = await import('/src/firebase.js')
     const claims = auth.currentUser ? (await auth.currentUser.getIdTokenResult()).claims : {}
     return {
       legacyUser: JSON.parse(sessionStorage.getItem('bhtUser')),
       secureSession: localStorage.getItem('sprc_staff_session_v3'),
+      firebaseIsAnonymous: auth.currentUser?.isAnonymous === true,
       stableProfileClaim: claims.profileId || null,
-      stableSessionClaim: claims.sessionId || null
+      stableSessionClaim: claims.sessionId || null,
+      workflowSecurityVersion: claims.workflowSecurityVersion || null
     }
   })
-  expect(initialState.legacyUser.id).toBe('phase4_out_of_scope_res_bht')
-  expect(initialState.secureSession).toBeNull()
-  expect(initialState.stableProfileClaim).toBeNull()
-  expect(initialState.stableSessionClaim).toBeNull()
+  expect(state.legacyUser.id).toBe('phase4_out_of_scope_res_bht')
+  expect(state.legacyUser.locationId).toBe('res')
+  expect(state.secureSession).toBeNull()
+  expect(state.firebaseIsAnonymous).toBe(true)
+  expect(state.stableProfileClaim).toBeNull()
+  expect(state.stableSessionClaim).toBeNull()
+  expect(state.workflowSecurityVersion).toBeNull()
 
   await page.reload()
   await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 })

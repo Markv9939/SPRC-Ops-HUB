@@ -5,15 +5,16 @@ import {
   collection,
   doc,
   getDoc,
-  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
-  updateDoc
+  updateDoc,
+  where
 } from 'firebase/firestore'
 import { LOCATIONS, getShiftLabel } from '../data/eocConstants'
 import { notifySuccess } from '../utils/toast'
 import { getVersionNumber } from '../services/versioning'
+import { subscribeMergedQueryRows } from '../services/scopedSnapshotService'
 import {
   getAvailableMainLocationsForUser,
   isAdminRole,
@@ -110,40 +111,36 @@ function PropertiesPanel({ user, scopeSites = null, onOpenTab = null }) {
   useEffect(() => {
     if (allowedMainLocations.length === 0) return () => {}
 
-    const unsubProperties = onSnapshot(
-      query(collection(db, 'eocProperties'), orderBy('name', 'asc')),
-      (snap) => {
-        const rows = snap.docs
-          .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-          .filter((row) => {
-            const mainLocation = normalizeMainLocation(row.mainLocation) || locationIdToMainLocation(row.locationId)
-            return Boolean(mainLocation) && allowedMainLocationSet.has(mainLocation)
-          })
-        setProperties(rows)
-      }
-    )
+    const propertyQueries = isAdmin
+      ? [query(collection(db, 'eocProperties'), orderBy('name', 'asc'))]
+      : allowedMainLocations.map(mainLocation => query(
+          collection(db, 'eocProperties'),
+          where('mainLocation', '==', mainLocation),
+          orderBy('name', 'asc')
+        ))
+    const allowedLocationIds = LOCATIONS
+      .filter(location => allowedMainLocationSet.has(locationIdToMainLocation(location.id)))
+      .map(location => location.id)
+    const houseTaskQueries = isAdmin
+      ? [query(collection(db, 'eocTasks'), where('taskType', '==', 'house'))]
+      : allowedLocationIds.map(locationId => query(
+          collection(db, 'eocTasks'),
+          where('taskType', '==', 'house'),
+          where('locationId', '==', locationId)
+        ))
 
-    const unsubHouseTasks = onSnapshot(
-      collection(db, 'eocTasks'),
-      (snap) => {
-        const rows = snap.docs
-          .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-          .filter(task => task.taskType === 'house')
-          .filter(task => allowedMainLocationSet.has(locationIdToMainLocation(task.locationId)))
-          .sort((a, b) => {
-            const aDue = String(a.dueDate || '')
-            const bDue = String(b.dueDate || '')
-            return aDue.localeCompare(bDue)
-          })
-        setHouseTasks(rows)
-      }
-    )
+    const unsubProperties = subscribeMergedQueryRows(propertyQueries, setProperties, {
+      sort: (a, b) => String(a.name || '').localeCompare(String(b.name || ''))
+    })
+    const unsubHouseTasks = subscribeMergedQueryRows(houseTaskQueries, setHouseTasks, {
+      sort: (a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || ''))
+    })
 
     return () => {
       unsubProperties()
       unsubHouseTasks()
     }
-  }, [allowedMainLocationSet, allowedMainLocations.length])
+  }, [allowedMainLocationSet, allowedMainLocations, isAdmin])
 
   const allowedLocationOptions = useMemo(() => {
     return LOCATIONS.filter(location => allowedMainLocationSet.has(locationIdToMainLocation(location.id)))

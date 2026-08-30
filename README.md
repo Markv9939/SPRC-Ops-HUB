@@ -36,8 +36,8 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Staff select their Ops profile with a unique six-digit PIN.
 - The local session locks after 60 minutes of inactivity.
 - PIN login includes timeout guards so degraded connectivity fails clearly instead of staying on `Checking...`.
-- Firebase claim enforcement is off. The planned security direction keeps the same PIN screen but moves PIN verification and Firebase identity proof to a staged server-backed custom-token session tied to the permanent Ops profile.
-- Phases 1–8 of that foundation are implemented and tested only in the isolated security branch. This includes protected account/session actions, owner-bound offline replay, named workflow and photo rules, two-device transport conflict protection, monitoring-only App Check hooks, and canary/rollback readiness. Every path remains disabled by exact versioned gates, unconfigured in production, and undeployed; the normal build does not change current staff behavior.
+- Global Firebase claim enforcement remains off. The familiar PIN screen now has a narrowly enabled server-backed custom-token canary for exactly three synthetic Test House profiles. That cohort has passed every cumulative workflow stage through Settings; ordinary valid staff remain on the compatibility path.
+- Security-foundation Phases 1–9, the complete local role/offline/device contract matrix, and the synthetic production canary are complete. Protected EOC/offline replay, issue, and transport callables are reachable only for their app-layer-authorized workflow paths. Broad staff enrollment, App Check enforcement, global strict authorization, and compatibility retirement remain disabled and require separate production approval.
 
 ## Recent Dashboard/Modal Behavior (Current)
 - BHT home is now a tighter action-hub experience:
@@ -92,7 +92,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 ## Runtime
 - App entry: `src/App.jsx`
 - Active roles: `bht`, `supervisor`, `admin`
-- Data backend: Firebase Firestore; current PIN-profile compatibility mode does not yet provide one consistent server-verified Firebase staff session
+- Data backend: Firebase Firestore; the exact three-profile canary receives a server-verified stable Firebase identity/session while non-canary staff retain the compatibility PIN path until a separately approved staged enrollment
 - Profile selection: six-digit PIN mapped to permanent `users/{id}` records
 
 ## Commands
@@ -103,7 +103,19 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Security foundation unit contracts: `npm run test:security-foundation`
 - Security foundation emulator contracts: `npm run test:security-foundation:emulator`
 - Local security readiness audit: `npm run verify:security-readiness`
-- Non-enrolled compatibility login/reload gate: `npm run test:security-compatibility:emulator` (inside the Node 22 Firestore/Auth/Functions emulator wrapper)
+- Guarded canary stage model tests: `npm run test:security-canary-stage`
+- Secure client/account/RES browser gate: `npm run test:security-client:emulator` (inside the documented Node 22 Firebase emulator wrapper)
+- Non-enrolled compatibility browser gate: `npm run test:security-compatibility:emulator` (inside the documented Node 22 Firebase emulator wrapper)
+- Focused secure templates/photos browser gate: `npm run test:security-templates-photos:browser` (inside the documented Firebase emulator/seed wrapper)
+- Focused secure EOC/offline-replay browser gate: `npm run test:security-eoc-offline:browser` (inside the documented Firebase emulator/seed wrapper)
+- Focused secure debriefs/alerts browser gate: `npm run test:security-debriefs-alerts:browser` (inside the documented Firebase emulator/seed wrapper)
+- Focused secure issues/feedback/audit browser gate: `npm run test:security-issues-feedback-audit:browser` (inside the documented Firebase emulator/seed wrapper)
+- Focused secure transports browser gate: `npm run test:security-transports:browser` (inside the documented Firebase emulator/seed wrapper)
+- Focused secure operations-administration browser gate: `npm run test:security-operations-admin:browser` (inside the documented Firebase emulator/seed wrapper)
+- Focused secure settings browser gate: `npm run test:security-settings:browser` (inside the documented Firebase emulator/seed wrapper)
+- Complete secure offline/reconnect browser gate: `npm run test:security-offline-matrix:emulator` (inside the documented Node 22 Firebase emulator wrapper)
+- Read-only App Check aggregate observation after approved monitoring rollout: `npm run security:canary -- --mode=app-check-observe --project=sprc-tx-l --hours=24`
+- Read-only live Identity/Users and rollback-anchor status: `npm run security:canary -- --mode=identity-status --project=sprc-tx-l --backup=<absolute verified backup path> --backup-sha256=<exact SHA-256>`
 - Smoke: `npm run smoke:phase9:full`
 - Preview core reset (read-only): `npm run reset:core:preview`
 - Back up core reset data (read-only): `npm run reset:core:backup`
