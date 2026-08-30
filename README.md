@@ -37,7 +37,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - The local session locks after 60 minutes of inactivity.
 - PIN login includes timeout guards so degraded connectivity fails clearly instead of staying on `Checking...`.
 - Global Firebase claim enforcement remains off. The familiar PIN screen now has a narrowly enabled server-backed custom-token canary for exactly three synthetic Test House profiles. That cohort has passed every cumulative workflow stage through Settings; ordinary valid staff remain on the compatibility path.
-- Security-foundation Phases 1–9, the complete local role/offline/device contract matrix, and the synthetic production canary are complete. Protected EOC/offline replay, issue, and transport callables are reachable only for their app-layer-authorized workflow paths. Broad staff enrollment, App Check enforcement, global strict authorization, and compatibility retirement remain disabled and require separate production approval.
+- Security-foundation Phases 1–9, the complete local role/offline/device contract matrix, and the synthetic production canary are complete and merged through `eda1ff9`. Guarded real-staff cohort tooling is now under local preparation; no real staff are enrolled by that tooling yet. Protected EOC/offline replay, issue, and transport callables remain app-layer protected. App Check enforcement, global strict authorization, and compatibility retirement remain disabled.
 
 ## Recent Dashboard/Modal Behavior (Current)
 - BHT home is now a tighter action-hub experience:
@@ -116,6 +116,8 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Complete secure offline/reconnect browser gate: `npm run test:security-offline-matrix:emulator` (inside the documented Node 22 Firebase emulator wrapper)
 - Read-only App Check aggregate observation after approved monitoring rollout: `npm run security:canary -- --mode=app-check-observe --project=sprc-tx-l --hours=24`
 - Read-only live Identity/Users and rollback-anchor status: `npm run security:canary -- --mode=identity-status --project=sprc-tx-l --backup=<absolute verified backup path> --backup-sha256=<exact SHA-256>`
+- Read-only eligible BHT/tech candidates for one exact home location: `npm run security:staff-rollout -- --mode=candidates --project=sprc-tx-l --location=<exact-location-id>`
+- Guarded exact-cohort preview: `npm run security:staff-rollout -- --mode=preview --project=sprc-tx-l --location=<exact-location-id> --profile-ids=<comma-separated-profile-ids> --backup-dir=<absolute-path-outside-repo>`
 - Smoke: `npm run smoke:phase9:full`
 - Preview core reset (read-only): `npm run reset:core:preview`
 - Back up core reset data (read-only): `npm run reset:core:backup`

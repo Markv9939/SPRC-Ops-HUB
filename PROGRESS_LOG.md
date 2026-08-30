@@ -4,6 +4,30 @@ Last updated: 2026-08-30
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
+## 2026-08-30 — Guarded real-staff cohort rollout preparation started locally
+
+### Approved direction
+
+- Mark approved beginning the remaining broad staff rollout after security-foundation PR #13 merged to `Main` as `eda1ff9`.
+- The rollout remains location-by-location and role-group-by-role-group. The first operational group is BHT/tech only at one exact existing home location. The familiar six-digit PIN screen and compatibility fallback remain unchanged for everyone not explicitly enrolled.
+- No exact real-staff location or profile list has been selected yet. No production enrollment, profile mutation, session ending, Firebase configuration change, deployment, strict-auth change, App Check enforcement, or compatibility retirement occurred in this preparation step.
+
+### Local implementation and evidence
+
+- Created isolated branch `codex/security-real-staff-rollout` from verified `origin/Main` merge `eda1ff9`.
+- Added a separate guarded staff-rollout model and command instead of weakening or repurposing the exact synthetic-canary tool.
+- The model caps one cohort at 12 profiles, rejects synthetic accounts, supervisors/admins, inactive/deleted profiles, zero/multiple/wrong home locations, missing or duplicate PIN credentials, conflicting identity mappings, already-enrolled profiles, mismatched allowlists, incomplete workflow coverage, global strict authorization, and App Check enforcement.
+- The command supports read-only candidate discovery, exact-cohort preview with an external checksum-protected rollback file, status, enrollment, and rollback. Enrollment and rollback atomically change only the two profile allowlists plus target security versions, then close all target device sessions, revoke mapped Firebase refresh tokens, and preserve retryable audit/cleanup evidence. Rollback removes only that cohort and returns it to compatibility login; it does not delete identity, credential, session, offline, or audit records.
+- Focused rollout-model tests: 6 passed. Complete security-foundation unit suite: 92 passed, 0 failed. The dedicated Firestore/Auth emulator lifecycle passed exact enrollment, version cutoff, old-session closure, immutable audit plus cleanup completion, identical-command retry without a second version increment, cohort-only rollback, rollback session closure, and rollback retry. Firebase CLI emitted the known updater-cache warning only after the product test passed. ESLint and the 1,913-module production build passed.
+- Read-only live candidate discovery initially surfaced the existing RES/Test House synthetic accounts alongside the true operational candidates. The guard was tightened to exclude the known synthetic IDs and test/canary ID patterns from both discovery and manual selection. The corrected live report shows zero real candidates at Mesquite, RES, or Test House and exactly three at Lone Mountain: `mark_v`, `paul_g`, and `sam_seylar`.
+- All three Lone Mountain profiles are active BHTs with the exact `lone_mountain` home location, unique legacy PIN hashes eligible for normal first-login server migration, security version `1`, no conflicting stable identity, and no current secure enrollment.
+- Read-only preview passed and wrote external rollback package `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-staff-rollout-lone_mountain-2026-08-30T18-52-40-969Z.json`, SHA-256 `bf97f83b044939c40d10aa9f4b88539f3d042e0e1d5095c57b2a312ab6db704c`. It preserves the full eight-workflow list, compatibility fallback, strict authorization off, and App Check enforcement off.
+
+### Remaining gate
+
+- The exact first cohort and preview are ready. Before enrollment, commit/review/merge the guarded tool, confirm the live configuration/profile hashes still match this preview, and obtain Mark's explicit authorization for the production profile-version/session mutation. The exact generated phrase is `ENROLL LONE_MOUNTAIN BHT SECURITY COHORT`.
+- After enrollment, require existing-PIN login, reload persistence, phone and desktop, two-device independence, one-device logout, offline/reconnect, relevant BHT workflows, supervisor scope, negative access, and rollback/re-enrollment evidence before adding another cohort.
+
 ## 2026-08-30 — Complete three-profile security canary closed out through Settings
 
 ### Final production boundary
