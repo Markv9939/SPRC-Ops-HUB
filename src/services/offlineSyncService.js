@@ -45,20 +45,9 @@ import { uploadEocResponsePhotos } from './eocSubmissionAttachmentService'
 import { evaluateOfflineActionForCurrentUser } from './offlineSecurityModel'
 import { authorizeOfflineActionReplay } from './offlineReplayAuthorization'
 import { shouldUseProtectedOperationalMutation, submitProtectedEocMutation } from './protectedOperationalMutationService'
+import { OFFLINE_ACTION_TYPES } from './offlineActionCatalog'
 
-export const OFFLINE_ACTION_TYPES = {
-  EOC_SUBMISSION: 'eocSubmission',
-  SHIFT_DEBRIEF_QUICK_NOTE: 'shiftDebriefQuickNote',
-  SHIFT_DEBRIEF_SUBMISSION: 'shiftDebriefSubmission',
-  SHIFT_DEBRIEF_EXTRA_NOTE: 'shiftDebriefExtraNote',
-  SHIFT_DEBRIEF_CONFIRMATION: 'shiftDebriefConfirmation',
-  BHT_ISSUE_REPORT: 'bhtIssueReport',
-  APP_FEEDBACK: 'appFeedback',
-  ISSUE_ATTACHMENT_UPLOAD: 'issueAttachmentUpload',
-  TRANSPORT_CREATE: 'transportCreate',
-  TRANSPORT_UPDATE: 'transportUpdate',
-  TRANSPORT_CLOSE: 'transportClose'
-}
+export { OFFLINE_ACTION_TYPES } from './offlineActionCatalog'
 
 export function getEocDraftId(taskId, userId) {
   return `eoc:${String(taskId || '').trim()}__${String(userId || '').trim()}`

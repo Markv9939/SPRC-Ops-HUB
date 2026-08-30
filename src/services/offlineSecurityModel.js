@@ -1,8 +1,4 @@
-const BHT_ACTION_TYPES = new Set([
-  'eocSubmission', 'shiftDebriefQuickNote', 'shiftDebriefSubmission', 'shiftDebriefExtraNote',
-  'shiftDebriefConfirmation', 'bhtIssueReport', 'appFeedback', 'issueAttachmentUpload',
-  'transportCreate', 'transportUpdate', 'transportClose'
-])
+import { isSupportedSecureOfflineActionType } from './offlineActionCatalog.js'
 
 function clean(value) {
   return String(value || '').trim()
@@ -54,7 +50,7 @@ export function evaluateOfflineActionForCurrentUser(action = {}, currentUser = {
   if (clean(binding.ownerProfileId) !== currentProfileId || clean(binding.ownerAuthUid) !== clean(currentUser.authUid)) {
     return { disposition: 'hold_for_owner', reason: 'wrong_firebase_identity' }
   }
-  if (!BHT_ACTION_TYPES.has(clean(action.type))) return { disposition: 'needs_review', reason: 'unsupported_action' }
+  if (!isSupportedSecureOfflineActionType(action.type)) return { disposition: 'needs_review', reason: 'unsupported_action' }
 
   const locationId = clean(binding.locationId).toUpperCase()
   const allowed = locationValues(currentUser)

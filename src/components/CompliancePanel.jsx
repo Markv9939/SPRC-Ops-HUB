@@ -5,18 +5,19 @@ import {
   collection,
   deleteDoc,
   doc,
-  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   Timestamp,
   updateDoc,
+  where,
   writeBatch
 } from 'firebase/firestore'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog } from '../utils/dialogs'
 import { getStatus } from '../utils/complianceStatus'
 import { MAIN_LOCATIONS, normalizeMainLocation } from '../utils/orgModel'
+import { subscribeMergedQueryRows } from '../services/scopedSnapshotService'
 
 const EMPLOYEE_COMPLIANCE_CATEGORIES = {
   fpcc: { label: 'FPCC', icon: '\u{1FAAA}' },
@@ -714,34 +715,36 @@ function CompliancePanel({ user, scopeSites = null }) {
   useEffect(() => {
     if (!hasComplianceScope) return () => {}
 
-    const unsubEmployees = onSnapshot(
-      query(collection(db, 'complianceEmployees'), orderBy('name', 'asc')),
-      (snap) => {
-        const rows = snap.docs.map(d => {
-          const data = d.data()
-          return {
-            id: d.id,
-            ...data,
-            site: normalizeMainLocation(data.site) || String(data.site || '').trim().toUpperCase()
-          }
-        })
-        setEmployees(rows.filter(row => isAdmin || scopeSiteSet.has(normalizeMainLocation(row.site))))
-      }
-    )
-
-    const unsubItems = onSnapshot(
-      query(collection(db, 'complianceItems'), orderBy('employeeName', 'asc')),
-      (snap) => {
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        setComplianceItems(rows)
-      }
-    )
+    const employeeQueries = isAdmin
+      ? [query(collection(db, 'complianceEmployees'), orderBy('name', 'asc'))]
+      : normalizedScopeSites.map(site => query(
+          collection(db, 'complianceEmployees'),
+          where('site', '==', site),
+          orderBy('name', 'asc')
+        ))
+    const itemQueries = isAdmin
+      ? [query(collection(db, 'complianceItems'), orderBy('employeeName', 'asc'))]
+      : normalizedScopeSites.map(site => query(
+          collection(db, 'complianceItems'),
+          where('targetType', '==', 'employee'),
+          where('employeeSite', '==', site),
+          orderBy('employeeName', 'asc')
+        ))
+    const unsubEmployees = subscribeMergedQueryRows(employeeQueries, (rows) => {
+      setEmployees(rows.map(row => ({
+        ...row,
+        site: normalizeMainLocation(row.site) || String(row.site || '').trim().toUpperCase()
+      })))
+    }, { sort: (a, b) => String(a.name || '').localeCompare(String(b.name || '')) })
+    const unsubItems = subscribeMergedQueryRows(itemQueries, setComplianceItems, {
+      sort: (a, b) => String(a.employeeName || '').localeCompare(String(b.employeeName || ''))
+    })
 
     return () => {
       unsubEmployees()
       unsubItems()
     }
-  }, [hasComplianceScope, isAdmin, scopeSiteSet])
+  }, [hasComplianceScope, isAdmin, normalizedScopeSites])
 
   const employeeMap = useMemo(() => {
     const map = {}

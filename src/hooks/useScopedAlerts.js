@@ -8,7 +8,7 @@
  * Replaces the duplicated alert listeners in App.jsx and SupervisorDashboard.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { isFleetAlertType } from '../utils/fleetStatus'
@@ -31,31 +31,48 @@ function tsMs(ts) {
  * @param {object} params.user              — session user
  * @param {function} params.inEocScope      — (locationId) => boolean
  * @param {function} params.inComplianceScope — (site) => boolean
+ * @param {string[]} [params.locationIds=[]] — exact backend-authorized alert locations
  * @param {boolean}  [params.enabled=true]  — set to false to skip listener
  */
-export default function useScopedAlerts({ user, inEocScope, inComplianceScope, enabled = true }) {
+export default function useScopedAlerts({ user, inEocScope, inComplianceScope, locationIds = [], enabled = true }) {
   const [eocAlerts, setEocAlerts] = useState([])
   const [fleetAlerts, setFleetAlerts] = useState([])
   const [debriefAlerts, setDebriefAlerts] = useState([])
   const [issueUpdates, setIssueUpdates] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [unreadIssueUpdateCount, setUnreadIssueUpdateCount] = useState(0)
+  const scopedLocationIds = useMemo(() => [...new Set(
+    (Array.isArray(locationIds) ? locationIds : [])
+      .map(value => String(value || '').trim())
+      .filter(Boolean)
+  )].sort(), [locationIds])
+  const scopedLocationSignature = scopedLocationIds.join('|')
 
   // Supervisor/admin: scoped eoc + fleet alerts
   useEffect(() => {
     if (!enabled || !user || !inEocScope || !inComplianceScope) return
     if (!isSupervisorRole(user.role) && !isAdminRole(user.role)) return
 
-    const q = query(
-      collection(db, 'alerts'),
-      where('audience', '==', 'supervisor'),
-      where('read', '==', false)
-    )
+    const admin = isAdminRole(user.role)
+    if (!admin && scopedLocationIds.length === 0) return
+    const queries = admin
+      ? [query(
+          collection(db, 'alerts'),
+          where('audience', '==', 'supervisor'),
+          where('read', '==', false)
+        )]
+      : scopedLocationIds.map(locationId => query(
+          collection(db, 'alerts'),
+          where('audience', '==', 'supervisor'),
+          where('read', '==', false),
+          where('locationId', '==', locationId)
+        ))
+    const buckets = queries.map(() => [])
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snap) => {
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    const applyRows = () => {
+      const byId = new Map()
+      buckets.flat().forEach(row => byId.set(row.id, row))
+      const rows = Array.from(byId.values())
 
         // EOC issue alerts
         const scopedEoc = rows
@@ -103,19 +120,25 @@ export default function useScopedAlerts({ user, inEocScope, inComplianceScope, e
         }, 0)
         setUnreadCount(count)
         setUnreadIssueUpdateCount(0)
+    }
+
+    const unsubscribes = queries.map((scopedQuery, index) => onSnapshot(
+      scopedQuery,
+      (snap) => {
+        buckets[index] = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        applyRows()
       },
       (err) => {
         console.error('Scoped supervisor alert listener failed:', err)
-        setEocAlerts([])
-        setFleetAlerts([])
-        setDebriefAlerts([])
-        setUnreadCount(0)
-        setUnreadIssueUpdateCount(0)
+        buckets[index] = []
+        applyRows()
       }
-    )
+    ))
 
-    return () => unsubscribe()
-  }, [enabled, user, inEocScope, inComplianceScope])
+    return () => unsubscribes.forEach(unsubscribe => unsubscribe())
+  // The signature keeps this listener stable when callers rebuild an equivalent array.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, user, inEocScope, inComplianceScope, scopedLocationSignature])
 
   // BHT: issue status updates targeted at this user
   useEffect(() => {

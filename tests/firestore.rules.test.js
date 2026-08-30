@@ -2569,6 +2569,16 @@ test('strict identity Users queries are backend-scoped for supervisors while adm
     name: 'Other Supervisor', role: 'supervisor', active: true, deleted: false,
     securityVersion: 1, location: 'OTC', authorizedLocations: ['OTC'], issueLocationIds: [], version: 1
   })
+  await seed('shiftAssignments/asg_identity_scope_otc_bht', {
+    bhtUserId: 'identity_scope_otc_bht', bhtUserName: 'OTC BHT',
+    locationId: 'test_house', shiftId: 'shift_2', vanIds: ['van_test'],
+    active: true, version: 1, createdAt: new Date(), updatedAt: new Date()
+  })
+  await seed('shiftAssignments/asg_identity_scope_res_bht', {
+    bhtUserId: 'identity_scope_res_bht', bhtUserName: 'RES BHT',
+    locationId: 'res', shiftId: 'res_shift_2_day', vanIds: ['van_3'],
+    active: true, version: 1, createdAt: new Date(), updatedAt: new Date()
+  })
 
   const supervisorDb = secureAuthed(
     'identity_scope_supervisor_uid', 'identity_scope_supervisor', 'identity_scope_supervisor_session', 4,
@@ -2594,6 +2604,22 @@ test('strict identity Users queries are backend-scoped for supervisors while adm
     where('role', '==', 'supervisor'),
     where('location', '==', 'OTC')
   )))
+  const scopedAssignments = await assertSucceeds(getDocs(query(
+    collection(supervisorDb, 'shiftAssignments'),
+    where('locationId', '==', 'test_house'),
+    where('shiftId', '==', 'shift_2'),
+    where('active', '==', true)
+  )))
+  const scopedAssignmentIds = scopedAssignments.docs.map(item => item.id)
+  assert.equal(scopedAssignmentIds.includes('asg_identity_scope_otc_bht'), true)
+  assert.equal(scopedAssignmentIds.includes('asg_identity_scope_res_bht'), false)
+  await assertFails(getDocs(collection(supervisorDb, 'shiftAssignments')))
+  await assertFails(getDocs(query(
+    collection(supervisorDb, 'shiftAssignments'),
+    where('locationId', '==', 'res'),
+    where('shiftId', '==', 'res_shift_2_day'),
+    where('active', '==', true)
+  )))
 
   await seed('users/identity_scope_admin', {
     name: 'Identity Scope Admin', role: 'admin', active: true, deleted: false,
@@ -2609,6 +2635,307 @@ test('strict identity Users queries are backend-scoped for supervisors while adm
     'admin', ['identity_users']
   )
   await assertSucceeds(getDocs(collection(adminDb, 'users')))
+})
+
+test('strict debrief and supervisor-alert list queries require backend location scope', async () => {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+  const secureWorkflows = ['identity_users', 'templates_photos', 'eoc', 'debriefs_alerts']
+  await seed('appSettings/securityWorkflows', {
+    schemaVersion: 6,
+    enabled: true,
+    workflows: secureWorkflows
+  })
+  await seed('users/debrief_scope_supervisor', {
+    name: 'Debrief Scope Supervisor', role: 'supervisor', active: true, deleted: false,
+    securityVersion: 5, location: 'OTC', authorizedLocations: ['OTC'],
+    issueLocationIds: ['test_house'], version: 1
+  })
+  await seed('staffSessions/debrief_scope_supervisor_session', {
+    profileId: 'debrief_scope_supervisor', authUid: 'debrief_scope_supervisor_uid', securityVersion: 5,
+    active: true, revokedAt: null, expiresAt
+  })
+  await seed('users/debrief_scope_admin', {
+    name: 'Debrief Scope Admin', role: 'admin', active: true, deleted: false,
+    securityVersion: 2, location: 'GLOBAL', authorizedLocations: [], issueLocationIds: [], version: 1
+  })
+  await seed('staffSessions/debrief_scope_admin_session', {
+    profileId: 'debrief_scope_admin', authUid: 'debrief_scope_admin_uid', securityVersion: 2,
+    active: true, revokedAt: null, expiresAt
+  })
+  for (const [id, locationId] of [['otc', 'test_house'], ['res', 'res']]) {
+    await seed(`shiftDebriefs/debrief_scope_${id}`, {
+      locationId, draftByUserId: `debrief_scope_${id}_bht`, submittedByUserId: `debrief_scope_${id}_bht`,
+      submittedByName: `${id.toUpperCase()} BHT`, receivingUserIds: [], receivingUserNames: {},
+      shiftId: 'shift_1', dateKey: '2026-08-29', mainLocation: id === 'otc' ? 'OTC' : 'RES',
+      status: 'submitted', items: [], extraNotes: [], confirmation: { acknowledgments: {} },
+      confirmed: false, submittedAt: new Date(), createdAt: new Date(), updatedAt: new Date(), version: 1
+    })
+    await seed(`alerts/debrief_scope_${id}`, {
+      audience: 'supervisor', locationId, type: 'shift_debrief_submitted',
+      message: `${id.toUpperCase()} debrief submitted`, read: false, version: 1,
+      createdAt: new Date(), updatedAt: new Date()
+    })
+    await seed(`alerts/debrief_scope_${id}_bht`, {
+      audience: 'bht', targetUserId: `debrief_scope_${id}_receiver`, locationId,
+      debriefId: `debrief_scope_${id}`, type: 'shift_debrief_submitted',
+      message: `${id.toUpperCase()} BHT handoff alert`, read: false, version: 1,
+      createdAt: new Date(), updatedAt: new Date()
+    })
+  }
+
+  const supervisorDb = secureAuthed(
+    'debrief_scope_supervisor_uid', 'debrief_scope_supervisor',
+    'debrief_scope_supervisor_session', 5, 'supervisor', secureWorkflows,
+    { authorizedLocations: ['OTC'], issueLocationIds: ['test_house'] }
+  )
+  const scopedDebriefs = await assertSucceeds(getDocs(query(
+    collection(supervisorDb, 'shiftDebriefs'),
+    where('locationId', '==', 'test_house')
+  )))
+  assert.equal(scopedDebriefs.docs.some(item => item.id === 'debrief_scope_otc'), true)
+  assert.equal(scopedDebriefs.docs.some(item => item.id === 'debrief_scope_res'), false)
+  await assertFails(getDocs(collection(supervisorDb, 'shiftDebriefs')))
+  await assertFails(getDocs(query(
+    collection(supervisorDb, 'shiftDebriefs'),
+    where('locationId', '==', 'res')
+  )))
+
+  const scopedAlerts = await assertSucceeds(getDocs(query(
+    collection(supervisorDb, 'alerts'),
+    where('audience', '==', 'supervisor'),
+    where('read', '==', false),
+    where('locationId', '==', 'test_house')
+  )))
+  assert.equal(scopedAlerts.docs.some(item => item.id === 'debrief_scope_otc'), true)
+  assert.equal(scopedAlerts.docs.some(item => item.id === 'debrief_scope_res'), false)
+  await assertFails(getDocs(query(
+    collection(supervisorDb, 'alerts'),
+    where('audience', '==', 'supervisor'),
+    where('read', '==', false)
+  )))
+  await assertFails(getDocs(query(
+    collection(supervisorDb, 'alerts'),
+    where('audience', '==', 'supervisor'),
+    where('read', '==', false),
+    where('locationId', '==', 'res')
+  )))
+  const scopedBhtAlerts = await assertSucceeds(getDocs(query(
+    collection(supervisorDb, 'alerts'),
+    where('audience', '==', 'bht'),
+    where('type', '==', 'shift_debrief_submitted'),
+    where('debriefId', '==', 'debrief_scope_otc'),
+    where('locationId', '==', 'test_house')
+  )))
+  assert.deepEqual(scopedBhtAlerts.docs.map(item => item.id), ['debrief_scope_otc_bht'])
+  await assertFails(getDocs(query(
+    collection(supervisorDb, 'alerts'),
+    where('audience', '==', 'bht'),
+    where('type', '==', 'shift_debrief_submitted'),
+    where('debriefId', '==', 'debrief_scope_res'),
+    where('locationId', '==', 'res')
+  )))
+
+  const adminDb = secureAuthed(
+    'debrief_scope_admin_uid', 'debrief_scope_admin',
+    'debrief_scope_admin_session', 2, 'admin', secureWorkflows
+  )
+  const adminDebriefs = await assertSucceeds(getDocs(collection(adminDb, 'shiftDebriefs')))
+  assert.equal(adminDebriefs.docs.some(item => item.id === 'debrief_scope_otc'), true)
+  assert.equal(adminDebriefs.docs.some(item => item.id === 'debrief_scope_res'), true)
+  const adminAlerts = await assertSucceeds(getDocs(query(
+    collection(adminDb, 'alerts'),
+    where('audience', '==', 'supervisor'),
+    where('read', '==', false)
+  )))
+  assert.equal(adminAlerts.docs.some(item => item.id === 'debrief_scope_otc'), true)
+  assert.equal(adminAlerts.docs.some(item => item.id === 'debrief_scope_res'), true)
+})
+
+test('strict transport reads are owner-scoped for BHTs and site-scoped for supervisors', async () => {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+  const secureWorkflows = ['identity_users', 'transports']
+  await seed('appSettings/securityWorkflows', {
+    schemaVersion: 6,
+    enabled: true,
+    workflows: secureWorkflows
+  })
+  const actors = [
+    ['transport_scope_bht', 'transport_scope_bht_uid', 'transport_scope_bht_session', 'bht', 3, ['OTC'], ['test_house']],
+    ['transport_scope_supervisor', 'transport_scope_supervisor_uid', 'transport_scope_supervisor_session', 'supervisor', 4, ['OTC'], ['test_house']],
+    ['transport_scope_admin', 'transport_scope_admin_uid', 'transport_scope_admin_session', 'admin', 2, [], []]
+  ]
+  for (const [profileId, authUid, sessionId, role, securityVersion, authorizedLocations, issueLocationIds] of actors) {
+    await seed(`users/${profileId}`, {
+      name: profileId, role, active: true, deleted: false, securityVersion,
+      location: role === 'admin' ? 'GLOBAL' : 'OTC',
+      locationId: role === 'bht' ? 'test_house' : null,
+      authorizedLocations, issueLocationIds, version: 1
+    })
+    await seed(`staffSessions/${sessionId}`, {
+      profileId, authUid, securityVersion, active: true, revokedAt: null, expiresAt
+    })
+  }
+  await seed('transports/transport_scope_otc', {
+    site: 'OTC', locationId: 'test_house', createdByUserId: 'transport_scope_bht',
+    createdByName: 'Transport Scope BHT', status: 'open', departedAt: new Date(),
+    createdAt: new Date(), updatedAt: new Date(), version: 1
+  })
+  await seed('transports/transport_scope_res', {
+    site: 'RES', locationId: 'res', createdByUserId: 'transport_scope_res_bht',
+    createdByName: 'RES BHT', status: 'open', departedAt: new Date(),
+    createdAt: new Date(), updatedAt: new Date(), version: 1
+  })
+
+  const bhtDb = secureAuthed(
+    'transport_scope_bht_uid', 'transport_scope_bht', 'transport_scope_bht_session',
+    3, 'bht', secureWorkflows, { authorizedLocations: ['OTC'], issueLocationIds: ['test_house'], locationId: 'test_house' }
+  )
+  const own = await assertSucceeds(getDocs(query(
+    collection(bhtDb, 'transports'),
+    where('createdByUserId', '==', 'transport_scope_bht')
+  )))
+  assert.equal(own.docs.some(item => item.id === 'transport_scope_otc'), true)
+  assert.equal(own.docs.some(item => item.id === 'transport_scope_res'), false)
+  await assertFails(getDocs(collection(bhtDb, 'transports')))
+  await assertFails(getDoc(doc(bhtDb, 'transports/transport_scope_res')))
+
+  const supervisorDb = secureAuthed(
+    'transport_scope_supervisor_uid', 'transport_scope_supervisor', 'transport_scope_supervisor_session',
+    4, 'supervisor', secureWorkflows, { authorizedLocations: ['OTC'], issueLocationIds: ['test_house'] }
+  )
+  const otc = await assertSucceeds(getDocs(query(
+    collection(supervisorDb, 'transports'),
+    where('site', '==', 'OTC')
+  )))
+  assert.equal(otc.docs.some(item => item.id === 'transport_scope_otc'), true)
+  assert.equal(otc.docs.some(item => item.id === 'transport_scope_res'), false)
+  await assertFails(getDocs(collection(supervisorDb, 'transports')))
+  await assertFails(getDocs(query(collection(supervisorDb, 'transports'), where('site', '==', 'RES'))))
+
+  const adminDb = secureAuthed(
+    'transport_scope_admin_uid', 'transport_scope_admin', 'transport_scope_admin_session',
+    2, 'admin', secureWorkflows
+  )
+  const all = await assertSucceeds(getDocs(collection(adminDb, 'transports')))
+  assert.equal(all.docs.some(item => item.id === 'transport_scope_otc'), true)
+  assert.equal(all.docs.some(item => item.id === 'transport_scope_res'), true)
+})
+
+test('strict operations administration reads and writes stay within supervisor location scope', async () => {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+  const secureWorkflows = ['identity_users', 'operations_admin']
+  await seed('appSettings/securityWorkflows', {
+    schemaVersion: 6,
+    enabled: true,
+    workflows: secureWorkflows
+  })
+  for (const [profileId, authUid, sessionId, role, securityVersion, authorizedLocations] of [
+    ['operations_scope_supervisor', 'operations_scope_supervisor_uid', 'operations_scope_supervisor_session', 'supervisor', 4, ['OTC']],
+    ['operations_scope_admin', 'operations_scope_admin_uid', 'operations_scope_admin_session', 'admin', 2, []]
+  ]) {
+    await seed(`users/${profileId}`, {
+      name: profileId, role, active: true, deleted: false, securityVersion,
+      location: role === 'admin' ? 'GLOBAL' : 'OTC', authorizedLocations, issueLocationIds: [], version: 1
+    })
+    await seed(`staffSessions/${sessionId}`, {
+      profileId, authUid, securityVersion, active: true, revokedAt: null, expiresAt
+    })
+  }
+  for (const [suffix, mainLocation] of [['otc', 'OTC'], ['res', 'RES']]) {
+    await seed(`eocProperties/operations_${suffix}_property`, { name: `${mainLocation} Property`, mainLocation, locationId: suffix === 'otc' ? 'test_house' : 'res', version: 1 })
+    await seed(`eocVehicles/operations_${suffix}_vehicle`, { name: `${mainLocation} Van`, mainLocation, locationId: suffix === 'otc' ? 'test_house' : 'res', version: 1 })
+    await seed(`fleetTasks/operations_${suffix}_task`, { mainLocation, status: 'overdue', taskType: 'oil_change', triggerMode: 'mileage', version: 1 })
+    await seed(`vehicleServiceRecords/operations_${suffix}_service`, { mainLocation, vehicleId: `operations_${suffix}_vehicle`, serviceDate: '2026-08-29', version: 1 })
+    await seed(`complianceEmployees/operations_${suffix}_employee`, { name: `${mainLocation} Employee`, site: mainLocation, active: true, version: 1 })
+    await seed(`complianceItems/operations_${suffix}_employee_item`, { targetType: 'employee', employeeId: `operations_${suffix}_employee`, employeeName: `${mainLocation} Employee`, employeeSite: mainLocation, category: 'cpr_first_aid', version: 1 })
+    await seed(`complianceItems/operations_${suffix}_location_item`, { targetType: 'location', mainLocation, locationId: mainLocation, category: 'fire_safety', version: 1 })
+    await seed(`cintasServices/operations_${suffix}_service`, { mainLocation, locationId: mainLocation, siteAddress: `${mainLocation} Address`, version: 1 })
+  }
+
+  const supervisorDb = secureAuthed(
+    'operations_scope_supervisor_uid', 'operations_scope_supervisor', 'operations_scope_supervisor_session',
+    4, 'supervisor', secureWorkflows, { authorizedLocations: ['OTC'] }
+  )
+  for (const [collectionName, field] of [
+    ['eocProperties', 'mainLocation'],
+    ['eocVehicles', 'mainLocation'],
+    ['fleetTasks', 'mainLocation'],
+    ['vehicleServiceRecords', 'mainLocation'],
+    ['complianceEmployees', 'site'],
+    ['cintasServices', 'mainLocation']
+  ]) {
+    const scoped = await assertSucceeds(getDocs(query(collection(supervisorDb, collectionName), where(field, '==', 'OTC'))))
+    assert.equal(scoped.empty, false)
+    await assertFails(getDocs(collection(supervisorDb, collectionName)))
+    await assertFails(getDocs(query(collection(supervisorDb, collectionName), where(field, '==', 'RES'))))
+  }
+  const scopedEmployeeItems = await assertSucceeds(getDocs(query(
+    collection(supervisorDb, 'complianceItems'),
+    where('targetType', '==', 'employee'),
+    where('employeeSite', '==', 'OTC')
+  )))
+  assert.equal(scopedEmployeeItems.docs.some(item => item.id === 'operations_otc_employee_item'), true)
+  await assertFails(getDocs(collection(supervisorDb, 'complianceItems')))
+  await assertFails(getDocs(query(
+    collection(supervisorDb, 'complianceItems'),
+    where('targetType', '==', 'employee'),
+    where('employeeSite', '==', 'RES')
+  )))
+  const scopedLocationItems = await assertSucceeds(getDocs(query(
+    collection(supervisorDb, 'complianceItems'),
+    where('targetType', '==', 'location'),
+    where('mainLocation', '==', 'OTC')
+  )))
+  assert.equal(scopedLocationItems.docs.some(item => item.id === 'operations_otc_location_item'), true)
+  await assertFails(updateDoc(doc(supervisorDb, 'eocProperties/operations_res_property'), {
+    name: 'Unauthorized RES edit', mainLocation: 'RES', locationId: 'res', version: 2
+  }))
+  await assertSucceeds(updateDoc(doc(supervisorDb, 'eocProperties/operations_otc_property'), {
+    name: 'Authorized OTC edit', mainLocation: 'OTC', locationId: 'test_house', version: 2
+  }))
+
+  const adminDb = secureAuthed(
+    'operations_scope_admin_uid', 'operations_scope_admin', 'operations_scope_admin_session',
+    2, 'admin', secureWorkflows
+  )
+  for (const collectionName of ['eocProperties', 'eocVehicles', 'fleetTasks', 'vehicleServiceRecords', 'complianceEmployees', 'complianceItems', 'cintasServices']) {
+    const all = await assertSucceeds(getDocs(collection(adminDb, collectionName)))
+    assert.equal(all.docs.some(item => item.id.includes('operations_otc')), true)
+    assert.equal(all.docs.some(item => item.id.includes('operations_res')), true)
+  }
+})
+
+test('strict settings keep runtime reads available and reserve ordinary writes for admins', async () => {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+  const secureWorkflows = ['identity_users', 'settings']
+  await seed('appSettings/securityWorkflows', { schemaVersion: 6, enabled: true, workflows: secureWorkflows })
+  await seed('appSettings/settings_contract', { enabled: true, version: 1 })
+  for (const [profileId, authUid, sessionId, role, securityVersion] of [
+    ['settings_bht', 'settings_bht_uid', 'settings_bht_session', 'bht', 3],
+    ['settings_supervisor', 'settings_supervisor_uid', 'settings_supervisor_session', 'supervisor', 4],
+    ['settings_admin', 'settings_admin_uid', 'settings_admin_session', 'admin', 2]
+  ]) {
+    await seed(`users/${profileId}`, {
+      name: profileId, role, active: true, deleted: false, securityVersion,
+      location: role === 'admin' ? 'GLOBAL' : 'OTC', authorizedLocations: role === 'admin' ? [] : ['OTC'], version: 1
+    })
+    await seed(`staffSessions/${sessionId}`, {
+      profileId, authUid, securityVersion, active: true, revokedAt: null, expiresAt
+    })
+  }
+  for (const [profileId, authUid, sessionId, role, securityVersion] of [
+    ['settings_bht', 'settings_bht_uid', 'settings_bht_session', 'bht', 3],
+    ['settings_supervisor', 'settings_supervisor_uid', 'settings_supervisor_session', 'supervisor', 4]
+  ]) {
+    const scopedDb = secureAuthed(authUid, profileId, sessionId, securityVersion, role, secureWorkflows, { authorizedLocations: ['OTC'] })
+    await assertSucceeds(getDoc(doc(scopedDb, 'appSettings/settings_contract')))
+    await assertFails(updateDoc(doc(scopedDb, 'appSettings/settings_contract'), { enabled: false, version: 2 }))
+  }
+  const adminDb = secureAuthed('settings_admin_uid', 'settings_admin', 'settings_admin_session', 2, 'admin', secureWorkflows)
+  await assertSucceeds(updateDoc(doc(adminDb, 'appSettings/settings_contract'), { enabled: false, version: 2 }))
+  await assertFails(updateDoc(doc(adminDb, 'appSettings/securityWorkflows'), { enabled: false }))
+  await assertFails(setDoc(doc(adminDb, 'appSettings/securityFoundation'), { enabled: false }))
+  await assertFails(setDoc(doc(adminDb, 'appSettings/appCheckMonitoring'), { enforcementEnabled: true }))
 })
 
 test('strict EOC and issue workflows require protected server mutations while drafts and reads remain usable', async () => {

@@ -1,19 +1,41 @@
 # Security Foundation Canary and Rollback Gate
 
-Last updated: 2026-08-29
-Status: Compatibility login/reload passed live; remaining Identity/Users revocation, RES, and rollback gates pending
+Last updated: 2026-08-30
+Status: Exact three-profile cumulative canary complete through Settings; broad staff rollout and compatibility retirement not authorized
 
-## Current Identity/Users re-release checkpoint
+## Current completed-canary boundary
 
-The original Test House canary has already been activated for exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`, with only `identity_users` enabled. The 2026-08-28 correction is therefore a **code re-release**, not a first activation:
+- Cohort: exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`.
+- Cumulative workflows: `identity_users`, `templates_photos`, `eoc`, `debriefs_alerts`, `issues_feedback_audit`, `transports`, `operations_admin`, and `settings`.
+- Offline replay: enabled only inside the current mapped-session/workflow boundary.
+- Network-reachable protected workflow callables: `authorizeOfflineReplayV5`, `submitProtectedEocV9`, `mutateProtectedIssueV9`, and `createProtectedTransportV6`. Network reachability does not grant access; each Function still requires its application-level current-session, signed-workflow, role/location, owner, and version checks.
+- Final coordinated rollback snapshot: `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-canary-2026-08-30T17-40-46-357Z.json`, SHA-256 `77c264534fab063f5aa6861c8f913b398c2a8f29b09b6ca495a5eb54b70a56da`.
+- Every cumulative stage completed a guarded rollback and reactivation. The final reactivation revoked prior canary sessions so the next canary login receives only current claims.
+- App Check remains monitoring-only and unenforced. The completed 24-hour aggregate contains all six protected endpoint groups across 63 samples, all with token absence recorded. This is sufficient monitoring evidence but is not approval or proof for enforcement.
+- Non-canary staff remain on compatibility login. Global strict authorization, Anonymous Authentication as a shortcut, broad enrollment, and compatibility retirement remain off.
 
-1. The corrected Identity/Users source is merged through `f067ccc`; the approved Hosting-only compatibility-reload patch is reconciled by this focused change.
+## Historical Identity/Users re-release checkpoint
+
+The original Test House canary has already been activated for exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`, with only `identity_users` enabled. The corrected release is merged through `1028347`; it remains an **Identity/Users code re-release**, not a first activation:
+
+**Superseded checkpoint:** At this point in the rollout, the guarded `templates_photos` rollback/reactivation had completed and EOC network reachability was the next gate. The current completed-canary boundary above supersedes this historical stage state.
+
+1. Use merged production source `1028347`; `e3f5577` contains the coordinated Identity/Users correction, `f067ccc` adds the secure supervisor PIN-generator fix, and `1028347` reconciles the compatibility-reload correction.
 2. Read back and back up the current deployed Functions, Firestore rules/indexes, Hosting release, Auth/provider state, and both protected configuration documents before changing anything.
 3. Confirm the protected configuration still names only the same three profiles and only `identity_users`. Do not rewrite or broaden it as part of the code release.
 4. Deploy the reviewed Functions, Firestore rules, and Hosting bundle as one coordinated set. Build Hosting only with `npm run build:security-canary`, then require `npm run verify:security-canary-build` to pass before deployment.
 5. Keep `authorizeOfflineReplayV5`, `createProtectedTransportV6`, `submitProtectedEocV9`, and `mutateProtectedIssueV9` network-private and disabled.
-6. Run non-mutating Test Supervisor EOC and Users location-scope checks first. Obtain Mark's explicit approval immediately before any live PIN reset, account creation/deactivation, session ending, or other production-data mutation.
-7. Test Supervisor, both Test BHTs, independent-device behavior, and the non-enrolled compatibility login/reload/no-secure-artifact gate passed live. Finish all-device revocation, RES-side account creation, and final rollback proof. If any remaining query, listener, role/location boundary, revocation, or rollback check fails, stop before enabling another workflow and restore the verified coordinated prior release set.
+6. Test Supervisor secure login, reload, EOC loading, OTC-only Users scope, approved OTC BHT creation, both Test BHT secure-login/reload/scope journeys, independent two-device use, one-device logout, supervisor all-device revocation, and admin-created RES BHT scope/login/negative-access behavior have passed. The revocation advanced the target BHT's security version, left both stored sessions inactive, returned both devices to the PIN screen, and recorded a completed audit/cleanup trail. The RES BHT remained outside secure enrollment, retained only RES/Day/Van 3 scope across reload, and was redirected away from Users. Obtain Mark's explicit approval immediately before any remaining live PIN reset, account creation/deactivation, session ending, or other production-data mutation.
+7. The valid non-enrolled synthetic BHT correctly stayed outside secure identity/session enrollment, but the prior client returned to the PIN screen on reload. The narrow versioned compatibility marker/restore correction passed the Node 22 production-shaped emulator/browser gate, was deployed Hosting-only from an isolated `f067ccc` release worktree, passed the live login/reload check, and was merged through `1028347`. Read-only production evidence confirmed no secure identity mapping and zero secure sessions for that profile.
+8. The existing release evidence records two completed rollback/reactivation drills for this exact release and cohort. A later privacy-minimized production audit readback directly confirmed the immutable activation/rollback/activation/rollback/activation sequence. Current configuration still exactly matches the verified rollback anchor, and the separate two-device cutoff test proves live revocation. Identity/Users is therefore complete; do not repeat the disruptive production rollback merely to duplicate this evidence.
+
+The production-shaped emulator rehearsals are now executable as `npm run test:security-client:emulator` and `npm run test:security-compatibility:emulator` inside the Node 22 Firebase emulator wrapper. They prove the secure RES admin-create/BHT-login path and that a valid non-enrolled staff member retains only the existing compatibility session, not a stable secure identity/session/workflow claim. These local results do not replace the live canary.
+
+Before resuming the live browser journey, run the read-only status check with the current verified rollback snapshot and its exact SHA-256:
+
+`npm run security:canary -- --mode=identity-status --project=sprc-tx-l --backup=<absolute verified backup path> --backup-sha256=<exact SHA-256>`
+
+This mode performs no writes. It fails closed if the exact three-profile cohort is missing, and it reports only synthetic profile role/validity/mapping state plus session counts. A missing Test BHT mapping is expected before that BHT's first secure login; it identifies the next live journey and must not be repaired through a script.
 
 The guarded `security:canary` **activate** mode was designed for the original absent-configuration baseline and must not be reused for this already-active re-release. Its preview output may be used only as read-only evidence plus a verified backup; no activation or rollback command may run without confirming that its assumptions match current production state.
 
@@ -31,6 +53,38 @@ The guarded `security:canary` **activate** mode was designed for the original ab
 8. End the canary users' existing sessions so their next PIN login receives the exact current workflow claims.
 
 For the original first activation, `npm run security:canary -- --mode=preview --project=sprc-tx-l --backup-dir=<absolute path outside the repo>` captured the protected settings. For any re-release, capture a fresh coordinated rollback package and compare it with live readback, but do not use the original absent-baseline activation mode. The guarded mutation and rollback modes require the verified backup, exact release ID, and exact confirmation phrase; verify their current-state assumptions before use.
+
+## Advancing later workflow stages
+
+The local canary tool now supports later stages without reusing the original absent-baseline activation mode:
+
+1. Run `stage-preview` for exactly the next approved stage. It validates the exact three-profile cohort, confirms the current workflow list is the approved cumulative prefix, names any protected endpoint that must be opened for that stage, and writes a verified rollback backup outside the repository.
+2. Review the preview and finish the stage's coordinated Functions/rules/Storage/Hosting preparation. Do not advance the configuration until the prior stage has passed and Mark has approved the production action.
+3. Run `stage-advance` with the exact preview backup path and SHA-256 checksum, release ID, target stage, and confirmation phrase. The command refuses skipped or repeated stages, ends every active canary device session, records immutable audit evidence, and revokes Firebase refresh tokens so the next PIN login receives only the new cumulative claims.
+4. If the stage fails, run `stage-rollback` with the same exact backup path/checksum and target stage. It restores both protected configuration documents, ends active canary sessions again, records immutable rollback evidence, and revokes refresh tokens.
+5. Any refresh-token cleanup failure is recorded without secret data and causes the command to fail closed for investigation.
+
+The only valid order is `identity_users`, `templates_photos`, `eoc`, `debriefs_alerts`, `issues_feedback_audit`, `transports`, `operations_admin`, then `settings`. `eoc` requires `authorizeOfflineReplayV5` and `submitProtectedEocV9`; `issues_feedback_audit` requires `mutateProtectedIssueV9`; `transports` requires `createProtectedTransportV6`. Advancing to `eoc` also enables the versioned owner-bound offline-replay gate. Required endpoint access must already be part of that stage's reviewed coordinated release, and rollback must restore the prior endpoint access boundary. App Check remains monitoring-only and is not activated by this command.
+
+Before proposing the `debriefs_alerts` production stage, run the cumulative Node 22 emulator/seed wrapper around `npm run test:security-debriefs-alerts:browser`. The gate must prove outgoing corrections, wrong-owner denial, assigned incoming acknowledgment, only-the-matching targeted alert acknowledgment, eligible incoming-shift reassignment with a required reason, visible late-handoff status/alert, stale offline confirmation held for review, supervisor location-scoped debrief/alert/assignment queries, and the matching Firestore query negatives. A client-side location filter is not sufficient evidence.
+
+Before proposing `issues_feedback_audit`, run the cumulative Node 22 emulator/seed wrapper around `npm run test:security-issues-feedback-audit:browser` plus the protected operational-mutation emulator contracts. Require protected issue reporting/replay, BHT resolution submission, supervisor approve/return authority, wrong-location denials, staff-owned feedback, admin-only audit/feedback review, sanitized evidence, and rollback of `mutateProtectedIssueV9` network access with the workflow stage.
+
+Before proposing `transports`, run the cumulative Node 22 emulator/seed wrapper around `npm run test:security-transports:browser` plus the transport security contracts. Require a two-device same-BHT creation race with exactly one active transport, wrong-site denial, BHT owner-only reads, supervisor backend site-scoped listeners, admin all-site visibility, exact-version correction/replay behavior, and coordinated rollback of `createProtectedTransportV6` network access with the workflow stage.
+
+Before proposing `operations_admin`, run the cumulative Node 22 emulator/seed wrapper around `npm run test:security-operations-admin:browser`. Require backend-scoped supervisor queries and wrong-location denials across Properties, Fleet, Compliance, and Cintas; a BHT negative; admin global visibility; and indexes for every field-plus-sort query. The guarded `stage-preview` and `stage-advance` commands read all nine relevant collections and fail closed if `mainLocation`, employee `site`, or compliance `targetType`/location metadata is missing or ambiguous. They report only collection counts, not record contents. Any correction is a separate backed-up production-data change requiring Mark's approval.
+
+Before proposing `settings`, run the cumulative Node 22 emulator/seed wrapper around `npm run test:security-settings:browser`. Require BHT/supervisor read access only to the runtime settings existing workflows need, admin-only ordinary setting writes, and denial of every browser write to `securityFoundation`, `securityWorkflows`, and `appCheckMonitoring`. App Check enforcement remains off.
+
+Before broad staff enrollment or compatibility retirement, run the complete offline gate under the Node 22 Firebase emulator wrapper with `npm run test:security-offline-matrix:emulator`. It must prove all 11 supported actions persist across an offline browser reload and retain original-owner, Firebase UID, device-session, security-version, location, and expected-version bindings. Current-owner work may continue, a new session must reauthorize it, wrong-owner/wrong-UID work stays held, and removed-scope work goes to review.
+
+Use the read-only aggregate report for future observation windows: `npm run security:canary -- --mode=app-check-observe --project=sprc-tx-l --hours=24`. The command makes no writes, returns only counts, refuses monitoring-only use if enforcement is active, and requires login, account/access, offline replay, transport, EOC, and issue groups to contain a valid recorded presence/absence boolean. The completed canary recorded all six groups, with tokens absent in every sample. A successful observation does not authorize enforcement.
+
+The preview form is:
+
+`npm run security:canary -- --mode=stage-preview --project=sprc-tx-l --stage=<next-stage> --backup-dir=<absolute path outside the repo>`
+
+The mutation modes deliberately require additional exact arguments printed by the preview/runbook, including `--backup-sha256`. Never paste a guessed confirmation phrase or reuse a backup from another stage.
 
 ## Per-workflow go/no-go gate
 

@@ -223,6 +223,8 @@ export function toSecureSessionUser(scopedProfile, session, authUid) {
   return {
     ...sanitizeSecurityProfile(session.profileId, scopedProfile),
     authUid: String(authUid || ''),
+    workflowSecurityVersion: Number(scopedProfile?.workflowSecurityVersion || 0),
+    secureWorkflows: stringArray(scopedProfile?.secureWorkflows),
     securitySessionVersion: SECURITY_CLIENT_SESSION_VERSION,
     securitySessionId: session.sessionId,
     securitySessionExpiresAtMs: session.expiresAtMs,

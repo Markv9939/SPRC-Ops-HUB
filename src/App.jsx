@@ -311,11 +311,16 @@ function App() {
   const [bhtDebriefAssignment, setBhtDebriefAssignment] = useState(null)
   const [bhtDebriefSummary, setBhtDebriefSummary] = useState({ available: false, status: 'none', itemCount: 0, pendingQuickItemCount: 0 })
   // Alert count and issue updates from shared hooks
-  const { inEocScope, inComplianceScope, exactIssueLocationIds, inIssueScope } = useUserScope(user)
+  const { inEocScope, inComplianceScope, exactIssueLocationIds, allowedComplianceSites, inIssueScope } = useUserScope(user)
+  const alertLocationIds = useMemo(
+    () => [...new Set([...exactIssueLocationIds, ...allowedComplianceSites])],
+    [allowedComplianceSites, exactIssueLocationIds]
+  )
   const { eocAlerts, fleetAlerts, debriefAlerts, unreadCount: alertCount, issueUpdates, unreadIssueUpdateCount } = useScopedAlerts({
     user,
     inEocScope,
     inComplianceScope,
+    locationIds: alertLocationIds,
     enabled: !!user
   })
   const [isOffline, setIsOffline] = useState(() => (

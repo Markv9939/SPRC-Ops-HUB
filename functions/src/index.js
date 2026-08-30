@@ -238,6 +238,8 @@ export async function authorizeOfflineReplayV5Handler(request, dependencies = {}
 export const authorizeOfflineReplayV5 = onCall({
   region: 'us-central1',
   enforceAppCheck: false,
+  invoker: 'public',
+  serviceAccount: SECURITY_RUNTIME_SERVICE_ACCOUNT,
   secrets: [STAFF_PIN_AUTH_SECRET]
 }, authorizeOfflineReplayV5Handler)
 
@@ -264,6 +266,7 @@ export async function createProtectedTransportV6Handler(request, dependencies = 
 export const createProtectedTransportV6 = onCall({
   region: 'us-central1',
   enforceAppCheck: false,
+  serviceAccount: SECURITY_RUNTIME_SERVICE_ACCOUNT,
   secrets: [STAFF_PIN_AUTH_SECRET]
 }, createProtectedTransportV6Handler)
 
@@ -274,7 +277,7 @@ export async function submitProtectedEocV9Handler(request, dependencies = {}) {
       secret: dependencies.secret || STAFF_PIN_AUTH_SECRET.value(),
       requestAuth: request.auth,
       requestData: request.data,
-      appCheckPresent: Boolean(request.app),
+      appCheckPresent: dependencies.appCheckPresent ?? Boolean(request.app),
       nowMs: dependencies.nowMs || Date.now()
     })
   } catch (error) {
@@ -287,6 +290,8 @@ export async function submitProtectedEocV9Handler(request, dependencies = {}) {
 export const submitProtectedEocV9 = onCall({
   region: 'us-central1',
   enforceAppCheck: false,
+  invoker: 'public',
+  serviceAccount: SECURITY_RUNTIME_SERVICE_ACCOUNT,
   secrets: [STAFF_PIN_AUTH_SECRET]
 }, submitProtectedEocV9Handler)
 
@@ -297,7 +302,7 @@ export async function mutateProtectedIssueV9Handler(request, dependencies = {}) 
       secret: dependencies.secret || STAFF_PIN_AUTH_SECRET.value(),
       requestAuth: request.auth,
       requestData: request.data,
-      appCheckPresent: Boolean(request.app),
+      appCheckPresent: dependencies.appCheckPresent ?? Boolean(request.app),
       nowMs: dependencies.nowMs || Date.now()
     })
   } catch (error) {
@@ -310,6 +315,7 @@ export async function mutateProtectedIssueV9Handler(request, dependencies = {}) 
 export const mutateProtectedIssueV9 = onCall({
   region: 'us-central1',
   enforceAppCheck: false,
+  serviceAccount: SECURITY_RUNTIME_SERVICE_ACCOUNT,
   secrets: [STAFF_PIN_AUTH_SECRET]
 }, mutateProtectedIssueV9Handler)
 

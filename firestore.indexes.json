@@ -58,6 +58,14 @@
       ]
     },
     {
+      "collectionGroup": "transports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "site", "order": "ASCENDING" },
+        { "fieldPath": "departedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "eocIssues",
       "queryScope": "COLLECTION",
       "fields": [
@@ -163,6 +171,23 @@
           "fieldPath": "createdAt",
           "order": "DESCENDING"
         }
+      ]
+    },
+    {
+      "collectionGroup": "alerts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "audience", "order": "ASCENDING" },
+        { "fieldPath": "read", "order": "ASCENDING" },
+        { "fieldPath": "locationId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shiftDebriefs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "locationId", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
       ]
     },
     {
@@ -469,6 +494,79 @@
           "fieldPath": "active",
           "order": "ASCENDING"
         }
+      ]
+    },
+    {
+      "collectionGroup": "eocProperties",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "mainLocation", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eocTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "taskType", "order": "ASCENDING" },
+        { "fieldPath": "locationId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eocVehicles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "mainLocation", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fleetMaintenanceTemplates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "mainLocation", "order": "ASCENDING" },
+        { "fieldPath": "dueMileage", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vehicleServiceRecords",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "mainLocation", "order": "ASCENDING" },
+        { "fieldPath": "serviceDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "complianceEmployees",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "site", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "complianceItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetType", "order": "ASCENDING" },
+        { "fieldPath": "employeeSite", "order": "ASCENDING" },
+        { "fieldPath": "employeeName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "complianceItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetType", "order": "ASCENDING" },
+        { "fieldPath": "mainLocation", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cintasServices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "mainLocation", "order": "ASCENDING" },
+        { "fieldPath": "siteAddress", "order": "ASCENDING" }
       ]
     }
   ],

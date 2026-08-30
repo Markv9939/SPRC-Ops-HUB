@@ -2,11 +2,13 @@ import { normalizeSecurityRole, validateBhtHomeLocation } from './securityFounda
 
 export const OFFLINE_REPLAY_CONFIG_VERSION = 5
 
-const ALLOWED_ACTIONS = new Set([
+export const OFFLINE_REPLAY_ACTION_TYPES = Object.freeze([
   'eocSubmission', 'shiftDebriefQuickNote', 'shiftDebriefSubmission', 'shiftDebriefExtraNote',
   'shiftDebriefConfirmation', 'bhtIssueReport', 'appFeedback', 'issueAttachmentUpload',
   'transportCreate', 'transportUpdate', 'transportClose'
 ])
+
+const ALLOWED_ACTIONS = new Set(OFFLINE_REPLAY_ACTION_TYPES)
 
 function token(value) {
   return String(value || '').trim().toUpperCase()

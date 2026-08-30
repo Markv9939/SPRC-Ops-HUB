@@ -182,6 +182,8 @@ test('device identity is stable and secure user state exposes only workflow fiel
   const secureUser = toSecureSessionUser({
     ...serverResponse().profile,
     active: true,
+    workflowSecurityVersion: 6,
+    secureWorkflows: ['identity_users', 'issues_feedback_audit'],
     email: 'not-needed@example.test',
     pinHash: 'not-needed'
   }, {
@@ -191,6 +193,8 @@ test('device identity is stable and secure user state exposes only workflow fiel
   }, 'staff_phase3_uid')
   assert.equal(secureUser.role, 'bht')
   assert.equal(secureUser.authUid, 'staff_phase3_uid')
+  assert.equal(secureUser.workflowSecurityVersion, 6)
+  assert.deepEqual(secureUser.secureWorkflows, ['identity_users', 'issues_feedback_audit'])
   assert.equal('email' in secureUser, false)
   assert.equal('pinHash' in secureUser, false)
   assert.equal('internalNote' in sanitizeSecurityProfile('phase3_bht', serverResponse().profile), false)

@@ -67,7 +67,9 @@ async function loadScopedProfile(profileId, rawProfile, { claims = {} } = {}) {
     ...rawProfile,
     authorizedLocations: Array.isArray(claims.authorizedLocations) ? claims.authorizedLocations : [],
     issueLocationIds: Array.isArray(claims.issueLocationIds) ? claims.issueLocationIds : [],
-    locationId: claims.locationId == null ? rawProfile.locationId : String(claims.locationId)
+    locationId: claims.locationId == null ? rawProfile.locationId : String(claims.locationId),
+    workflowSecurityVersion: Number(claims.workflowSecurityVersion || 0),
+    secureWorkflows: Array.isArray(claims.secureWorkflows) ? claims.secureWorkflows : []
   }
   return {
     ...sanitizeSecurityProfile(profileId, scoped),
