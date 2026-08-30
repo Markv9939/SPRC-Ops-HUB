@@ -1,7 +1,7 @@
 # Security Foundation Canary and Rollback Gate
 
 Last updated: 2026-08-30
-Status: Exact three-profile cumulative canary complete through Settings; broad staff rollout and compatibility retirement not authorized
+Status: Exact three-profile cumulative canary complete through Settings; Lone Mountain three-BHT rollout preview passed, production enrollment not yet authorized
 
 ## Current completed-canary boundary
 
@@ -13,6 +13,38 @@ Status: Exact three-profile cumulative canary complete through Settings; broad s
 - Every cumulative stage completed a guarded rollback and reactivation. The final reactivation revoked prior canary sessions so the next canary login receives only current claims.
 - App Check remains monitoring-only and unenforced. The completed 24-hour aggregate contains all six protected endpoint groups across 63 samples, all with token absence recorded. This is sufficient monitoring evidence but is not approval or proof for enforcement.
 - Non-canary staff remain on compatibility login. Global strict authorization, Anonymous Authentication as a shortcut, broad enrollment, and compatibility retirement remain off.
+
+## Real-staff rollout stages
+
+The synthetic canary tool remains fixed to its three test profiles. Do not repurpose it for staff. Real-staff cohorts use the separate `security:staff-rollout` command and always keep `rolloutState: production_canary`, the full tested workflow list, compatibility fallback for non-enrolled profiles, global strict authorization off, and App Check enforcement off.
+
+1. **Choose one exact location and BHT/tech group.** Run the read-only candidate report. It returns only matching staff names/IDs plus readiness reasons; it makes no writes. Start with the smallest operational house cohort and never include more than 12 profiles.
+2. **Preview the exact profile list.** Preview rechecks active status, the single-home-location contract, unique server or safely migratable legacy PIN storage, identity mapping integrity, current synthetic-canary configuration, full workflow coverage, strict-auth off, and App Check enforcement off. It writes a privacy-minimized rollback file outside the repository and prints its SHA-256 checksum and exact enrollment phrase.
+3. **Review before production mutation.** Confirm the selected staff are available to sign in with their existing PINs, no one is depending on unsynced work on another person's device, the rollback file is retained, and the current configuration/profile hashes have not changed. Do not reset a PIN or log in as staff.
+4. **Enroll only the exact approved IDs.** The guarded transaction adds those IDs to both protected allowlists, increments each target security version, and writes immutable rollout evidence. Cleanup then closes every old target device session and revokes mapped Firebase refresh tokens. A failed cleanup leaves the version cutoff active and can be retried with the same backup; it never broadens the cohort on retry.
+5. **Prove live behavior.** Staff use the unchanged six-digit PIN. Verify secure login and browser-close/reopen persistence, phone and desktop, two independent devices, one-device logout, offline/reconnect with original-owner work, every BHT workflow used at that location, supervisor location scope, and negative access to Users/admin/global settings. Observe one complete working shift with no unexplained permission, sync, or scope errors.
+6. **Exercise cohort rollback and re-enrollment.** The exact backup removes only that cohort from both allowlists, increments target security versions again, closes all target sessions, revokes refresh tokens, records audit evidence, and returns those staff to compatibility PIN login without deleting identity, PIN credential, offline, session, or audit history. Re-preview before re-enrollment; never reuse a stale backup for a different cohort.
+7. **Advance one cohort at a time.** Record exact evidence in the Master Plan and Progress Log. Do not begin another location until the current location passes observation and rollback/re-enrollment. Compatibility retirement is still a later separate release after all active staff cohorts are stable.
+
+Read-only candidate discovery:
+
+`npm run security:staff-rollout -- --mode=candidates --project=sprc-tx-l --location=<exact-location-id>`
+
+Exact-cohort preview:
+
+`npm run security:staff-rollout -- --mode=preview --project=sprc-tx-l --location=<exact-location-id> --profile-ids=<comma-separated-profile-ids> --backup-dir=<absolute-path-outside-repo>`
+
+The preview prints the exact `enroll`, `status`, and `rollback` arguments. Never guess a confirmation phrase, hand-edit the protected allowlists, or use a backup for a different location/profile set.
+
+### Prepared first real cohort
+
+- Exact location: `lone_mountain`.
+- Exact profiles: `mark_v`, `paul_g`, and `sam_seylar`.
+- Corrected read-only production preflight: all three are active BHTs, each has one Lone Mountain home location, each has a unique legacy PIN hash ready for normal first secure-login migration, none has a conflicting identity mapping, and none is already enrolled. Mesquite, RES, and Test House currently contain no eligible real BHT cohort; known synthetic/test profiles are explicitly blocked from staff rollout selection.
+- External preview/rollback file: `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-staff-rollout-lone_mountain-2026-08-30T18-52-40-969Z.json`.
+- SHA-256: `bf97f83b044939c40d10aa9f4b88539f3d042e0e1d5095c57b2a312ab6db704c`.
+- Enrollment phrase: `ENROLL LONE_MOUNTAIN BHT SECURITY COHORT`.
+- Current boundary: preview only. No protected configuration, profile, session, PIN, identity, or production data was changed.
 
 ## Historical Identity/Users re-release checkpoint
 

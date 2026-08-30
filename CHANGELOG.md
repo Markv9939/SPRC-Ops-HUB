@@ -4,6 +4,7 @@ All notable changes to SPRC Ops Hub are tracked here in chronological order.
 
 ## [Unreleased]
 ### Added
+- Guarded real-staff security cohort preparation with read-only location candidate discovery, exact profile/PIN/location/mapping preflight, checksum-protected external rollback snapshots, additive enrollment, retry-safe session/token cleanup, and cohort-only rollback. The tool is not activated and does not enroll staff by itself.
 - One-time BHT onboarding overlay with local completion tracking so first-time users get a guided intro to transport/EOC basics.
 - Header notification entry flow:
   - bell-style unread badge

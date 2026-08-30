@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-30
 Document status: Active living blueprint
-Application source-integration reference: merged baseline `1028347` plus security-foundation completion PR #13 from source commit `79553ef`; Git history is authoritative for the resulting `Main` merge commit
+Application release reference: security-foundation completion PR #13 merged to `Main` as `eda1ff9`
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -33,9 +33,9 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | The approved production canary is complete for exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`. Its cumulative secure workflow list now runs through `settings`: Identity/Users, Templates/Photos, EOC, Debriefs/Alerts, Issues/Feedback/Audit, Transports, Operations Administration, and Settings. Every stage passed its guarded advance, live scoped check, rollback, and reactivation. The four workflow callables needed by EOC/offline replay, issues, and transports are reachable at the network layer and still require the mapped Firebase identity, current device session, signed workflow claim, role/location scope, and record version inside the Function. |
-| **Paused** | Broad staff enrollment, compatibility retirement, global strict authorization, and App Check enforcement remain off. Ordinary non-canary staff continue using the familiar compatibility PIN flow. Custom EOC template use outside the tested cohort should not be broadened until the corresponding staff cohort is enrolled. |
-| **Next major decision** | Separately approve or defer a small real-staff enrollment cohort. Recommended next release is one location and one role group at a time, with profile preflight, staff communication, observation, and rollback before the next cohort. Compatibility retirement remains a later separate decision after every active staff cohort is stable. |
+| **In progress** | The guarded real-staff rollout tool is locally complete and its full enrollment/retry/rollback lifecycle passes the Firestore/Auth emulator. Read-only production discovery found one real operational cohort: Lone Mountain BHTs `mark_v`, `paul_g`, and `sam_seylar`. All three passed active, role, one-home-location, unique legacy-PIN, mapping, and current-enrollment checks. A checksum-protected external preview/rollback package is ready; no staff were enrolled and no production record was changed. |
+| **Paused** | Actual Lone Mountain enrollment is paused at the final production mutation gate. Compatibility retirement, global strict authorization, and App Check enforcement remain off. Ordinary non-enrolled staff continue using the familiar compatibility PIN flow. |
+| **Next major decision** | Approve or decline merging the guarded tool and enrolling exactly the three ready Lone Mountain BHT profiles. Enrollment will preserve their PINs but increment their security versions and sign them out of any existing devices so the next sign-in receives the current secure scope. |
 
 The synthetic Test House canary now exercises the complete server PIN/custom-token foundation while preserving the six-digit screen. This is not a broad migration: non-canary profiles still use compatibility behavior, Anonymous Authentication was not enabled as a shortcut, strict global authorization is off, and App Check is monitoring-only.
 

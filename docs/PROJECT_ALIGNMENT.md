@@ -34,6 +34,7 @@ These exceptions are intentional and approved for this repo.
 4. Security-foundation release boundary
 - Local dormant implementation and tests do not authorize a production authentication, rules, Storage, Functions, Hosting, App Check, secret, data, or configuration change.
 - Release must follow the named workflow canary and coordinated rollback contract in `docs/security/SECURITY_CANARY_AND_ROLLBACK.md`.
+- Real-staff enrollment must use the guarded location/BHT cohort preview and exact checksum-protected rollback contract; never edit protected allowlists directly or silently enroll profiles.
 - Protected strict-mode EOC and issue mutations must follow `docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md`; do not restore the expression-heavy browser transaction path.
 
 ## Delivery Workflow Contract (Required)
