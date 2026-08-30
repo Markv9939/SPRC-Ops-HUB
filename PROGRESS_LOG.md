@@ -42,7 +42,7 @@ Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 ### Release and remaining boundary
 
 - Hosting, the reviewed Firestore rules/indexes, and the required Node 22 Functions were released only as explicitly authorized during the staged canary. No production PIN is documented here, no real staff account was reset/deactivated, and no real staff cohort was enrolled.
-- The completed canary implementation and this closeout remain uncommitted/unmerged on `codex/security-foundation-stage3-evidence`. `origin/Main` remains the merged `1028347` baseline; do not treat this isolated branch as merged source until a separate reviewed PR/merge occurs.
+- The completed canary implementation and this closeout were captured in source commit `79553ef` and submitted as security-foundation completion PR #13. The `Main` baseline immediately before that integration was `1028347`; Git history is authoritative for the resulting merge commit.
 - The synthetic all-workflow canary is complete. The next distinct production project is broad staff enrollment in small role/location cohorts. It requires separate approval and must preserve compatibility fallback until those cohorts are observed and rollback-ready. Compatibility retirement is a later separate approval.
 
 ## 2026-08-30 — Templates/photos production canary activated for live verification (historical stage; superseded above)

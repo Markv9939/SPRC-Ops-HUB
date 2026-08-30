@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-30
 Document status: Active living blueprint
-Application release reference: merged baseline `1028347` plus the explicitly approved, unmerged three-profile security-canary release from `codex/security-foundation-stage3-evidence`
+Application source-integration reference: merged baseline `1028347` plus security-foundation completion PR #13 from source commit `79553ef`; Git history is authoritative for the resulting `Main` merge commit
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -555,11 +555,11 @@ This subsection preserves the earlier local-only checkpoint. It is superseded fo
 
 | Area | Status | Evidence / limitation |
 |---|---|---|
-| Main application baseline | Released | `origin/Main` is `1028347`; PR #9 merged the corrected Identity/Users canary package, PR #11 added the Hosting-only secure supervisor PIN-generator correction, and PR #12 reconciled the deployed compatibility-reload correction on 2026-08-29. |
+| Main application baseline | Released | The baseline immediately before security-foundation completion PR #13 was `1028347`; PR #9 merged the corrected Identity/Users canary package, PR #11 added the Hosting-only secure supervisor PIN-generator correction, and PR #12 reconciled the deployed compatibility-reload correction on 2026-08-29. Git history is authoritative for PR #13's resulting `Main` merge commit. |
 | Shift Debrief safeguards | Released | `8339827`; focused tests, emulator/rules tests, lint/build, push, Hosting and Firestore rules deployment were reported. |
 | Issue handoff/app feedback V2 | Released and enabled | `3c11306`; feature flag version 3 was verified for the approved four operational locations at release time. Recheck before future changes because configuration can drift. |
 | Guided EOC template builder | Released; secure synthetic canary passed | `c6b0ec1` remains the merged builder baseline. The mapped-session Templates/Photos and protected EOC paths now pass for the exact synthetic cohort; broader operational use follows staff enrollment rather than a remaining builder defect. |
-| Security foundation | Three-profile all-workflow canary complete; broad rollout pending | The exact synthetic cohort is cumulatively enabled through `settings`. Secure PIN/custom-token login, 84-hour device sessions, scoped Users, templates/photos, EOC/offline replay, debriefs/alerts, issues/feedback/audit, transports, operations administration, Settings, rollback, and compatibility fallback passed. Global strict auth, Anonymous Auth shortcut, App Check enforcement, broad enrollment, and compatibility retirement remain off. The approved canary code/docs are still unmerged on `codex/security-foundation-stage3-evidence`. |
+| Security foundation | Three-profile all-workflow canary complete; broad rollout pending | The exact synthetic cohort is cumulatively enabled through `settings`. Secure PIN/custom-token login, 84-hour device sessions, scoped Users, templates/photos, EOC/offline replay, debriefs/alerts, issues/feedback/audit, transports, operations administration, Settings, rollback, and compatibility fallback passed. Global strict auth, Anonymous Auth shortcut, App Check enforcement, broad enrollment, and compatibility retirement remain off. The approved completion package is source commit `79553ef` in PR #13. |
 | Documentation foundation | Restored and locally updated | Authoritative `MASTER_PLAN.md` and `PROGRESS_LOG.md` drafts plus project guidance, README links, and document hierarchy are restored and reconciled in this isolated branch; no production changes. |
 
 Current configuration and live Hosting state can change after this document is written. Recheck before any release or production decision.
