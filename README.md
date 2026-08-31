@@ -37,7 +37,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - The local session locks after 60 minutes of inactivity.
 - PIN login includes timeout guards so degraded connectivity fails clearly instead of staying on `Checking...`.
 - Global Firebase claim enforcement remains off. The familiar PIN screen now has a narrowly enabled server-backed custom-token canary for exactly three synthetic Test House profiles. That cohort has passed every cumulative workflow stage through Settings; ordinary valid staff remain on the compatibility path.
-- Security-foundation Phases 1–9, the complete local role/offline/device contract matrix, and the synthetic production canary are complete and merged through `eda1ff9`. Guarded real-staff cohort tooling is now under local preparation; no real staff are enrolled by that tooling yet. Protected EOC/offline replay, issue, and transport callables remain app-layer protected. App Check enforcement, global strict authorization, and compatibility retirement remain disabled.
+- Security-foundation Phases 1–9, the complete local role/offline/device contract matrix, and the synthetic production canary are complete. Guarded real-staff rollout tooling merged through `0fe3be2`, and the approved first BHT cohort is in live observation. Its first account passed secure login, reload, scoped desktop/phone-sized Home, read-only workflow navigation, and Users-page denial. Protected callables remain app-layer protected. All other staff retain compatibility login; App Check enforcement, global strict authorization, further cohorts, and compatibility retirement remain disabled.
 
 ## Recent Dashboard/Modal Behavior (Current)
 - BHT home is now a tighter action-hub experience:

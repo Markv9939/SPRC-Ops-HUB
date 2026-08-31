@@ -1,7 +1,7 @@
 # Security Foundation Canary and Rollback Gate
 
 Last updated: 2026-08-30
-Status: Exact three-profile cumulative canary complete through Settings; Lone Mountain three-BHT rollout preview passed, production enrollment not yet authorized
+Status: Exact three-profile cumulative canary complete through Settings; Lone Mountain three-BHT cohort enrolled, first account live checks passed, remaining observation and rollback/re-enrollment pending
 
 ## Current completed-canary boundary
 
@@ -36,15 +36,17 @@ Exact-cohort preview:
 
 The preview prints the exact `enroll`, `status`, and `rollback` arguments. Never guess a confirmation phrase, hand-edit the protected allowlists, or use a backup for a different location/profile set.
 
-### Prepared first real cohort
+### First real cohort
 
 - Exact location: `lone_mountain`.
-- Exact profiles: `mark_v`, `paul_g`, and `sam_seylar`.
+- Exact profiles: the three approved Lone Mountain BHT profiles. Their identifiers remain only in the protected external rollback/audit evidence.
 - Corrected read-only production preflight: all three are active BHTs, each has one Lone Mountain home location, each has a unique legacy PIN hash ready for normal first secure-login migration, none has a conflicting identity mapping, and none is already enrolled. Mesquite, RES, and Test House currently contain no eligible real BHT cohort; known synthetic/test profiles are explicitly blocked from staff rollout selection.
-- External preview/rollback file: `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-staff-rollout-lone_mountain-2026-08-30T18-52-40-969Z.json`.
-- SHA-256: `bf97f83b044939c40d10aa9f4b88539f3d042e0e1d5095c57b2a312ab6db704c`.
-- Enrollment phrase: `ENROLL LONE_MOUNTAIN BHT SECURITY COHORT`.
-- Current boundary: preview only. No protected configuration, profile, session, PIN, identity, or production data was changed.
+- Released guard: PR #14, merge `0fe3be2`.
+- Fresh external preview/rollback file: retained outside the repository with its checksum and exact cohort identifiers in protected evidence.
+- Enrollment confirmation and audit: retained with exact version, session, cleanup, and cohort details in protected external evidence.
+- Immediate post-enrollment boundary: guarded readback confirmed only the approved cohort changed. Global strict authorization and App Check enforcement remained off, and no PIN was changed.
+- First live account: the first approved Lone Mountain BHT established its mapped secure session. Existing-PIN login, current assignment scope, reload persistence, desktop and 390×844 layout, existing House EOC, existing transport, issue form, debrief editor, and direct Users-page denial passed with no new correct-session permission error and no operational submission. Exact identity/session records remain in protected external evidence.
+- Still required before cohort closeout: first secure login for the remaining two approved profiles, a true second-device/phone check, one-device logout while another session remains, offline/reconnect behavior, one complete working shift observation, and the controlled rollback/re-enrollment proof.
 
 ## Historical Identity/Users re-release checkpoint
 
