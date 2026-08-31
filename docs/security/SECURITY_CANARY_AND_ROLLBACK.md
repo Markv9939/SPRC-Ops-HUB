@@ -1,7 +1,7 @@
 # Security Foundation Canary and Rollback Gate
 
-Last updated: 2026-08-30
-Status: Exact three-profile cumulative canary complete through Settings; Lone Mountain three-BHT cohort enrolled, first account live checks passed, remaining observation and rollback/re-enrollment pending
+Last updated: 2026-08-31
+Status: Exact three-profile cumulative canary complete through Settings; first Lone Mountain account passed two-device/logout checks, real-phone offline shell correction verified locally and awaiting release/retest
 
 ## Current completed-canary boundary
 
@@ -45,8 +45,9 @@ The preview prints the exact `enroll`, `status`, and `rollback` arguments. Never
 - Fresh external preview/rollback file: retained outside the repository with its checksum and exact cohort identifiers in protected evidence.
 - Enrollment confirmation and audit: retained with exact version, session, cleanup, and cohort details in protected external evidence.
 - Immediate post-enrollment boundary: guarded readback confirmed only the approved cohort changed. Global strict authorization and App Check enforcement remained off, and no PIN was changed.
-- First live account: the first approved Lone Mountain BHT established its mapped secure session. Existing-PIN login, current assignment scope, reload persistence, desktop and 390×844 layout, existing House EOC, existing transport, issue form, debrief editor, and direct Users-page denial passed with no new correct-session permission error and no operational submission. Exact identity/session records remain in protected external evidence.
-- Still required before cohort closeout: first secure login for the remaining two approved profiles, a true second-device/phone check, one-device logout while another session remains, offline/reconnect behavior, one complete working shift observation, and the controlled rollback/re-enrollment proof.
+- First live account: the first approved Lone Mountain BHT established its mapped secure session. Existing-PIN login, current assignment scope, reload persistence, desktop and 390×844 layout, existing House EOC, existing transport, issue form, debrief editor, and direct Users-page denial passed with no new correct-session permission error and no operational submission. A real phone then established an independent second session; phone-only logout closed only that session while the browser remained active, and phone re-login established a fresh independent session. Exact identity/session records remain in protected external evidence.
+- Real-phone offline gate: a cold close/reopen with both phone network paths disabled produced a blank white screen. Local `sprc-ops-shell-v12` now precaches the complete built module graph through a root asset manifest and uses a URL-only cache fallback after network failure. The actual production bundle passed the matching phone cold-start test, and the existing 11-action secure offline matrix remained green. The correction is not deployed; broader rollout stays paused.
+- Still required before cohort closeout: review/merge and Hosting-only release of the offline-shell correction, a passing real-phone offline/reconnect retest, first secure login for the remaining two approved profiles, one complete working shift observation, and the controlled rollback/re-enrollment proof.
 
 ## Historical Identity/Users re-release checkpoint
 
