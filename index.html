@@ -9,7 +9,28 @@
     <title>SPRC Ops Hub</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main
+        id="startup-fallback"
+        role="status"
+        aria-live="polite"
+        style="min-height:100vh;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:24px;background:#f4f6f8;color:#112f52;font-family:Arial,sans-serif;text-align:center"
+      >
+        <div style="max-width:420px">
+          <h1 style="margin:0 0 12px;font-size:28px">Opening SPRC Ops Hub…</h1>
+          <p style="margin:0 0 20px;line-height:1.5">
+            If this message stays on screen, reconnect to the internet once and try again so this device can finish saving the app for offline use.
+          </p>
+          <button
+            type="button"
+            onclick="window.location.reload()"
+            style="border:0;border-radius:10px;padding:12px 20px;background:#c7473d;color:#fff;font:inherit;font-weight:700"
+          >
+            Try again
+          </button>
+        </div>
+      </main>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

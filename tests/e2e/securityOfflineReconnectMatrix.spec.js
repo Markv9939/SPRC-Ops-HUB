@@ -30,7 +30,7 @@ async function ensureOfflineShellIsControlled(page) {
     urls.add(new URL('/src/services/offlineStore.js', window.location.origin).href)
     urls.add(new URL('/src/services/offlineActionCatalog.js', window.location.origin).href)
     urls.add(new URL('/src/services/offlineSecurityModel.js', window.location.origin).href)
-    const cache = await caches.open('sprc-ops-shell-v12')
+    const cache = await caches.open('sprc-ops-shell-v13')
     await Promise.all([...urls].map(async url => {
       const response = await fetch(url)
       if (!response.ok) throw new Error(`Unable to cache ${url}: ${response.status}`)
