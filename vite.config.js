@@ -28,6 +28,10 @@ export default defineConfig(({ mode }) => {
       }
     ],
     build: {
+      // The service worker uses this production manifest to precache every
+      // hashed bundle needed for a cold offline launch. Keep it at the dist
+      // root because Firebase Hosting ignores dot-directories.
+      manifest: 'asset-manifest.json',
       // Current app bundle is ~1.2 MB minified; keep build output clean while we
       // defer deeper code-splitting work.
       chunkSizeWarningLimit: 1500

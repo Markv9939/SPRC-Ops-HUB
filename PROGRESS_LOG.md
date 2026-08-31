@@ -1,8 +1,30 @@
 # SPRC Ops Hub Progress Log
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
+
+## 2026-08-31 — Real-phone offline cold-start defect found and corrected locally
+
+### Live canary evidence
+
+- The first approved Lone Mountain BHT account signed in concurrently on the existing browser and a real phone. Privacy-minimized read-only status confirmed two independent active device sessions for one mapped cohort profile while the other approved profiles still awaited first login.
+- Mark logged out on the phone only. Read-only status dropped from two active sessions to one while the original browser remained active, directly passing the approved one-device logout contract. Signing back in on the phone created a fresh second session again.
+- With the phone signed in, Mark disabled both network paths, fully closed the browser/app, and reopened Ops Hub. The real phone displayed a blank white screen. No operational form was submitted, no PIN/account/access setting changed, and the remaining online session was not revoked. Broader cohort rollout remains paused.
+
+### Root cause and local correction
+
+- The deployed `sprc-ops-shell-v11` installer parsed only asset links present in `index.html`. The security bootstrap intentionally loads the main App as a separate production chunk after the core reset check, so a first visit could install the worker after that chunk had already loaded and never place the complete production module graph in Cache Storage. The prior development offline test manually refetched its module graph and therefore did not prove a real built cold restart.
+- A second production-shaped failure showed that even present precache entries can miss a later script/style request when the server response carries a `Vary` header. The cache fallback now matches the immutable same-origin asset by URL after network failure.
+- Local branch `codex/offline-shell-cold-start` starts from verified `origin/Main` `9712318`. The correction creates a root-level Vite asset manifest, advances the shell to `sprc-ops-shell-v12`, precaches every hashed production file with a forced complete response body, preserves the development fallback, and ignores `Vary` only for the offline same-origin cache fallback.
+- Added `test:security-offline-shell:browser`, which builds the actual secure production bundle, waits for a fresh service worker to install, closes the first phone-sized page, disconnects the browser, opens `/home` cold, and requires a nonblank usable app shell. The test also verifies that the manifest, entry script, dynamically loaded App chunk, and stylesheet have nonempty cached bodies.
+
+### Verification and release boundary
+
+- Production-built cold offline restart: 1 passed. Full secure offline/reconnect owner matrix: 1 passed with all 11 supported queued action types and their owner, Firebase identity, session, security-version, location, and record-version safeguards intact.
+- Security foundation: 92 passed. ESLint passed. Security-canary build passed with 1,913 modules, root asset manifest, and `v3-enabled` marker. `git diff --check` passed.
+- The full matrix ran on the current Node `24.13.0` host because local Node 22 is unavailable; no fresh Node 22 parity is claimed. Its product test passed before the Firebase CLI emitted the known local updater-cache shutdown error. A temporary dummy emulator-only PIN secret was used because the workstation Firebase login is expired, then removed immediately; no production secret was read, stored, changed, or exposed.
+- This correction is local only. It does not change Functions, Firestore/Storage rules, Auth providers, security configuration, production data, sessions, App Check enforcement, strict authorization, or cohort enrollment. Production still requires a reviewed Hosting-only release and a repeat of the real-phone offline/reconnect journey.
 
 ## 2026-08-30 — Guarded real-staff cohort rollout preparation started locally
 

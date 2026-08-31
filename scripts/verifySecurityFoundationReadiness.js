@@ -31,6 +31,9 @@ const requiredFiles = [
   'tests/e2e/securitySettingsStage.spec.js',
   'playwright.security.offline.config.js',
   'tests/e2e/securityOfflineReconnectMatrix.spec.js',
+  'playwright.security.offline-shell.config.js',
+  'tests/e2e/securityOfflineProductionShell.spec.js',
+  'tests/e2e/support/securityProductionOfflineServer.js',
   'playwright.security.compatibility.config.js',
   'tests/e2e/securityCompatibilityCanary.spec.js',
   'tests/e2e/support/securityViteGlobalServer.js',
@@ -87,6 +90,10 @@ const checks = {
   completeOfflineReconnectMatrixPresent: Boolean(packageJson.scripts?.['test:security-offline-matrix:browser'])
     && Boolean(packageJson.scripts?.['test:security-offline-matrix:emulator'])
     && readFileSync('src/services/offlineActionCatalog.js', 'utf8').includes('SUPPORTED_SECURE_OFFLINE_ACTION_TYPES'),
+  productionOfflineColdStartGatePresent: Boolean(packageJson.scripts?.['test:security-offline-shell:browser'])
+    && readFileSync('tests/e2e/securityOfflineProductionShell.spec.js', 'utf8').includes('sprc-ops-shell-v12')
+    && readFileSync('public/sw.js', 'utf8').includes("fetch('/asset-manifest.json'")
+    && readFileSync('vite.config.js', 'utf8').includes("manifest: 'asset-manifest.json'"),
   secureClientAndCompatibilityBrowserGatesPresent: Boolean(packageJson.scripts?.['test:security-client:emulator'])
     && Boolean(packageJson.scripts?.['test:security-compatibility:emulator'])
     && readFileSync('tests/e2e/securityCompatibilityCanary.spec.js', 'utf8').includes('stableProfileClaim'),
