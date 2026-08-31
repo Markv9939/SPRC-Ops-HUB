@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-30
 Document status: Active living blueprint
-Application release reference: security-foundation completion PR #13 merged to `Main` as `eda1ff9`
+Application release reference: guarded real-staff rollout PR #14 merged to `Main` as `0fe3be2`
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -33,9 +33,9 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | The guarded real-staff rollout tool is locally complete and its full enrollment/retry/rollback lifecycle passes the Firestore/Auth emulator. Read-only production discovery found one real operational cohort: Lone Mountain BHTs `mark_v`, `paul_g`, and `sam_seylar`. All three passed active, role, one-home-location, unique legacy-PIN, mapping, and current-enrollment checks. A checksum-protected external preview/rollback package is ready; no staff were enrolled and no production record was changed. |
-| **Paused** | Actual Lone Mountain enrollment is paused at the final production mutation gate. Compatibility retirement, global strict authorization, and App Check enforcement remain off. Ordinary non-enrolled staff continue using the familiar compatibility PIN flow. |
-| **Next major decision** | Approve or decline merging the guarded tool and enrolling exactly the three ready Lone Mountain BHT profiles. Enrollment will preserve their PINs but increment their security versions and sign them out of any existing devices so the next sign-in receives the current secure scope. |
+| **In progress** | PR #14 merged the guarded real-staff rollout tool as `0fe3be2`. Mark then authorized enrollment of the three approved Lone Mountain BHT profiles, and guarded cleanup completed. The first approved account has now completed the normal secure PIN migration. Its existing Lone Mountain Home assignment, browser reload persistence, desktop and phone-sized layout, House EOC, active transport, issue form, debrief editor, and direct Users-page denial all passed without a new permission error or operational write. The remaining two profiles have not performed first secure login yet. Exact profile, session, version, audit, and rollback details remain only in protected external evidence. |
+| **Paused** | Additional staff cohorts, compatibility retirement, global strict authorization, and App Check enforcement remain off. Ordinary non-enrolled staff continue using the familiar compatibility PIN flow. The Lone Mountain cohort must pass live existing-PIN login, reload/device/offline/workflow observation, and controlled rollback/re-enrollment before another location starts. |
+| **Next major decision** | No new policy decision is needed yet. Complete the Lone Mountain live observation gate with normal staff PIN use; never ask staff to share a PIN or reset one for testing. If the cohort passes, perform the already-planned controlled rollback/re-enrollment at an operationally safe time before expanding further. |
 
 The synthetic Test House canary now exercises the complete server PIN/custom-token foundation while preserving the six-digit screen. This is not a broad migration: non-canary profiles still use compatibility behavior, Anonymous Authentication was not enabled as a shortcut, strict global authorization is off, and App Check is monitoring-only.
 
