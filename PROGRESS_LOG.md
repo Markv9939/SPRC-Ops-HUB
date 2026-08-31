@@ -4,7 +4,7 @@ Last updated: 2026-08-31
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
-## 2026-08-31 — Android Chrome offline cold-start defect reproduced and stronger correction verified locally
+## 2026-08-31 — Android Chrome offline cold-start correction released and verified on the real phone
 
 ### Live canary evidence
 
@@ -21,12 +21,18 @@ Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 - Local branch `codex/offline-shell-process-restart` starts from verified `origin/Main` `ad69bec`. The v13 correction registers the service worker immediately, waits up to a bounded 20 seconds for the offline shell before rendering the app, records an exact readiness marker, and retains update/reload behavior. The static initial HTML now shows a plain-language reconnect/retry message, so missing offline JavaScript cannot collapse into an unexplained white page.
 - The production preview server now runs in an independent process for process-restart evidence. `test:security-offline-shell:browser` still proves the complete manifest, entry, App chunk, stylesheet, and page-close cold start. The separate `test:security-offline-shell:process` starts a fresh persistent Chrome profile, proves the v13 shell is active, completely closes Chrome, starts a second Chrome process with that same profile while offline, and requires a nonblank visible PIN screen.
 
+### Hosting release and real-phone proof
+
+- PR #17 merged the exact tested v13 commit to `Main` as `30c5665`. That merged commit was rebuilt with the `v3-enabled` security marker and deployed to Firebase Hosting only for `sprc-tx-l`; no Functions, Firestore/Storage rules, Auth provider, security configuration, session, cohort, or production-data change was included.
+- Immediate live-file verification returned HTTP 200 for the index, v13 worker, and asset manifest. The secure marker and static recovery screen were present, and all eight manifest-listed production assets returned nonempty HTTP 200 responses.
+- Mark then loaded the updated app online on the real Android Chrome device, disabled its network paths, fully closed Chrome, and reopened Ops Hub offline. The app reopened successfully instead of showing the prior white screen. This passes the previously blocked real-device cold offline gate for the first approved Lone Mountain account.
+
 ### Verification and release boundary
 
 - Production-built page-close cold offline restart: 1 passed. Independent full-Chrome-process offline restart: 1 passed with the v13 cache ready before close and the offline PIN screen visible after relaunch. Full secure offline/reconnect owner matrix: 1 passed with all 11 supported queued action types and their owner, Firebase identity, session, security-version, location, and record-version safeguards intact.
 - Security foundation: 92 passed. ESLint passed. Security-canary build passed with 1,913 modules, root asset manifest, and `v3-enabled` marker. The readiness verifier now recognizes both offline gates and reports the local implementation ready while correctly retaining the Node-parity and broad-rollout blockers. `git diff --check` passed.
 - The full matrix ran on the current Node `24.13.0` host because local Node 22 is unavailable; no fresh Node 22 parity is claimed. Its product test passed before the Firebase CLI emitted the known local updater-cache shutdown error. A temporary dummy emulator-only PIN secret was used because the workstation Firebase login is expired, then removed immediately; no production secret was read, stored, changed, or exposed.
-- The v13 correction is local only. It does not change Functions, Firestore/Storage rules, Auth providers, security configuration, production data, sessions, App Check enforcement, strict authorization, or cohort enrollment. Production still requires a reviewed Hosting-only release and a repeat of the real Android Chrome full-close offline/reconnect journey.
+- The v13 correction is now merged and Hosting-deployed. The remaining cohort work is first secure login for the other two approved profiles, ordinary working-shift observation, and controlled rollback/re-enrollment evidence. Additional cohorts, strict authorization, App Check enforcement, and compatibility retirement remain paused.
 
 ## 2026-08-30 — Guarded real-staff cohort rollout preparation started locally
 
