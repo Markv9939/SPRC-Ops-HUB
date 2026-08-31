@@ -1,9 +1,25 @@
 import { expect, test } from '@playwright/test'
 
-test('fresh production service worker opens the app shell after a cold offline restart', async ({ context, page }) => {
-  await page.goto('/')
+async function waitForOfflineShell(page) {
   await page.evaluate(async () => {
-    await navigator.serviceWorker.ready
+    try {
+      await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Service worker readiness timed out.')), 25_000)
+        })
+      ])
+    } catch (error) {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      const states = registrations.map(registration => ({
+        scope: registration.scope,
+        installing: registration.installing?.state || null,
+        waiting: registration.waiting?.state || null,
+        active: registration.active?.state || null
+      }))
+      const cacheNames = await caches.keys()
+      throw new Error(`${error.message} registrations=${JSON.stringify(states)} caches=${JSON.stringify(cacheNames)}`)
+    }
     if (navigator.serviceWorker.controller) return
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Service worker did not take control.')), 15_000)
@@ -13,9 +29,14 @@ test('fresh production service worker opens the app shell after a cold offline r
       }, { once: true })
     })
   })
+}
+
+test('fresh production service worker opens the app shell after a cold offline restart', async ({ context, page }) => {
+  await page.goto('/')
+  await waitForOfflineShell(page)
 
   const cacheEvidence = await page.evaluate(async () => {
-    const cache = await caches.open('sprc-ops-shell-v12')
+    const cache = await caches.open('sprc-ops-shell-v13')
     const keys = await cache.keys()
     const paths = keys.map(request => new URL(request.url).pathname)
     const byteLength = async pattern => {

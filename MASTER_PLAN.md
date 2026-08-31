@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-31
 Document status: Active living blueprint
-Current `Main` reference: privacy-minimized observation PR #15 merged as `9712318`; offline-shell correction remains local and undeployed
+Current `Main` reference: Hosting-only offline-shell PR #16 merged as `ad69bec`; the stronger v13 startup/readiness correction remains local and undeployed
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -33,9 +33,9 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | The first approved Lone Mountain account completed normal secure PIN migration, scoped workflow checks, true browser-plus-phone use, and phone-only logout without ending the browser session. A real phone cold offline reopen then exposed a blank-screen app-shell defect. The local `sprc-ops-shell-v12` correction now precaches the complete production bundle and passed a production-built phone cold restart plus the full 11-action secure offline matrix, but it is not merged or deployed. The remaining two approved profiles have not performed first secure login yet. Exact profile, session, version, audit, and rollback details remain only in protected external evidence. |
+| **In progress** | The first approved Lone Mountain account completed normal secure PIN migration, scoped workflow checks, true browser-plus-phone use, and phone-only logout without ending the browser session. The deployed v12 complete-bundle cache still produced a blank screen after Android Chrome was fully closed and reopened offline. The local v13 correction now starts and verifies offline setup before rendering the app, supplies a nonblank recovery screen, and passes both the production page-close test and an independent full-Chrome-process offline restart. It is not merged or deployed. The remaining two approved profiles have not performed first secure login yet. Exact profile, session, version, audit, and rollback details remain only in protected external evidence. |
 | **Paused** | Additional staff cohorts, compatibility retirement, global strict authorization, and App Check enforcement remain off. Ordinary non-enrolled staff continue using the familiar compatibility PIN flow. The Lone Mountain cohort must pass live existing-PIN login, reload/device/offline/workflow observation, and controlled rollback/re-enrollment before another location starts. |
-| **Next major decision** | Review and release the Hosting-only offline-shell correction, then repeat the same real-phone offline/reconnect check before any broader cohort work. Never ask staff to share a PIN or reset one for testing. After the corrected first cohort passes, complete the remaining first logins, working-shift observation, and controlled rollback/re-enrollment before expanding. |
+| **Next major decision** | Review and release the Hosting-only v13 startup/readiness correction, then repeat the same real-phone full-close offline/reconnect check before any broader cohort work. Never ask staff to share a PIN or reset one for testing. After the corrected first cohort passes, complete the remaining first logins, working-shift observation, and controlled rollback/re-enrollment before expanding. |
 
 The synthetic Test House canary now exercises the complete server PIN/custom-token foundation while preserving the six-digit screen. This is not a broad migration: non-canary profiles still use compatibility behavior, Anonymous Authentication was not enabled as a shortcut, strict global authorization is off, and App Check is monitoring-only.
 

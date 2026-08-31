@@ -4,27 +4,29 @@ Last updated: 2026-08-31
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
-## 2026-08-31 — Real-phone offline cold-start defect found and corrected locally
+## 2026-08-31 — Android Chrome offline cold-start defect reproduced and stronger correction verified locally
 
 ### Live canary evidence
 
 - The first approved Lone Mountain BHT account signed in concurrently on the existing browser and a real phone. Privacy-minimized read-only status confirmed two independent active device sessions for one mapped cohort profile while the other approved profiles still awaited first login.
 - Mark logged out on the phone only. Read-only status dropped from two active sessions to one while the original browser remained active, directly passing the approved one-device logout contract. Signing back in on the phone created a fresh second session again.
 - With the phone signed in, Mark disabled both network paths, fully closed the browser/app, and reopened Ops Hub. The real phone displayed a blank white screen. No operational form was submitted, no PIN/account/access setting changed, and the remaining online session was not revoked. Broader cohort rollout remains paused.
+- PR #16 merged the first complete-bundle cache correction to `Main` as `ad69bec`, and its Hosting-only release reached `sprc-tx-l`. The secure login remained usable online, but a second real Android Chrome full-close/offline reopen still displayed a blank white screen. That direct phone result superseded the earlier page-close-only local pass.
 
 ### Root cause and local correction
 
 - The deployed `sprc-ops-shell-v11` installer parsed only asset links present in `index.html`. The security bootstrap intentionally loads the main App as a separate production chunk after the core reset check, so a first visit could install the worker after that chunk had already loaded and never place the complete production module graph in Cache Storage. The prior development offline test manually refetched its module graph and therefore did not prove a real built cold restart.
 - A second production-shaped failure showed that even present precache entries can miss a later script/style request when the server response carries a `Vary` header. The cache fallback now matches the immutable same-origin asset by URL after network failure.
-- Local branch `codex/offline-shell-cold-start` starts from verified `origin/Main` `9712318`. The correction creates a root-level Vite asset manifest, advances the shell to `sprc-ops-shell-v12`, precaches every hashed production file with a forced complete response body, preserves the development fallback, and ignores `Vary` only for the offline same-origin cache fallback.
-- Added `test:security-offline-shell:browser`, which builds the actual secure production bundle, waits for a fresh service worker to install, closes the first phone-sized page, disconnects the browser, opens `/home` cold, and requires a nonblank usable app shell. The test also verifies that the manifest, entry script, dynamically loaded App chunk, and stylesheet have nonempty cached bodies.
+- The v12 release added the root-level Vite asset manifest, complete hashed-bundle precache with forced response bodies, development fallback, and same-origin offline `Vary` handling. The real phone result showed that complete cache contents alone were insufficient because service-worker registration still began only after the browser `load` event and the app did not prove installation readiness before staff could close Chrome.
+- Local branch `codex/offline-shell-process-restart` starts from verified `origin/Main` `ad69bec`. The v13 correction registers the service worker immediately, waits up to a bounded 20 seconds for the offline shell before rendering the app, records an exact readiness marker, and retains update/reload behavior. The static initial HTML now shows a plain-language reconnect/retry message, so missing offline JavaScript cannot collapse into an unexplained white page.
+- The production preview server now runs in an independent process for process-restart evidence. `test:security-offline-shell:browser` still proves the complete manifest, entry, App chunk, stylesheet, and page-close cold start. The separate `test:security-offline-shell:process` starts a fresh persistent Chrome profile, proves the v13 shell is active, completely closes Chrome, starts a second Chrome process with that same profile while offline, and requires a nonblank visible PIN screen.
 
 ### Verification and release boundary
 
-- Production-built cold offline restart: 1 passed. Full secure offline/reconnect owner matrix: 1 passed with all 11 supported queued action types and their owner, Firebase identity, session, security-version, location, and record-version safeguards intact.
-- Security foundation: 92 passed. ESLint passed. Security-canary build passed with 1,913 modules, root asset manifest, and `v3-enabled` marker. `git diff --check` passed.
+- Production-built page-close cold offline restart: 1 passed. Independent full-Chrome-process offline restart: 1 passed with the v13 cache ready before close and the offline PIN screen visible after relaunch. Full secure offline/reconnect owner matrix: 1 passed with all 11 supported queued action types and their owner, Firebase identity, session, security-version, location, and record-version safeguards intact.
+- Security foundation: 92 passed. ESLint passed. Security-canary build passed with 1,913 modules, root asset manifest, and `v3-enabled` marker. The readiness verifier now recognizes both offline gates and reports the local implementation ready while correctly retaining the Node-parity and broad-rollout blockers. `git diff --check` passed.
 - The full matrix ran on the current Node `24.13.0` host because local Node 22 is unavailable; no fresh Node 22 parity is claimed. Its product test passed before the Firebase CLI emitted the known local updater-cache shutdown error. A temporary dummy emulator-only PIN secret was used because the workstation Firebase login is expired, then removed immediately; no production secret was read, stored, changed, or exposed.
-- This correction is local only. It does not change Functions, Firestore/Storage rules, Auth providers, security configuration, production data, sessions, App Check enforcement, strict authorization, or cohort enrollment. Production still requires a reviewed Hosting-only release and a repeat of the real-phone offline/reconnect journey.
+- The v13 correction is local only. It does not change Functions, Firestore/Storage rules, Auth providers, security configuration, production data, sessions, App Check enforcement, strict authorization, or cohort enrollment. Production still requires a reviewed Hosting-only release and a repeat of the real Android Chrome full-close offline/reconnect journey.
 
 ## 2026-08-30 — Guarded real-staff cohort rollout preparation started locally
 
