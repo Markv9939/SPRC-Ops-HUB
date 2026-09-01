@@ -11,6 +11,7 @@ const requiredFiles = [
   'docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md',
   'docs/security/SECURITY_CANARY_AND_ROLLBACK.md',
   'scripts/manageSecurityFoundationCanary.js',
+  'scripts/inspectSecurityCompatibilityReadiness.js',
   'scripts/appCheckObservationModel.js',
   'scripts/securityCanaryEvidenceModel.js',
   'scripts/securityCanaryStageModel.js',
@@ -111,6 +112,9 @@ const checks = {
   identityReadOnlyStatusGatePresent: canaryManagerSource.includes("mode === 'identity-status'")
     && canaryManagerSource.includes('summarizeIdentityCanaryEvidence')
     && canaryManagerSource.includes('Identity status requires the verified --backup path'),
+  compatibilityRetirementReadinessGatePresent: Boolean(packageJson.scripts?.['security:compatibility-readiness'])
+    && readFileSync('scripts/inspectSecurityCompatibilityReadiness.js', 'utf8').includes('strictAuthorizationReady')
+    && readFileSync('src/App.jsx', 'utf8').includes('compatibilitySessionRequiresFreshLogin'),
   serverIssuedWorkflowScopeClaims: indexSource.includes('manageStaffSecurityV4')
     && readFileSync('functions/src/staffPinLoginService.js', 'utf8').includes('authorizedLocations')
     && readFileSync('functions/src/staffPinLoginService.js', 'utf8').includes('issueLocationIds'),

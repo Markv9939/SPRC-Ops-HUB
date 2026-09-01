@@ -126,7 +126,7 @@ function appCheckEnforcementEnabled(config = {}) {
 }
 
 async function observeAppCheck(db, config) {
-  validateActiveCanaryScope(config)
+  validateCanaryObservationScope(config)
   const hours = observationHours()
   const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - (hours * 60 * 60 * 1000))
   const appCheckSnapshot = await db.doc('appSettings/appCheckMonitoring').get()
@@ -225,6 +225,17 @@ function createBackup(config, requestedDirectory, details = {}) {
 function hasExactCanaryProfiles(config) {
   const configured = Array.isArray(config?.enabledProfileIds) ? [...config.enabledProfileIds].sort() : []
   return hash(configured) === hash([...CANARY_PROFILE_IDS].sort())
+}
+
+function hasCanaryProfiles(config) {
+  const configured = new Set(Array.isArray(config?.enabledProfileIds) ? config.enabledProfileIds : [])
+  return CANARY_PROFILE_IDS.every(profileId => configured.has(profileId))
+}
+
+function validateCanaryObservationScope(config) {
+  if (CONFIG_PATHS.some(path => !config[path]?.exists || !hasCanaryProfiles(config[path]?.data))) {
+    throw new Error('Current protected settings no longer include the approved three-profile canary scope.')
+  }
 }
 
 function validateActiveCanaryScope(config) {

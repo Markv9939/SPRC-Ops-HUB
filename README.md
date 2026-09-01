@@ -36,9 +36,9 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Staff select their Ops profile with a unique six-digit PIN.
 - The local session locks after 60 minutes of inactivity.
 - PIN login includes timeout guards so degraded connectivity fails clearly instead of staying on `Checking...`.
-- Global Firebase claim enforcement remains off. The familiar PIN screen now has a narrowly enabled server-backed custom-token canary for exactly three synthetic Test House profiles. That cohort has passed every cumulative workflow stage through Settings; ordinary valid staff remain on the compatibility path.
-- Security-foundation Phases 1–9, the complete local role/offline/device contract matrix, and the synthetic production canary are complete. Guarded real-staff rollout tooling merged through `0fe3be2`, and the approved first BHT cohort is in live observation. Its first account passed secure login, reload, scoped desktop/phone-sized Home, read-only workflow navigation, and Users-page denial. Protected callables remain app-layer protected. All other staff retain compatibility login; App Check enforcement, global strict authorization, further cohorts, and compatibility retirement remain disabled.
-- The first real-phone cold offline restart exposed a blank app shell. A local `sprc-ops-shell-v12` correction now precaches the complete production bundle and passes a production-built phone cold restart plus the 11-action secure offline matrix. It remains undeployed pending review and live phone retest; broader cohort rollout stays paused.
+- Global Firebase claim enforcement remains off. The familiar PIN screen uses the server-backed custom-token path for the three synthetic Test House profiles plus the approved three-profile Lone Mountain BHT cohort. Two Lone Mountain profiles have completed first secure login; one remains. Other valid profiles retain compatibility behavior until the guarded all-active-profile stage.
+- Security-foundation Phases 1–9, the complete local role/offline/device contract matrix, and the synthetic production canary are complete. Protected callables remain app-layer protected. App Check enforcement, global strict authorization, broad all-profile activation, and compatibility retirement remain disabled.
+- The v13 offline shell correction is merged and Hosting-deployed. Automated production-process evidence and Mark's real Android Chrome full-close/offline reopen both passed. A final strict-cutover guard and privacy-safe active-account readiness audit are locally tested and awaiting merge/deployment before broad activation.
 
 ## Recent Dashboard/Modal Behavior (Current)
 - BHT home is now a tighter action-hub experience:
@@ -119,6 +119,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Read-only live Identity/Users and rollback-anchor status: `npm run security:canary -- --mode=identity-status --project=sprc-tx-l --backup=<absolute verified backup path> --backup-sha256=<exact SHA-256>`
 - Read-only eligible BHT/tech candidates for one exact home location: `npm run security:staff-rollout -- --mode=candidates --project=sprc-tx-l --location=<exact-location-id>`
 - Guarded exact-cohort preview: `npm run security:staff-rollout -- --mode=preview --project=sprc-tx-l --location=<exact-location-id> --profile-ids=<comma-separated-profile-ids> --backup-dir=<absolute-path-outside-repo>`
+- Privacy-safe active-account and compatibility-retirement readiness audit: `npm run security:compatibility-readiness -- --project=sprc-tx-l`
 - Smoke: `npm run smoke:phase9:full`
 - Preview core reset (read-only): `npm run reset:core:preview`
 - Back up core reset data (read-only): `npm run reset:core:backup`
