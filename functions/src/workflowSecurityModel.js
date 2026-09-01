@@ -56,6 +56,7 @@ export function appCheckMonitoringReady(config = {}) {
 export function compatibilityRetirementReady({
   workflowConfig,
   appCheckConfig,
+  accountReadiness = {},
   gates = {}
 } = {}) {
   const workflow = validateWorkflowRollout(workflowConfig)
@@ -68,13 +69,22 @@ export function compatibilityRetirementReady({
     'canaryRollback'
   ]
   const missingGates = requiredGates.filter(gate => gates[gate] !== true)
+  const activeProfileCount = Number(accountReadiness.activeProfileCount || 0)
+  const missingAccountConditions = []
+  if (activeProfileCount <= 0) missingAccountConditions.push('active_profile_inventory_missing')
+  if (Number(accountReadiness.invalidProfileCount || 0) !== 0) missingAccountConditions.push('invalid_active_profiles')
+  if (Number(accountReadiness.credentialReadyCount || 0) !== activeProfileCount) missingAccountConditions.push('active_profile_credentials_incomplete')
+  if (Number(accountReadiness.stableIdentityCount || 0) !== activeProfileCount) missingAccountConditions.push('active_profile_identity_incomplete')
+  if (accountReadiness.secureLoginForAll !== true) missingAccountConditions.push('secure_login_not_active_for_all')
   return {
     ready: workflow.valid
       && workflow.enabled
       && workflow.secureWorkflows.length === SECURITY_WORKFLOWS.length
       && appCheckMonitoringReady(appCheckConfig)
-      && missingGates.length === 0,
+      && missingGates.length === 0
+      && missingAccountConditions.length === 0,
     missingWorkflows: SECURITY_WORKFLOWS.filter(value => !workflow.secureWorkflows.includes(value)),
-    missingGates
+    missingGates,
+    missingAccountConditions
   }
 }

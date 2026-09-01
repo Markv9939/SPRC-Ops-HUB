@@ -33,6 +33,10 @@ export function isSecurityCompatibilityUser(user) {
   return Boolean(String(user.id || '').trim()) && ALLOWED_ROLES.has(normalizedRole(user.role))
 }
 
+export function compatibilitySessionRequiresFreshLogin(user, authPolicy = {}) {
+  return authPolicy.authScopeEnforced === true && isSecurityCompatibilityUser(user)
+}
+
 function requiredInteger(value) {
   const parsed = Number(value)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0

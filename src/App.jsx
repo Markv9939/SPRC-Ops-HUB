@@ -61,7 +61,11 @@ import {
   restoreSecurityClientSession,
   subscribeToSecurityClientSession
 } from './services/securityClientRuntime'
-import { isSecurityCompatibilityUser } from './services/securityClientSessionModel'
+import {
+  compatibilitySessionRequiresFreshLogin,
+  isSecurityCompatibilityUser
+} from './services/securityClientSessionModel'
+import { subscribeToAuthPolicy } from './services/authPolicyService'
 import { createProtectedTransport, shouldUseProtectedTransport } from './services/protectedTransportService'
 
 const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
@@ -523,6 +527,18 @@ function App() {
     localStorage.removeItem('lastActivity')
     navigate('/', { replace: true })
   }, [navigate, user?.securitySessionVersion])
+
+  useEffect(() => {
+    if (!isSecurityCompatibilityUser(user)) return undefined
+    let handled = false
+    return subscribeToAuthPolicy(policy => {
+      if (handled || !compatibilitySessionRequiresFreshLogin(user, policy)) return
+      handled = true
+      handleLogout()
+        .then(() => alert('Security was updated. Enter your six-digit PIN again to continue.'))
+        .catch(error => console.warn('Compatibility session close failed during security cutover:', error))
+    }, error => console.warn('Security policy monitoring was unavailable:', error))
+  }, [handleLogout, user])
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false)

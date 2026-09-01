@@ -1,4 +1,4 @@
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, onSnapshot } from 'firebase/firestore'
 import { db } from '../firebase'
 
 function parseBooleanEnv(value) {
@@ -20,4 +20,10 @@ export async function getAuthPolicy() {
   return {
     authScopeEnforced: parseBooleanEnv(import.meta.env?.VITE_REQUIRE_AUTH_CLAIMS)
   }
+}
+
+export function subscribeToAuthPolicy(onPolicy, onError) {
+  return onSnapshot(doc(db, 'appSettings', 'authPolicy'), snapshot => {
+    onPolicy?.({ authScopeEnforced: snapshot.exists() && snapshot.data()?.authScopeEnforced === true })
+  }, onError)
 }

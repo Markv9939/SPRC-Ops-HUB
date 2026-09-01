@@ -1,8 +1,37 @@
 # SPRC Ops Hub Progress Log
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
+
+## 2026-09-01 — Broad-activation and strict-retirement readiness reconciled
+
+### Live read-only evidence
+
+- Current source truth is `Main` `c962266`, including the merged privacy-safe v13 Android evidence. Hosting remains the verified v13 release from `30c5665`; no Functions, rules, Auth provider, security configuration, account, session, PIN, or production-data change was made during this reconciliation.
+- Privacy-safe staff status now shows all three approved Lone Mountain BHTs enrolled, two stable identities, and one profile still awaiting its first normal existing-PIN secure login. This supersedes the older statement that two profiles remained.
+- A complete active-account inventory found 9 active profiles, 0 malformed profiles, and 9 unique server-ready or safely migratable credentials. Five profiles currently have verified stable identities and six are covered by the additive secure-login allowlist. The remaining identity work is one real Lone Mountain BHT plus three active test accounts; there are no active real supervisor/admin profiles and no additional real BHT location cohort.
+- The corrected additive-cohort App Check observation gate passed over 168 hours with 75 valid privacy-safe samples across all six required groups: login 44, account/access 24, offline replay 1, transport 3, EOC 1, and issues 2. Token presence was absent in all 75 samples, no sample was malformed, and enforcement remains off. The shorter 24-hour window contained only login and transport samples and is not counted as the complete current observation.
+
+### Local closeout guard
+
+- Added a live auth-policy listener for marked compatibility sessions. When strict authorization is eventually enabled, the app signs that legacy device out and returns it to the familiar six-digit PIN screen with a plain-language message instead of leaving it in a permission-error state. Secure custom-token sessions are not affected.
+- Strengthened the compatibility-retirement model so it cannot report ready without a complete active-profile inventory, zero invalid profiles, credentials for every active profile, stable identities for every active profile, and secure login active for all profiles.
+- Added `security:compatibility-readiness`, a read-only privacy-safe production audit. It returns aggregate account/cohort counts, workflow coverage, seven-day App Check observation, strict-auth state, and exact blocker categories without exposing profile IDs, names, PINs, hashes, tokens, or record contents.
+- Added a separate checksum-backed `security:compatibility-cutover` command with status, preview, apply, and rollback modes for exactly two transitions: all-active secure login and strict authorization. Preview writes the rollback package outside the repository; apply refuses configuration drift and requires an exact phrase; rollback restores the verified setting and writes immutable audit evidence. All-active rollback atomically closes sessions outside the prior allowlist before restoring compatibility mode and then revokes their Firebase refresh tokens, recording any cleanup failure without exposing account identifiers.
+- Added a machine-checked final retirement contract. Its read-only inventory currently reports seven expected blocker groups: browser PIN trust, compatibility session markers, direct browser PIN mutation, server legacy-PIN migration, private legacy PIN endpoints, Firestore compatibility branches, and Storage compatibility branches. The final release gate will remain red until all seven are removed, while separately requiring the familiar six-digit PIN screen, protected server login/account actions, absolute 84-hour session, and current-session rule boundary to remain present.
+- The broad-activation readiness gate now also requires every profile already covered by the additive allowlist to have completed stable identity creation. This intentionally keeps the command blocked until the final Lone Mountain first login is complete, even though all 9 active credentials are ready.
+- The new command's production read-only status mode passed and reported exactly one broad-activation blocker: the current six-profile additive cohort has five stable identities. It made no write and correctly refused to claim readiness before the remaining Lone Mountain login.
+- Updated the App Check observation command so it continues working after a guarded additive staff cohort while still requiring the original three-profile synthetic canary to remain present. Its mutating canary and identity-status boundaries remain exact and unchanged.
+- Local verification: security foundation 101 passed, including four final-retirement contract tests; Firestore/Auth/Functions security contracts 44 passed (including the new all-active previously-non-enrolled login contract), Firestore rules 40 passed, Storage rules 4 passed, and the aligned non-enrolled compatibility login/reload browser gate 1 passed. The retirement inventory correctly remains pending on the seven known compatibility groups and passed all secure-behavior preservation checks. ESLint passed; the production build passed with 1,913 modules; JavaScript syntax, readiness, and `git diff --check` passed. The emulator products were green before the known Firebase CLI updater-cache shutdown error. The Functions emulator used host Node 24 because local Node 22 remains unavailable; production Functions still declare and run Node 22, so no new local Node 22 parity is claimed. The temporary emulator-only dummy secret was removed immediately. The new source remains local and undeployed at this checkpoint.
+
+### Exact remaining order
+
+1. Complete the final Lone Mountain normal PIN login, ordinary working-shift observation, and controlled rollback/re-enrollment proof.
+2. Merge and Hosting-deploy the compatibility-session cutover guard plus the guarded cutover/rollback tooling.
+3. With explicit production-data/config approval, switch secure login to all-active-profile mode while strict authorization remains off.
+4. Complete normal PIN logins and focused role/scope checks for the three remaining active test accounts; require all 9 active profiles to have stable identities.
+5. With separate final approval, enable strict authorization, verify every role/workflow/device/offline/negative gate, prove rollback, and then remove the dormant compatibility code/rule branches in a final reviewed release. App Check remains monitoring-only unless separately approved.
 
 ## 2026-08-31 — Android Chrome offline cold-start correction released and verified on the real phone
 
@@ -32,7 +61,7 @@ Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 - Production-built page-close cold offline restart: 1 passed. Independent full-Chrome-process offline restart: 1 passed with the v13 cache ready before close and the offline PIN screen visible after relaunch. Full secure offline/reconnect owner matrix: 1 passed with all 11 supported queued action types and their owner, Firebase identity, session, security-version, location, and record-version safeguards intact.
 - Security foundation: 92 passed. ESLint passed. Security-canary build passed with 1,913 modules, root asset manifest, and `v3-enabled` marker. The readiness verifier now recognizes both offline gates and reports the local implementation ready while correctly retaining the Node-parity and broad-rollout blockers. `git diff --check` passed.
 - The full matrix ran on the current Node `24.13.0` host because local Node 22 is unavailable; no fresh Node 22 parity is claimed. Its product test passed before the Firebase CLI emitted the known local updater-cache shutdown error. A temporary dummy emulator-only PIN secret was used because the workstation Firebase login is expired, then removed immediately; no production secret was read, stored, changed, or exposed.
-- The v13 correction is now merged and Hosting-deployed. The remaining cohort work is first secure login for the other two approved profiles, ordinary working-shift observation, and controlled rollback/re-enrollment evidence. Additional cohorts, strict authorization, App Check enforcement, and compatibility retirement remain paused.
+- **Superseded by the 2026-09-01 entry above:** the v13 correction is merged and Hosting-deployed; only one approved Lone Mountain profile now remains before ordinary working-shift and controlled rollback/re-enrollment evidence. Additional activation, strict authorization, App Check enforcement, and compatibility retirement remain off.
 
 ## 2026-08-30 — Guarded real-staff cohort rollout preparation started locally
 
