@@ -39,6 +39,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Global Firebase claim enforcement remains off. The familiar PIN screen uses the server-backed custom-token path for the three synthetic Test House profiles plus the approved three-profile Lone Mountain BHT cohort. Two Lone Mountain profiles have completed first secure login; one remains. Other valid profiles retain compatibility behavior until the guarded all-active-profile stage.
 - Security-foundation Phases 1–9, the complete local role/offline/device contract matrix, and the synthetic production canary are complete. Protected callables remain app-layer protected. App Check enforcement, global strict authorization, broad all-profile activation, and compatibility retirement remain disabled.
 - The v13 offline shell correction is merged and Hosting-deployed. Automated production-process evidence and Mark's real Android Chrome full-close/offline reopen both passed. A final strict-cutover guard and privacy-safe active-account readiness audit are locally tested and awaiting merge/deployment before broad activation.
+- Final compatibility cleanup now has a separate machine-checkable release gate. `npm run inspect:security-compatibility-retirement` safely inventories the old paths while they are still required; after strict cutover, `npm run verify:security-compatibility-retired` must pass before the security update can be closed.
 
 ## Recent Dashboard/Modal Behavior (Current)
 - BHT home is now a tighter action-hub experience:

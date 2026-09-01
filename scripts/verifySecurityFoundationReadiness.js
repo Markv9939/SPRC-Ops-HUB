@@ -14,6 +14,8 @@ const requiredFiles = [
   'scripts/inspectSecurityCompatibilityReadiness.js',
   'scripts/manageSecurityCompatibilityCutover.js',
   'scripts/securityCompatibilityCutoverModel.js',
+  'scripts/securityCompatibilityRetirementModel.js',
+  'scripts/verifySecurityCompatibilityRetirement.js',
   'scripts/appCheckObservationModel.js',
   'scripts/securityCanaryEvidenceModel.js',
   'scripts/securityCanaryStageModel.js',
@@ -45,6 +47,7 @@ const requiredFiles = [
   'tests/offlineReconnectMatrix.test.js',
   'tests/appCheckObservationModel.test.js',
   'tests/securityCanaryEvidenceModel.test.js',
+  'tests/securityCompatibilityRetirementModel.test.js',
   'functions/src/staffPinLoginService.js',
   'functions/src/staffAccountSecurityService.js',
   'functions/src/accessScopeSecurityService.js',
@@ -116,8 +119,10 @@ const checks = {
     && canaryManagerSource.includes('Identity status requires the verified --backup path'),
   compatibilityRetirementReadinessGatePresent: Boolean(packageJson.scripts?.['security:compatibility-readiness'])
     && Boolean(packageJson.scripts?.['security:compatibility-cutover'])
+    && Boolean(packageJson.scripts?.['verify:security-compatibility-retired'])
     && readFileSync('scripts/inspectSecurityCompatibilityReadiness.js', 'utf8').includes('strictAuthorizationReady')
     && readFileSync('scripts/securityCompatibilityCutoverModel.js', 'utf8').includes('ROLL BACK')
+    && readFileSync('scripts/securityCompatibilityRetirementModel.js', 'utf8').includes('browserPinTrustRemoved')
     && readFileSync('src/App.jsx', 'utf8').includes('compatibilitySessionRequiresFreshLogin'),
   serverIssuedWorkflowScopeClaims: indexSource.includes('manageStaffSecurityV4')
     && readFileSync('functions/src/staffPinLoginService.js', 'utf8').includes('authorizedLocations')
