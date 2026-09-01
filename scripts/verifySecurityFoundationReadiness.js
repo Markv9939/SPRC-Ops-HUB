@@ -12,6 +12,8 @@ const requiredFiles = [
   'docs/security/SECURITY_CANARY_AND_ROLLBACK.md',
   'scripts/manageSecurityFoundationCanary.js',
   'scripts/inspectSecurityCompatibilityReadiness.js',
+  'scripts/manageSecurityCompatibilityCutover.js',
+  'scripts/securityCompatibilityCutoverModel.js',
   'scripts/appCheckObservationModel.js',
   'scripts/securityCanaryEvidenceModel.js',
   'scripts/securityCanaryStageModel.js',
@@ -113,7 +115,9 @@ const checks = {
     && canaryManagerSource.includes('summarizeIdentityCanaryEvidence')
     && canaryManagerSource.includes('Identity status requires the verified --backup path'),
   compatibilityRetirementReadinessGatePresent: Boolean(packageJson.scripts?.['security:compatibility-readiness'])
+    && Boolean(packageJson.scripts?.['security:compatibility-cutover'])
     && readFileSync('scripts/inspectSecurityCompatibilityReadiness.js', 'utf8').includes('strictAuthorizationReady')
+    && readFileSync('scripts/securityCompatibilityCutoverModel.js', 'utf8').includes('ROLL BACK')
     && readFileSync('src/App.jsx', 'utf8').includes('compatibilitySessionRequiresFreshLogin'),
   serverIssuedWorkflowScopeClaims: indexSource.includes('manageStaffSecurityV4')
     && readFileSync('functions/src/staffPinLoginService.js', 'utf8').includes('authorizedLocations')

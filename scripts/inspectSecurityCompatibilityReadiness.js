@@ -180,6 +180,7 @@ export async function inspectCompatibilityReadiness({ db, auth }) {
     activeInventoryPresent: activeProfileCount > 0,
     activeProfilesValid: invalidProfileCount === 0,
     activeCredentialsReady: credentialReadyCount === activeProfileCount,
+    currentSecureLoginCohortComplete: stableIdentityCount === secureLoginCoveredCount,
     allWorkflowsReady: workflow.valid && workflow.enabled && workflow.secureWorkflows.length === SECURITY_WORKFLOWS.length,
     appCheckMonitoringReady: appCheckEvidence.ready
   }

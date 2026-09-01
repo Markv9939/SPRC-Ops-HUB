@@ -120,6 +120,7 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Read-only eligible BHT/tech candidates for one exact home location: `npm run security:staff-rollout -- --mode=candidates --project=sprc-tx-l --location=<exact-location-id>`
 - Guarded exact-cohort preview: `npm run security:staff-rollout -- --mode=preview --project=sprc-tx-l --location=<exact-location-id> --profile-ids=<comma-separated-profile-ids> --backup-dir=<absolute-path-outside-repo>`
 - Privacy-safe active-account and compatibility-retirement readiness audit: `npm run security:compatibility-readiness -- --project=sprc-tx-l`
+- Guarded all-active/strict cutover status, preview, apply, and rollback: `npm run security:compatibility-cutover -- --mode=<status|preview|apply|rollback> --project=sprc-tx-l --target=<all_active|strict_authorization>`
 - Smoke: `npm run smoke:phase9:full`
 - Preview core reset (read-only): `npm run reset:core:preview`
 - Back up core reset data (read-only): `npm run reset:core:backup`

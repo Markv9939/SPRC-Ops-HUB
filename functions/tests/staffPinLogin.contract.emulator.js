@@ -177,6 +177,28 @@ test('production canary enrollment leaves a valid non-enrolled profile on legacy
   assert.equal((await auth.listUsers()).users.length, 0)
 })
 
+test('all-active rollout gives a previously non-enrolled valid profile the secure custom-token path', async () => {
+  await db.doc('appSettings/securityFoundation').set({
+    schemaVersion: 2,
+    serverPinLoginEnabled: true,
+    clientBootstrapVersion: 3,
+    clientBootstrapEnabled: true,
+    rolloutState: 'active',
+    enabledProfileIds: ['original_canary_only']
+  })
+  await db.doc('users/all_active_bht').set(bhtProfile('275184'))
+  const result = await begin({
+    pin: '275184',
+    deviceId: 'all_active_device_01',
+    operationId: 'all_active_operation_01'
+  })
+
+  assert.equal(result.profile.id, 'all_active_bht')
+  assert.equal(typeof result.customToken, 'string')
+  assert.equal((await db.doc('staffAuthIdentities/all_active_bht').get()).exists, true)
+  assert.equal((await db.collection('staffSessions').where('profileId', '==', 'all_active_bht').get()).size, 1)
+})
+
 test('preferred server-only credentials work after migration without a client-readable legacy PIN hash', async () => {
   await enableDormantEndpoint()
   await db.doc('users/server_credential_bht').set(bhtProfile('385104', { pinHash: null }))
