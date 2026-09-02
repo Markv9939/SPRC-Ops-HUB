@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-01
 Document status: Active living blueprint
-Current `Main` reference: secure-login closeout guard PR #19 merged as `e54322b` and Hosting-deployed with `index-3Gd50sTS.js` / `App-BsqUAcaI.js`
+Current `Main` reference: secure-login closeout guard evidence PR #20 merged as `1f246db`; the guard release remains Hosting-deployed
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -33,10 +33,10 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | Two of the three approved Lone Mountain BHTs now have stable secure identities; one normal existing-PIN first login remains. The first account completed scoped workflow checks, true browser-plus-phone use, phone-only logout without ending the browser session, and the real Android Chrome full-close offline reopen. The cohort still needs ordinary working-shift observation plus controlled rollback/re-enrollment before broad activation. Exact profile, session, version, audit, and rollback details remain only in protected external evidence. |
-| **Released support** | The strict-cutover guard now monitors the live auth policy and automatically returns any remaining compatibility session to the familiar six-digit PIN screen when strict authorization is eventually enabled. The privacy-safe readiness audit, checksum-backed all-active/strict cutover and rollback command, and machine-checked final-retirement contract are merged in `e54322b`. The guard is Hosting-deployed and directly verified; it remains inert while strict authorization is off. |
-| **Paused** | Broad secure-login activation, compatibility retirement, global strict authorization, and App Check enforcement remain off. Ordinary non-enrolled staff continue using the familiar compatibility PIN flow. App Check remains monitoring-only and is not part of the enforcement cutover. |
-| **Next release sequence** | Finish the last Lone Mountain first login and cohort observation/rollback proof; deploy the compatibility-session cutover guard; activate secure login for all valid active profiles while strict authorization stays off; have the remaining active test accounts complete normal PIN login; then separately approve, apply, verify, and rollback-prove strict authorization before removing the dormant browser-trusted compatibility code. Never ask staff to share a PIN or reset one for testing. |
+| **In progress** | Secure login now covers all 9 valid active profiles with stable identities. The first strict-authorization canary passed Admin access and the scoped Supervisor Users page, then exposed unscoped Supervisor Dashboard transport and Fleet background reads. Strict authorization was immediately rolled back without closing a session; a location-scoped client fix is locally committed as `93c0edf` and awaits push/review/Hosting release plus live strict retest. |
+| **Released support** | The familiar six-digit server-verified login, persistent absolute 84-hour per-device sessions, all-active-profile secure-login mode, strict-cutover guard, readiness/rollback tooling, and monitoring-only App Check collection are live. Read-only production evidence after rollback shows 9 active profiles, 0 invalid profiles, 9 ready credentials, 9 stable identities, secure login for all active profiles, and strict authorization off. |
+| **Paused** | Global strict authorization is temporarily off after the controlled rollback. Compatibility retirement is not allowed until the scoped query fix is released and the Admin, Supervisor, BHT, workflow, device, offline, negative-access, rollback, and reactivation gates pass. App Check enforcement remains off. |
+| **Next release sequence** | Review and Hosting-release `93c0edf`; repeat the live strict Admin/Supervisor/BHT canary with settled-page console evidence; re-enable strict authorization only after that gate passes; complete the planned strict rollback/reactivation proof; then obtain separate approval for the final compatibility-code/rule retirement release. |
 
 The synthetic Test House canary now exercises the complete server PIN/custom-token foundation while preserving the six-digit screen. This is not a broad migration: non-canary profiles still use compatibility behavior, Anonymous Authentication was not enabled as a shortcut, strict global authorization is off, and App Check is monitoring-only.
 

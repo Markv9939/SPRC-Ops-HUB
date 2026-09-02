@@ -73,6 +73,20 @@ test('secure OTC supervisor transport listener is backend-scoped to OTC', async 
   expect(listenerErrors).toEqual([])
 })
 
+test('secure OTC supervisor dashboard transport summary stays backend-scoped', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'The supervisor dashboard journey runs once at desktop size.')
+  const dashboardErrors = []
+  page.on('console', message => {
+    if (/error fetching dashboard data|missing or insufficient permissions|permission-denied/i.test(message.text())) {
+      dashboardErrors.push(message.text())
+    }
+  })
+  await signIn(page, '395172', /\/dashboard\/dashboard$/)
+  await expect(page.getByRole('heading', { name: 'EOC + Compliance + Fleet Status' })).toBeVisible()
+  await page.waitForTimeout(1_000)
+  expect(dashboardErrors).toEqual([])
+})
+
 test('secure admin retains the approved all-site transport view', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'The admin transport journey runs once at desktop size.')
   await signIn(page, '737373', /\/dashboard\/dashboard$/)

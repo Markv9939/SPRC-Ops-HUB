@@ -178,6 +178,8 @@ export default function DashboardSummaryPanel({
   fleetAlerts,
   debriefAlerts = [],
   complianceItems,
+  isAdmin,
+  transportSites = [],
   inComplianceScope,
   inTransportScope,
   onNavigateTab,
@@ -378,9 +380,33 @@ export default function DashboardSummaryPanel({
       try {
         const startOfMonth = Timestamp.fromDate(dashMonth)
         const startOfNext = Timestamp.fromDate(new Date(dashMonth.getFullYear(), dashMonth.getMonth() + 1, 1))
-        const q = query(collection(db, 'transports'), where('departedAt', '>=', startOfMonth), where('departedAt', '<', startOfNext), orderBy('departedAt', 'desc'))
-        const snapshot = await getDocs(q)
-        let data = snapshot.docs.map(d => ({ id: d.id, ...d.data() })).map(item => ({ ...item, site: normalizeTransportSite(item.site) }))
+        const scopedSites = [...new Set(
+          (Array.isArray(transportSites) ? transportSites : [])
+            .map(normalizeTransportSite)
+            .filter(Boolean)
+        )]
+        const queries = isAdmin
+          ? [query(
+              collection(db, 'transports'),
+              where('departedAt', '>=', startOfMonth),
+              where('departedAt', '<', startOfNext),
+              orderBy('departedAt', 'desc')
+            )]
+          : scopedSites.map(site => query(
+              collection(db, 'transports'),
+              where('site', '==', site),
+              where('departedAt', '>=', startOfMonth),
+              where('departedAt', '<', startOfNext),
+              orderBy('departedAt', 'desc')
+            ))
+        const snapshots = await Promise.all(queries.map(scopedQuery => getDocs(scopedQuery)))
+        const merged = new Map()
+        snapshots.forEach((snapshot) => {
+          snapshot.docs.forEach((transportDoc) => {
+            merged.set(transportDoc.id, { id: transportDoc.id, ...transportDoc.data() })
+          })
+        })
+        let data = Array.from(merged.values()).map(item => ({ ...item, site: normalizeTransportSite(item.site) }))
         data = data.filter(t => inTransportScope(t.site))
         data = data.filter(t => isCompletedTransport(t))
         if (dashSite !== 'ALL') data = data.filter(t => normalizeTransportSite(t.site) === dashSite)
@@ -392,7 +418,7 @@ export default function DashboardSummaryPanel({
       setDashLoading(false)
     }
     fetchDashData()
-  }, [dashMonth, dashSite, inTransportScope])
+  }, [dashMonth, dashSite, inTransportScope, isAdmin, transportSites])
 
   const dashStats = useMemo(() => {
     const reasonCounts = {}, techCounts = {}, paperworkCounts = {}

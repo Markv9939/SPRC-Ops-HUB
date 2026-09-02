@@ -4,6 +4,23 @@ Last updated: 2026-09-01
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
+## 2026-09-01 — Strict canary rollback and Supervisor query correction
+
+### Live evidence and safe rollback
+
+- Secure login was active for all 9 valid active profiles before the first global strict-authorization canary. Admin login, reload persistence, global Users access, and the protected Transports, Debriefs, EOC, Compliance, Properties, Fleet, Cintas, Feedback, and Audit pages loaded without fresh permission errors.
+- Test Supervisor login and reload persistence passed with primary OTC scope. The Users page settled at 6 records, all BHT profiles at OTC, retained `+ Add New User`, and exposed no supervisor, admin, or RES profile. An earlier automated `Users (0)` observation was a premature loading-state capture and was superseded by the settled page plus Mark's screenshot.
+- The settled Supervisor Dashboard and Fleet page still emitted reproducible `Missing or insufficient permissions` errors from the dashboard transport summary and Fleet task-engine background reads. EOC itself loaded its published templates, but the cross-page background sync also showed the same unscoped-read risk. Strict authorization therefore did not pass the Supervisor canary.
+- With Mark's explicit approval, only global strict authorization was rolled back through the checksum-backed strict backup. The command reported `rollbackVerified: true`, closed 0 sessions, and had 0 refresh-token cleanup failures. Immediate privacy-safe readback confirmed 9 active profiles, 0 invalid, 9 credential-ready, 9 stable identities, secure login for all active profiles, strict authorization off, 91 valid monitoring-only App Check samples, and no readiness blocker.
+
+### Local correction and verification
+
+- Local commit `93c0edf` constrains the Dashboard transport summary to the Supervisor's authorized main location before Firestore evaluates the query. It also scopes Fleet vehicles, runtime, maintenance templates, and open tasks by `mainLocation`, while preserving the existing Admin all-location path.
+- EOC/debrief timing synchronization now uses exact authorized operational locations for submitted-debrief reads and checks deterministic supervisor-alert history through an authorized location query. Existing read alerts remain read; the idempotency check does not recreate them as unread.
+- Added a focused secure Supervisor dashboard browser regression and an explicit strict Firestore contract for location-scoped supervisor alert history.
+- Verification passed: security foundation 101/101; EOC 29/29; Firestore rules 40/40; Storage rules 4/4; ESLint; production build with 1,913 modules; `git diff --check`; focused secure Transports browser journeys including the new Dashboard regression; Operations Administration browser journeys for scoped Supervisor, denied BHT, and global Admin; and Debriefs/Alerts browser journeys including the exact scoped Supervisor listener. The local Functions browser runs used host Node 24 because Node 22 is unavailable, and each temporary emulator-only dummy secret was removed immediately. The Windows Playwright web-server wrapper required manual shutdown after every selected test reported `ok`; this is a runner-teardown limitation, not a product-test failure.
+- No PIN, account, session, production data, rules, Function, Auth provider, or App Check setting changed during the correction. The fix is not yet pushed, merged, deployed, or reactivated; strict authorization remains off pending review and live retest.
+
 ## 2026-09-01 — Broad-activation and strict-retirement readiness reconciled
 
 ### Live read-only evidence
