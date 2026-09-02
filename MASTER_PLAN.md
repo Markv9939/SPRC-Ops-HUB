@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-01
 Document status: Active living blueprint
-Current verified `Main` baseline: PR #22 merged as `647baaf`; the final server-only PIN/custom-token security retirement is deployed and live
+Current verified `Main` baseline: PR #22 merged as `647baaf`, with final dead-rule cleanup through PR #24; the server-only PIN/custom-token security retirement is deployed and live
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -186,7 +186,7 @@ This is the approved sequence for finishing the secure PIN/custom-token update w
 14. **Complete:** Every active profile passed the valid-profile, unique server-credential, stable-identity, and normal-login readiness boundary.
 15. **Complete:** Strict authorization was enabled, rolled back when scoped background queries exposed defects, corrected workflow-by-workflow, re-enabled, and verified. The last scoped Supervisor query correction is merged through `123dbec`.
 16. **Complete:** Browser/server/rules compatibility trust paths and obsolete downgrade/reset commands are removed. The retirement gate, 102 unit contracts, 44 security emulator contracts, strict Firestore/Storage suites, full workflow browser matrix, offline owner/replay matrix, and cold offline shell/process gates passed. App Check remains monitoring-only.
-17. **Complete:** PR #22 merged the final candidate as `647baaf`. Functions, Firestore rules, Storage rules, and Hosting deployed together; production runs 16 current Node 22 functions, the obsolete `establishPinSession` endpoint is absent, exact new Hosting assets returned HTTP 200, and the already-signed-in scoped Test House session survived a live reload with normal Home data.
+17. **Complete:** PR #22 merged the final candidate as `647baaf`. Functions, Firestore rules, Storage rules, and Hosting deployed together; production runs 16 current Node 22 functions, the obsolete `establishPinSession` endpoint is absent, exact new Hosting assets returned HTTP 200, and the already-signed-in scoped Test House session survived a live reload with normal Home data. PRs #23–24 then removed only rule helpers made unreachable by retirement, with the strict suite still green and the final Firestore rules-only release compiling without warnings.
 
 Every stage follows one gate: implement and test locally, capture rollback, deploy dormant, enable only the named cohort/workflow, test positive and negative live behavior, exercise rollback, record evidence, and only then continue. PIN resets, deactivation, session ending, production-data changes, deployments, activation, and compatibility retirement retain their explicit approval boundaries.
 
@@ -540,7 +540,7 @@ This subsection preserves the earlier local-only checkpoint. It is superseded fo
 
 | Area | Status | Evidence / limitation |
 |---|---|---|
-| Main application baseline | Released | The verified baseline is `Main` `647baaf`, including the final compatibility retirement merged in PR #22. |
+| Main application baseline | Released | The security behavior baseline is `Main` `647baaf` from PR #22, with no-behavior-change rule/documentation cleanup completed through PR #24. |
 | Shift Debrief safeguards | Released | `8339827`; focused tests, emulator/rules tests, lint/build, push, Hosting and Firestore rules deployment were reported. |
 | Issue handoff/app feedback V2 | Released and enabled | `3c11306`; feature flag version 3 was verified for the approved four operational locations at release time. Recheck before future changes because configuration can drift. |
 | Guided EOC template builder | Released under secure sessions | The mapped-session Templates/Photos and protected EOC paths now pass scoped supervisor/BHT, wrong-location, photo, offline replay, and idempotent submission gates. |

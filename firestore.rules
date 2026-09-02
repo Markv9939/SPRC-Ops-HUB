@@ -118,25 +118,9 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(authAppUserId())).data;
     }
 
-    function authRole() {
-      return hasActiveAuthProfile() ? authProfile().role : '';
-    }
-
-    function authLocations() {
-      return hasActiveAuthProfile() && authProfile().authorizedLocations is list
-        ? authProfile().authorizedLocations
-        : [];
-    }
-
     function activeAuthProfileLocations() {
       return hasActiveAuthProfile() && authProfile().authorizedLocations is list
         ? authProfile().authorizedLocations
-        : [];
-    }
-
-    function authIssueLocations() {
-      return hasActiveAuthProfile() && authProfile().issueLocationIds is list
-        ? authProfile().issueLocationIds
         : [];
     }
 
@@ -165,21 +149,6 @@ service cloud.firestore {
           );
     }
 
-    function authLocationAllowed(locationId) {
-      let normalizedLocation = locationScopeAlias(locationId);
-      let legacyLocationAllowed = (
-        (normalizedLocation == 'OTC' && ('PHP' in authLocations() || 'RTC' in authLocations()))
-        || (normalizedLocation == 'RES' && ('PHP' in authLocations()))
-      );
-      return hasActiveAuthProfile()
-        && (
-          authRole() == 'admin'
-          || locationId in authLocations()
-          || normalizedLocation in authLocations()
-          || legacyLocationAllowed
-        );
-    }
-
     function authRoleAndLocationAllowed(roles, locationId) {
       let normalizedLocation = locationScopeAlias(locationId);
       let locations = activeAuthProfileLocations();
@@ -195,31 +164,6 @@ service cloud.firestore {
           || normalizedLocation in locations
           || legacyLocationAllowed
         );
-    }
-
-    function authTransportLocationAllowed(locationId) {
-      let normalizedLocation = locationScopeAlias(locationId);
-      let locations = activeAuthProfileLocations();
-      let legacyLocationAllowed = (
-        (normalizedLocation == 'OTC' && ('PHP' in locations || 'RTC' in locations))
-        || (normalizedLocation == 'RES' && ('PHP' in locations))
-      );
-      let otcHouseScopeAllowed = normalizedLocation == 'OTC'
-        && (
-          'MESQUITE' in locations
-          || 'mesquite' in locations
-          || 'LONE_MOUNTAIN' in locations
-          || 'lone_mountain' in locations
-          || 'TEST_HOUSE' in locations
-          || 'test_house' in locations
-        );
-      let resScopeAllowed = normalizedLocation == 'RES'
-        && 'res' in locations;
-      return locationId in locations
-        || normalizedLocation in locations
-        || legacyLocationAllowed
-        || otcHouseScopeAllowed
-        || resScopeAllowed;
     }
 
     function activeEocProfileAllowed(profile, profileId, roles, locationId) {
@@ -301,11 +245,6 @@ service cloud.firestore {
           )
             ? normalizedShiftMainLocation(data.locationId)
             : '';
-    }
-
-    function fleetLocationAllowed(data) {
-      let mainLocation = fleetMainLocationFromData(data);
-      return mainLocation != '' && authLocationAllowed(mainLocation);
     }
 
     function validFleetTaskType(taskType) {
