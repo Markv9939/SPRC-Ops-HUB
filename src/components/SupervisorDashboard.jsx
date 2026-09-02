@@ -2037,6 +2037,8 @@ function SupervisorDashboard({
           fleetAlerts={fleetAlerts}
           debriefAlerts={debriefAlerts}
           complianceItems={complianceItems}
+          isAdmin={isAdmin}
+          transportSites={scopedTransportSites}
           inComplianceScope={inComplianceScope}
           inTransportScope={inTransportScope}
           onNavigateTab={setActiveTab}

@@ -231,8 +231,12 @@ function isAcknowledgedBy(debrief, userId) {
 
 async function queueUniqueAlert(writeOperations, alertId, payload) {
   const alertRef = doc(db, 'alerts', alertId)
-  const existingSnap = await getDoc(alertRef)
-  if (existingSnap.exists()) return false
+  const existingSnap = await getDocs(query(
+    collection(db, 'alerts'),
+    where('audience', '==', 'supervisor'),
+    where('locationId', '==', payload.locationId)
+  ))
+  if (existingSnap.docs.some(alertDoc => alertDoc.id === alertId)) return false
   writeOperations.push(batch => batch.set(alertRef, {
       ...payload,
       alertKey: alertId,
@@ -244,7 +248,7 @@ async function queueUniqueAlert(writeOperations, alertId, payload) {
   return true
 }
 
-async function syncDebriefTimingAlerts({ user, assignments, timingConfig, writeOperations }) {
+async function syncDebriefTimingAlerts({ user, assignments, timingConfig, writeOperations, exactLocationIds = [] }) {
   if (!isSupervisorRole(user?.role) && !isAdminRole(user?.role)) return 0
 
   const now = new Date()
@@ -292,9 +296,15 @@ async function syncDebriefTimingAlerts({ user, assignments, timingConfig, writeO
     if (queued) alerts += 1
   }
 
-  const debriefsSnap = await getDocs(query(collection(db, 'shiftDebriefs'), where('status', '==', 'submitted')))
-  for (const debriefDoc of debriefsSnap.docs) {
+  const debriefSnapshots = isAdminRole(user?.role)
+    ? [await getDocs(query(collection(db, 'shiftDebriefs'), where('status', '==', 'submitted')))]
+    : await Promise.all(exactLocationIds.map(locationId => getDocs(query(
+        collection(db, 'shiftDebriefs'),
+        where('locationId', '==', locationId)
+      ))))
+  for (const debriefDoc of debriefSnapshots.flatMap(snapshot => snapshot.docs)) {
     const debrief = { id: debriefDoc.id, ...debriefDoc.data() }
+    if (debrief.status !== 'submitted') continue
     if (!isOtcTimedShift(debrief.receivingShiftId || getNextShiftId(debrief.shiftId), timingConfig)) continue
     if (!hasTimestampPassed(debrief.incomingAcknowledgmentLateAt, now)) continue
 
@@ -366,12 +376,14 @@ async function runEocTaskSyncForUserScope(user) {
   const timingConfig = await getShiftTimingConfig()
   const normalizedUserId = String(user.id || '').trim()
   const assignmentDocs = []
+  const exactLocationIds = isSupervisorRole(user.role)
+    ? getExactOperationalLocationIdsForUser(user)
+    : []
 
   if (isBhtRole(user.role)) {
     const assignmentSnap = await getDoc(doc(db, 'shiftAssignments', `asg_${normalizedUserId}`))
     if (assignmentSnap.exists()) assignmentDocs.push(assignmentSnap)
   } else if (isSupervisorRole(user.role)) {
-    const exactLocationIds = getExactOperationalLocationIdsForUser(user)
     if (exactLocationIds.length === 0) return { created: 0, updated: 0, scanned: 0, alerts: 0 }
     const assignmentsSnap = await getDocs(
       query(collection(db, 'shiftAssignments'), where('locationId', 'in', exactLocationIds))
@@ -535,7 +547,8 @@ async function runEocTaskSyncForUserScope(user) {
     user,
     assignments: assignmentsForScope,
     timingConfig,
-    writeOperations
+    writeOperations,
+    exactLocationIds
   })
 
   await commitFirestoreWritesInChunks(writeOperations, () => writeBatch(db))

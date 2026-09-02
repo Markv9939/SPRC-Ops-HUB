@@ -2708,6 +2708,13 @@ test('strict debrief and supervisor-alert list queries require backend location 
   )))
   assert.equal(scopedAlerts.docs.some(item => item.id === 'debrief_scope_otc'), true)
   assert.equal(scopedAlerts.docs.some(item => item.id === 'debrief_scope_res'), false)
+  const scopedAlertHistory = await assertSucceeds(getDocs(query(
+    collection(supervisorDb, 'alerts'),
+    where('audience', '==', 'supervisor'),
+    where('locationId', '==', 'test_house')
+  )))
+  assert.equal(scopedAlertHistory.docs.some(item => item.id === 'debrief_scope_otc'), true)
+  assert.equal(scopedAlertHistory.docs.some(item => item.id === 'debrief_scope_res'), false)
   await assertFails(getDocs(query(
     collection(supervisorDb, 'alerts'),
     where('audience', '==', 'supervisor'),

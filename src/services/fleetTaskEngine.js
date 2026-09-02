@@ -337,10 +337,31 @@ async function commitOperationsInChunks(operations) {
   }
 }
 
-async function loadActiveVehiclesForMainLocations(allowedMainLocations) {
-  const snap = await getDocs(collection(db, 'eocVehicles'))
+async function loadMainLocationScopedDocs(collectionName, allowedMainLocations, includeAll = false) {
+  const normalizedLocations = [...new Set(
+    (Array.isArray(allowedMainLocations) ? allowedMainLocations : [])
+      .map(value => normalizeString(value).toUpperCase())
+      .filter(Boolean)
+  )]
+  if (!includeAll && normalizedLocations.length === 0) return []
+
+  const snapshots = includeAll
+    ? [await getDocs(collection(db, collectionName))]
+    : await Promise.all(normalizedLocations.map(mainLocation => getDocs(query(
+        collection(db, collectionName),
+        where('mainLocation', '==', mainLocation)
+      ))))
+  const rows = new Map()
+  snapshots.forEach((snapshot) => {
+    snapshot.docs.forEach((docSnap) => rows.set(docSnap.id, docSnap))
+  })
+  return Array.from(rows.values())
+}
+
+async function loadActiveVehiclesForMainLocations(allowedMainLocations, includeAll = false) {
+  const docs = await loadMainLocationScopedDocs('eocVehicles', allowedMainLocations, includeAll)
   const allowed = new Set(Array.isArray(allowedMainLocations) ? allowedMainLocations : [])
-  return snap.docs
+  return docs
     .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
     .filter(vehicle => vehicle?.active !== false)
     .filter((vehicle) => {
@@ -350,19 +371,19 @@ async function loadActiveVehiclesForMainLocations(allowedMainLocations) {
     })
 }
 
-async function loadRuntimeMap() {
-  const snap = await getDocs(collection(db, 'fleetVehicleRuntime'))
+async function loadRuntimeMap(allowedMainLocations, includeAll = false) {
+  const docs = await loadMainLocationScopedDocs('fleetVehicleRuntime', allowedMainLocations, includeAll)
   const map = new Map()
-  snap.docs.forEach((docSnap) => {
+  docs.forEach((docSnap) => {
     map.set(docSnap.id, { id: docSnap.id, ...docSnap.data() })
   })
   return map
 }
 
-async function loadTemplateMapByMainLocation() {
-  const snap = await getDocs(collection(db, 'fleetMaintenanceTemplates'))
+async function loadTemplateMapByMainLocation(allowedMainLocations, includeAll = false) {
+  const docs = await loadMainLocationScopedDocs('fleetMaintenanceTemplates', allowedMainLocations, includeAll)
   const map = new Map()
-  snap.docs.forEach((docSnap) => {
+  docs.forEach((docSnap) => {
     const data = docSnap.data() || {}
     const mainLocation = normalizeString(data.mainLocation).toUpperCase()
     if (!mainLocation || data.active === false) return
@@ -373,13 +394,10 @@ async function loadTemplateMapByMainLocation() {
   return map
 }
 
-async function loadOpenTaskMap() {
-  const [upcomingSnap, overdueSnap] = await Promise.all([
-    getDocs(query(collection(db, 'fleetTasks'), where('status', '==', 'upcoming'))),
-    getDocs(query(collection(db, 'fleetTasks'), where('status', '==', 'overdue')))
-  ])
+async function loadOpenTaskMap(allowedMainLocations, includeAll = false) {
+  const docs = await loadMainLocationScopedDocs('fleetTasks', allowedMainLocations, includeAll)
   const map = new Map()
-  ;[...upcomingSnap.docs, ...overdueSnap.docs].forEach((docSnap) => {
+  docs.filter(docSnap => OPEN_STATUSES.includes(normalizeString(docSnap.data()?.status))).forEach((docSnap) => {
     map.set(docSnap.id, { id: docSnap.id, ...docSnap.data() })
   })
   return map
@@ -555,11 +573,12 @@ export async function syncFleetTasksForUserScope(user) {
     return { created: 0, updated: 0, alerts: 0, evaluated: 0, vehicles: 0 }
   }
 
+  const includeAll = isAdminRole(user?.role)
   const [vehicles, runtimeMap, templateMapByMainLocation, openTaskMap] = await Promise.all([
-    loadActiveVehiclesForMainLocations(allowedMainLocations),
-    loadRuntimeMap(),
-    loadTemplateMapByMainLocation(),
-    loadOpenTaskMap()
+    loadActiveVehiclesForMainLocations(allowedMainLocations, includeAll),
+    loadRuntimeMap(allowedMainLocations, includeAll),
+    loadTemplateMapByMainLocation(allowedMainLocations, includeAll),
+    loadOpenTaskMap(allowedMainLocations, includeAll)
   ])
 
   const now = new Date()
