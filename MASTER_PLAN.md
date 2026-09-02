@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-01
 Document status: Active living blueprint
-Current verified `Main` baseline: PR #21 merged as `123dbec`; the compatibility-retirement release candidate is being completed in the isolated closeout branch
+Current verified `Main` baseline: PR #22 merged as `647baaf`; the final server-only PIN/custom-token security retirement is deployed and live
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -33,10 +33,10 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | Final compatibility retirement is locally implemented and fully regression-tested. The release candidate removes browser PIN trust, legacy/Anonymous fallback, direct browser account/PIN mutation, permissive rules branches, obsolete cutover/reset commands, and stale test-server behavior while preserving the staff-facing PIN experience and workflows. It is not yet committed, merged, or deployed. |
-| **Released support** | Production already uses server-verified six-digit PIN login for all active profiles, stable custom-token identity, persistent absolute 84-hour independent device sessions, strict authorization, workflow-scoped claims, protected server actions, and monitoring-only App Check. The strict Supervisor query correction is merged through `123dbec`. |
+| **Complete** | Final compatibility retirement is merged and deployed. Browser PIN trust, legacy/Anonymous fallback, direct browser account/PIN mutation, permissive rules branches, obsolete cutover/reset commands, and the obsolete `establishPinSession` endpoint are removed while the staff-facing PIN experience and workflows remain intact. |
+| **Released support** | Production uses server-verified six-digit PIN login for all active profiles, stable custom-token identity, persistent absolute 84-hour independent device sessions, strict authorization, workflow-scoped claims, protected server actions, and monitoring-only App Check. The final release is merged through `647baaf`. |
 | **Paused** | App Check enforcement remains off by design. No PIN reset, deactivation, session-ending, or production-data mutation is part of the compatibility-retirement release. |
-| **Next release sequence** | Finish document/diff verification, commit and review the retirement candidate, deploy Functions + Firestore rules + Storage rules + Hosting as one coordinated release, verify the live six-digit login/reload and read-only role/workflow scope, then record the final release evidence. |
+| **Next release sequence** | The security-foundation update is closed. Future work should begin from `Main`, preserve this trust boundary, and use the normal Orient / implement / verify / Close out sequence for the next product update. |
 
 The staged canary and staff rollout are complete. The current closeout preserves the familiar six-digit screen while making the server-verified custom-token identity the only supported login path. Anonymous Authentication is not used, and App Check remains monitoring-only.
 
@@ -103,7 +103,7 @@ This section is only for large choices that are difficult to reverse or that con
 - **Decision:** Staff should continue using the simple six-digit PIN screen. The planned security foundation will validate the PIN on the server and issue a stable Firebase identity tied to the existing Ops profile.
 - **Reason:** Staff need a simple login, while protected records, photos, roles, and locations need consistent server proof.
 - **Effect:** Do not enable Anonymous Authentication or strict global enforcement as a shortcut. Build and prove the replacement in staged workflow groups.
-- **Status:** Current production direction and locally completed retirement contract. All active profiles use the server PIN/custom-token path; the compatibility fallback is removed in the release candidate.
+- **Status:** Current production behavior. All active profiles use the server PIN/custom-token path; the compatibility fallback and obsolete compatibility endpoint are removed.
 
 ### Use persistent 84-hour per-device sessions with automatic all-device revocation
 
@@ -185,8 +185,8 @@ This is the approved sequence for finishing the secure PIN/custom-token update w
 13. **Complete:** Secure login was changed to all-active-profile mode while strict authorization remained off for observation.
 14. **Complete:** Every active profile passed the valid-profile, unique server-credential, stable-identity, and normal-login readiness boundary.
 15. **Complete:** Strict authorization was enabled, rolled back when scoped background queries exposed defects, corrected workflow-by-workflow, re-enabled, and verified. The last scoped Supervisor query correction is merged through `123dbec`.
-16. **Locally complete; release pending:** Browser/server/rules compatibility trust paths and obsolete downgrade/reset commands are removed. The retirement gate, 102 unit contracts, 44 security emulator contracts, strict Firestore/Storage suites, full workflow browser matrix, offline owner/replay matrix, and cold offline shell/process gates passed. App Check remains monitoring-only.
-17. **Final release closeout in progress:** Commit/review/merge the exact candidate; deploy Functions, Firestore rules, Storage rules, and Hosting together; verify live six-digit login/reload and read-only role/workflow scope; then record exact release evidence and close the security update.
+16. **Complete:** Browser/server/rules compatibility trust paths and obsolete downgrade/reset commands are removed. The retirement gate, 102 unit contracts, 44 security emulator contracts, strict Firestore/Storage suites, full workflow browser matrix, offline owner/replay matrix, and cold offline shell/process gates passed. App Check remains monitoring-only.
+17. **Complete:** PR #22 merged the final candidate as `647baaf`. Functions, Firestore rules, Storage rules, and Hosting deployed together; production runs 16 current Node 22 functions, the obsolete `establishPinSession` endpoint is absent, exact new Hosting assets returned HTTP 200, and the already-signed-in scoped Test House session survived a live reload with normal Home data.
 
 Every stage follows one gate: implement and test locally, capture rollback, deploy dormant, enable only the named cohort/workflow, test positive and negative live behavior, exercise rollback, record evidence, and only then continue. PIN resets, deactivation, session ending, production-data changes, deployments, activation, and compatibility retirement retain their explicit approval boundaries.
 
@@ -468,8 +468,8 @@ These rules apply to current and future work:
 
 ### Current production and release-candidate state
 
-- The verified production source baseline is `Main` `123dbec`, with all-active server PIN/custom-token login and strict authorization already operating.
-- The final local release candidate removes the remaining browser-trusted PIN lookup/hash code, compatibility session marker, Anonymous/legacy fallback, direct browser PIN/account mutation, server migration/private legacy endpoint code, and Firestore/Storage compatibility branches.
+- The verified production source baseline is `Main` `647baaf`, with all-active server PIN/custom-token login, strict authorization, and final compatibility retirement operating.
+- The released system removes browser-trusted PIN lookup/hash code, compatibility session markers, Anonymous/legacy fallback, direct browser PIN/account mutation, server migration/private legacy endpoint code, and Firestore/Storage compatibility branches.
 - Server-only salted credentials, rate limiting, stable UID mappings, current per-device session records, security-version revocation, workflow claims, protected account actions, and protected operational Functions remain.
 - The familiar six-digit screen, absolute 84-hour same-device persistence, independent multi-device sessions, one-device logout, all-device security revocation, scoped Users management, and original-owner offline replay remain required behavior.
 - App Check remains monitoring-only and unenforced. Anonymous Authentication is neither needed nor used.
@@ -488,7 +488,7 @@ This subsection preserves the earlier local-only checkpoint. It is superseded fo
 7. **App Check monitoring — production observation complete, not enforced:** The client and Functions record only presence/absence. The 24-hour aggregate covered login, account/access, offline replay, transport, EOC, and issue groups across 63 samples; all 63 recorded a missing token. Enforcement remains explicitly false. This proves the monitoring trail is complete, not that enforcement is safe to enable.
 8. **Canary and rollback — complete for the three synthetic profiles:** Every cumulative workflow stage passed guarded advance, live verification, rollback, and reactivation. The exact process and current boundary are in [`docs/security/SECURITY_CANARY_AND_ROLLBACK.md`](docs/security/SECURITY_CANARY_AND_ROLLBACK.md).
 9. **Protected EOC and issue mutations — locally complete and dormant:** The expression-limit-sensitive EOC submission and issue lifecycle writes now have versioned server transactions with current-session, role/location/owner, optimistic-version, idempotency, recurrence, alert, and immutable-audit protection. Strict browser writes are denied only for the selected workflow. See [`docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md`](docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md).
-10. **Retire compatibility mode — locally complete, release pending:** Mark authorized continuous completion. The runtime/rules retirement gate is green, obsolete downgrade/reset commands are removed, and the complete unit/emulator/browser/offline matrix passed. Commit/review/deployment and final live read-only verification remain before closeout.
+10. **Retire compatibility mode — complete and released:** The runtime/rules retirement gate is green, obsolete downgrade/reset commands and endpoint are removed, the complete unit/emulator/browser/offline matrix passed, and PR #22 plus the coordinated production deployment and live reload verification completed the closeout.
 
 ### Required proof before each security gate
 
@@ -540,12 +540,12 @@ This subsection preserves the earlier local-only checkpoint. It is superseded fo
 
 | Area | Status | Evidence / limitation |
 |---|---|---|
-| Main application baseline | Released | The verified baseline for final retirement is `Main` `123dbec`, including the strict Supervisor location-query correction merged in PR #21. |
+| Main application baseline | Released | The verified baseline is `Main` `647baaf`, including the final compatibility retirement merged in PR #22. |
 | Shift Debrief safeguards | Released | `8339827`; focused tests, emulator/rules tests, lint/build, push, Hosting and Firestore rules deployment were reported. |
 | Issue handoff/app feedback V2 | Released and enabled | `3c11306`; feature flag version 3 was verified for the approved four operational locations at release time. Recheck before future changes because configuration can drift. |
 | Guided EOC template builder | Released under secure sessions | The mapped-session Templates/Photos and protected EOC paths now pass scoped supervisor/BHT, wrong-location, photo, offline replay, and idempotent submission gates. |
-| Security foundation | Final compatibility-retirement release candidate locally green | All-active server PIN/custom-token login and strict authorization are already live. The final candidate removes remaining browser/legacy trust and obsolete downgrade commands while preserving the six-digit UX, 84-hour device sessions, account controls, all protected workflows, and offline work. Coordinated merge/deployment/live verification remain. App Check enforcement stays off. |
-| Documentation foundation | Restored and locally updated | Authoritative `MASTER_PLAN.md` and `PROGRESS_LOG.md` drafts plus project guidance, README links, and document hierarchy are restored and reconciled in this isolated branch; no production changes. |
+| Security foundation | Complete and released | All-active server PIN/custom-token login, strict authorization, server-only PIN credentials, 84-hour device sessions, scoped account controls, protected workflows, safe offline work, and final compatibility retirement are live through `647baaf`. App Check enforcement stays off by design. |
+| Documentation foundation | Restored and current | `MASTER_PLAN.md`, `PROGRESS_LOG.md`, project guidance, README links, and the approved two-document hierarchy reflect the final released security state. |
 
 Current configuration and live Hosting state can change after this document is written. Recheck before any release or production decision.
 

@@ -4,6 +4,28 @@ Last updated: 2026-09-01
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
+## 2026-09-01 — Secure-login compatibility retirement released and closed
+
+### Source and production release
+
+- Committed the fully verified retirement candidate as `936d0c6`, pushed the isolated closeout branch, opened PR #22, confirmed GitHub reported it clean and mergeable with no configured automated check runs, and merged it to case-sensitive `Main` as `647baaf`.
+- Rebuilt the merged source successfully with 1,908 modules. The exact released Hosting assets include `index-DcU_jlEF.js`, `index-CNuLJj3A.css`, and `App-ChiYovC5.js`.
+- Deployed Functions, Firestore rules, Storage rules, and Hosting together to Firebase project `sprc-tx-l`. Storage and Firestore rules compiled and released successfully; Hosting uploaded 17 files and completed its release.
+- All 16 current Functions updated successfully on the declared Node 22 production runtime. The obsolete `establishPinSession` Function was deleted. Post-deploy inventory confirms `beginStaffPinSessionV2` and `manageStaffSecurityV4` are present and `establishPinSession` is absent.
+
+### Live verification
+
+- Production `/`, `asset-manifest.json`, and `sw.js` returned HTTP 200. Live HTML referenced the expected main/CSS bundles, and the manifest referenced the expected App bundle.
+- The already-signed-in Test House BHT session remained at `/home` after a live reload and rendered the correct scoped assignment, transport, issue, House/Van EOC, debrief, and quick-action data. This was a read-only reload smoke, not a new PIN or data-mutation test.
+- The complete pre-release evidence remains: 102 security units, 44 security emulator contracts, 17 current Firestore strict/negative rules tests, 4 Storage rules tests, 8 Functions model tests, 9 Functions/emulator tests, 37 selected workflow browser journeys, the offline owner/replay matrix, and both production-built cold-offline restart gates.
+- After deployment, the Firestore compiler identified 16 helpers made unreachable by compatibility retirement. They were removed locally; the strict Firestore suite again passed 17 current tests with 23 intentionally retired cases skipped and 0 failures. This cleanup is a no-behavior-change follow-up to be merged and rules-deployed as the final documentation/rules closeout.
+
+### Final boundary
+
+- No production PIN was reset or changed, no account was created/deactivated/deleted, no production session was deliberately ended, and no operational record, Auth provider, protected security configuration, or App Check setting was changed by this release.
+- App Check remains monitoring-only and unenforced by design. Anonymous Authentication is not used. The six-digit staff experience, absolute 84-hour independent device sessions, one-device logout, automatic all-device security revocation, scoped supervisor BHT management, protected workflows, and supported offline work remain the current production contract.
+- The security-foundation update is complete. Future feature work should preserve this boundary rather than restoring compatibility, Anonymous Auth, browser PIN hashes, or direct browser security mutations.
+
 ## 2026-09-01 — Final compatibility-retirement release candidate completed locally
 
 ### Scope and behavior preserved
@@ -36,9 +58,9 @@ Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
 ### Release/data boundary
 
-- This entry records local work only. Nothing in this release candidate has yet been committed, pushed, merged, deployed, or activated.
+- **Superseded by the release entry above:** this entry records the pre-release local checkpoint; the candidate is now committed, merged through PR #22 as `647baaf`, and deployed.
 - No PIN was reset or changed, no account was created/deactivated/deleted, no session was ended in production, no production record/config/Auth provider/App Check setting was changed, and Anonymous Authentication was not enabled.
-- Remaining closeout: final diff/document checks, commit/review/merge, coordinated Functions + Firestore rules + Storage rules + Hosting deployment, read-only live login/reload/role/workflow smoke, and final release evidence.
+- Remaining closeout from this historical checkpoint was completed in the release entry above.
 
 ## 2026-09-01 — Strict canary rollback and Supervisor query correction
 

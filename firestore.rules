@@ -16,10 +16,6 @@ service cloud.firestore {
              || request.resource.data.createdAt == resource.data.createdAt;
     }
 
-    function validRole(role) {
-      return role in ['bht', 'supervisor', 'admin', 'tech'];
-    }
-
     function roleIsBht(role) {
       return role == 'bht' || role == 'tech';
     }
@@ -36,18 +32,6 @@ service cloud.firestore {
               ? 'RES'
               : ''
           );
-    }
-
-    function validMainLocation(locationId) {
-      return normalizedMainLocation(locationId) != '';
-    }
-
-    function validHouseId(houseId) {
-      return houseId in ['MESQUITE', 'LONE_MOUNTAIN', 'TEST_HOUSE'];
-    }
-
-    function validVanId(vanId) {
-      return vanId in ['van_1', 'van_2', 'van_3', 'van_4', 'van_test'];
     }
 
     function validShiftId(shiftId) {
@@ -238,44 +222,6 @@ service cloud.firestore {
         || resScopeAllowed;
     }
 
-    function authTransportWriteAllowed(data) {
-      return hasActiveAuthProfile()
-        && data.site in ['OTC', 'RES']
-        && authProfile().role in ['bht', 'tech', 'supervisor', 'admin']
-        && (
-          authProfile().role == 'admin'
-          || authTransportLocationAllowed(data.site)
-        )
-        && (
-          authProfile().role in ['supervisor', 'admin']
-          || data.createdByUserId == authAppUserId()
-        );
-    }
-
-    function authTransportDeleteAllowed(data) {
-      return authRoleAllowed(['admin'])
-        || (
-          authRoleAllowed(['bht', 'tech'])
-          && data.site in ['OTC', 'RES']
-          && authTransportLocationAllowed(data.site)
-          && data.createdByUserId == authAppUserId()
-          && data.status in ['open', 'arrived']
-        );
-    }
-
-    function exactIssueLocationAllowed(locationId) {
-      return hasActiveAuthProfile()
-        && (
-          authRole() == 'admin'
-          || locationId in authIssueLocations()
-          || (
-            exists(/databases/$(database)/documents/issueAccess/$(authAppUserId()))
-            && get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.active == true
-            && locationId in get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.locationIds
-          )
-        );
-    }
-
     function activeEocProfileAllowed(profile, profileId, roles, locationId) {
       let normalizedLocation = locationScopeAlias(locationId);
       let locations = 'authorizedLocations' in profile && profile.authorizedLocations is list
@@ -341,85 +287,6 @@ service cloud.firestore {
         );
     }
 
-    function validTemplateLibraryData(data) {
-      return data.keys().hasAll(['name', 'eocType', 'items', 'status'])
-        && data.name is string
-        && data.name.size() > 0
-        && data.eocType in ['house', 'van']
-        && data.items is list
-        && data.status in ['active', 'archived']
-        && (!('itemSchemaVersion' in data) || data.itemSchemaVersion is int)
-        && (!('publishedVersion' in data) || data.publishedVersion is int)
-        && (!('publishedVersionId' in data) || data.publishedVersionId == null || data.publishedVersionId is string)
-        && (!('ownerUserId' in data) || data.ownerUserId == null || data.ownerUserId is string)
-        && (!('ownerAuthUid' in data) || data.ownerAuthUid == null || data.ownerAuthUid is string)
-        && (!('ownerName' in data) || data.ownerName == null || data.ownerName is string);
-    }
-
-    function templateCreateAllowed() {
-      return authRoleAllowed(['admin'])
-        || (
-          authRoleAllowed(['supervisor'])
-          && request.auth != null
-          && request.resource.data.ownerAuthUid is string
-          && request.resource.data.ownerAuthUid == request.auth.uid
-        );
-    }
-
-    function templateUpdateAllowed() {
-      return authRoleAllowed(['admin'])
-        || (
-          authRoleAllowed(['supervisor'])
-          && request.auth != null
-          && resource.data.ownerAuthUid is string
-          && request.auth.uid == resource.data.ownerAuthUid
-          && request.resource.data.ownerAuthUid == resource.data.ownerAuthUid
-          && request.resource.data.ownerUserId == resource.data.ownerUserId
-        );
-    }
-
-    function validTemplateAssignmentData(data) {
-      return data.keys().hasAll(['locationId', 'shiftId', 'eocType', 'defaultTemplateId'])
-        && data.locationId is string
-        && data.shiftId is string
-        && validShiftForLocation(data.locationId, data.shiftId)
-        && data.eocType in ['house', 'van']
-        && data.defaultTemplateId is string
-        && data.defaultTemplateId.size() > 0
-        && (!('defaultTemplateName' in data) || data.defaultTemplateName == null || data.defaultTemplateName is string)
-        && (!('defaultTemplateVersion' in data) || data.defaultTemplateVersion == null || data.defaultTemplateVersion is int)
-        && (!('defaultTemplateVersionId' in data) || data.defaultTemplateVersionId == null || data.defaultTemplateVersionId is string);
-    }
-
-    function validTemplateVersionData(data) {
-      return data.keys().hasAll([
-          'templateId', 'templateName', 'eocType', 'items', 'status',
-          'versionNumber', 'ownerAuthUid', 'publishedByUserId'
-        ])
-        && data.templateId is string
-        && data.templateId.size() > 0
-        && data.templateName is string
-        && data.templateName.size() > 0
-        && data.eocType in ['house', 'van']
-        && data.items is list
-        && data.status in ['active', 'archived']
-        && data.versionNumber is int
-        && data.versionNumber > 0
-        && (data.ownerAuthUid == null || data.ownerAuthUid is string)
-        && data.publishedByUserId != null
-        && data.publishedByUserId is string
-        && (!('itemSchemaVersion' in data) || data.itemSchemaVersion is int);
-    }
-
-    function templateVersionCreateAllowed() {
-      return authRoleAllowed(['admin'])
-        || (
-          authRoleAllowed(['supervisor'])
-          && request.auth != null
-          && request.resource.data.ownerAuthUid == request.auth.uid
-        );
-    }
-
     function fleetMainLocationFromData(data) {
       return (
         ('mainLocation' in data)
@@ -439,22 +306,6 @@ service cloud.firestore {
     function fleetLocationAllowed(data) {
       let mainLocation = fleetMainLocationFromData(data);
       return mainLocation != '' && authLocationAllowed(mainLocation);
-    }
-
-    function fleetRuntimeLocationAllowed(data) {
-      return (
-        (
-          ('mainLocation' in data)
-          && data.mainLocation is string
-          && data.mainLocation.size() > 0
-          && authLocationAllowed(data.mainLocation)
-        )
-        || (
-          data.vehicleId is string
-          && exists(/databases/$(database)/documents/eocVehicles/$(data.vehicleId))
-          && fleetLocationAllowed(get(/databases/$(database)/documents/eocVehicles/$(data.vehicleId)).data)
-        )
-      );
     }
 
     function validFleetTaskType(taskType) {
@@ -1002,34 +853,6 @@ service cloud.firestore {
           && validVersionField(request.resource.data);
         allow update, delete: if false;
       }
-    }
-
-    function validBhtResolutionTransition(before, after) {
-      return before.status in ['open', 'in_progress']
-        && after.status == 'pending_supervisor_review'
-        && after.locationId == before.locationId
-        && after.version == before.version + 1
-        && after.latestActivity.eventType == 'resolution_submitted'
-        && after.latestActivity.actorUserId == after.resolutionSubmittedByUserId
-        && after.resolutionSubmittedNotes is string
-        && after.resolutionSubmittedNotes.size() > 0
-        && after.diff(before).affectedKeys().hasOnly([
-          'status', 'version', 'latestActivity',
-          'resolutionSubmittedNotes', 'resolutionSubmittedAt',
-          'resolutionSubmittedByUserId', 'resolutionSubmittedByName', 'updatedAt'
-        ]);
-    }
-
-    function strictBhtIssueActor(data) {
-      let userId = authAppUserId();
-      let profile = get(/databases/$(database)/documents/users/$(userId)).data;
-      return signedIn()
-        && userId != ''
-        && profile.active == true
-        && profile.role in ['bht', 'tech']
-        && profile.issueLocationIds is list
-        && data.locationId in profile.issueLocationIds
-        && data.resolutionSubmittedByUserId == userId;
     }
 
     // App feedback is intentionally separate from operational EOC issues.
