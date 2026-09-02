@@ -4,10 +4,10 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ============================================================================
-    // PIN-COMPATIBLE AUTH MODEL
+    // SERVER-VERIFIED PIN / FIREBASE SESSION MODEL
     // ============================================================================
-    // PIN mode uses the application-selected `users/{id}` profile. Strict mapped
-    // Firebase Auth remains available behind `authScopeEnforced` for rollback.
+    // Every protected browser request must use the mapped Firebase identity and
+    // a current server-issued staff session.
     // ============================================================================
 
     // Helper: prevent createdAt from being changed after creation
@@ -105,91 +105,8 @@ service cloud.firestore {
       return ('location' in data) ? data.location : (('site' in data) ? data.site : '');
     }
 
-    function validBhtWriteData(data) {
-      let mainLocation = normalizedMainLocation(userLocationValue(data));
-      return roleIsBht(data.role)
-        && (
-          (data.deleted == true && data.active == false)
-          || (
-            validMainLocation(userLocationValue(data))
-            && data.vanId is string
-            && validVanId(data.vanId)
-            && data.shiftId is string
-            && validShiftForMainLocation(mainLocation, data.shiftId)
-            && data.locationId is string
-            && (
-              mainLocation == 'OTC'
-                ? (
-                  data.house is string
-                  && validHouseId(data.house)
-                  && data.locationId in ['mesquite', 'lone_mountain', 'test_house']
-                  && data.vanId in ['van_1', 'van_2', 'van_4', 'van_test']
-                )
-                : (
-                  mainLocation == 'RES'
-                  && data.locationId == 'res'
-                  && data.vanId == 'van_3'
-                  && (
-                    !('house' in data)
-                    || data.house == null
-                    || data.house == ''
-                  )
-                )
-              )
-            )
-          );
-    }
-
-    function validSupervisorWriteData(data) {
-      return data.role == 'supervisor'
-        && (
-          (data.deleted == true && data.active == false)
-          || validMainLocation(userLocationValue(data))
-        )
-        && (
-          !('house' in data)
-          || data.house == null
-          || data.house == ''
-        )
-        && (
-          !('vanId' in data)
-          || data.vanId == null
-          || data.vanId == ''
-        );
-    }
-
-    function validAdminWriteData(data) {
-      return data.role == 'admin'
-        && userLocationValue(data) == 'GLOBAL';
-    }
-
     function signedIn() {
       return request.auth != null;
-    }
-
-    function hasAuthScopeClaims() {
-      return signedIn()
-        && request.auth.token.role is string
-        && request.auth.token.locations is list;
-    }
-
-    function authScopeEnforced() {
-      return exists(/databases/$(database)/documents/appSettings/authPolicy)
-        && get(/databases/$(database)/documents/appSettings/authPolicy).data.authScopeEnforced == true;
-    }
-
-    function hasLegacyAuthSession() {
-      return !authScopeEnforced();
-    }
-
-    function authEmail() {
-      return signedIn() && request.auth.token.email is string
-        ? request.auth.token.email.lower()
-        : '';
-    }
-
-    function authEmailVerified() {
-      return signedIn() && request.auth.token.email_verified == true;
     }
 
     function hasAuthUidMapping() {
@@ -240,8 +157,7 @@ service cloud.firestore {
     }
 
     function authRoleAllowed(roles) {
-      return hasLegacyAuthSession()
-        || (hasActiveAuthProfile() && authProfile().role in roles);
+      return hasActiveAuthProfile() && authProfile().role in roles;
     }
 
     // Map house location IDs to supervisor site scopes used in auth claims.
@@ -271,15 +187,13 @@ service cloud.firestore {
         (normalizedLocation == 'OTC' && ('PHP' in authLocations() || 'RTC' in authLocations()))
         || (normalizedLocation == 'RES' && ('PHP' in authLocations()))
       );
-      return hasLegacyAuthSession() || (
-        hasActiveAuthProfile()
+      return hasActiveAuthProfile()
         && (
           authRole() == 'admin'
           || locationId in authLocations()
           || normalizedLocation in authLocations()
           || legacyLocationAllowed
-        )
-      );
+        );
     }
 
     function authRoleAndLocationAllowed(roles, locationId) {
@@ -289,14 +203,14 @@ service cloud.firestore {
         (normalizedLocation == 'OTC' && ('PHP' in locations || 'RTC' in locations))
         || (normalizedLocation == 'RES' && ('PHP' in locations))
       );
-      return hasLegacyAuthSession() || (hasActiveAuthProfile()
+      return hasActiveAuthProfile()
         && authProfile().role in roles
         && (
           authProfile().role == 'admin'
           || locationId in locations
           || normalizedLocation in locations
           || legacyLocationAllowed
-        ));
+        );
     }
 
     function authTransportLocationAllowed(locationId) {
@@ -325,7 +239,7 @@ service cloud.firestore {
     }
 
     function authTransportWriteAllowed(data) {
-      return hasLegacyAuthSession() || (hasActiveAuthProfile()
+      return hasActiveAuthProfile()
         && data.site in ['OTC', 'RES']
         && authProfile().role in ['bht', 'tech', 'supervisor', 'admin']
         && (
@@ -335,12 +249,11 @@ service cloud.firestore {
         && (
           authProfile().role in ['supervisor', 'admin']
           || data.createdByUserId == authAppUserId()
-        ));
+        );
     }
 
     function authTransportDeleteAllowed(data) {
-      return hasLegacyAuthSession()
-        || authRoleAllowed(['admin'])
+      return authRoleAllowed(['admin'])
         || (
           authRoleAllowed(['bht', 'tech'])
           && data.site in ['OTC', 'RES']
@@ -351,7 +264,7 @@ service cloud.firestore {
     }
 
     function exactIssueLocationAllowed(locationId) {
-      return hasLegacyAuthSession() || (hasActiveAuthProfile()
+      return hasActiveAuthProfile()
         && (
           authRole() == 'admin'
           || locationId in authIssueLocations()
@@ -360,7 +273,7 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.active == true
             && locationId in get(/databases/$(database)/documents/issueAccess/$(authAppUserId())).data.locationIds
           )
-        ));
+        );
     }
 
     function activeEocProfileAllowed(profile, profileId, roles, locationId) {
@@ -406,95 +319,9 @@ service cloud.firestore {
     }
 
     function eocRoleAndLocationAllowed(roles, locationId) {
-      return hasLegacyAuthSession()
-        || (
-          signedIn()
-          && exists(/databases/$(database)/documents/usersByAuthUid/$(request.auth.uid))
-          && mappedEocRoleAndLocationAllowed(roles, locationId)
-        );
-    }
-
-    function validUserWriteData(data) {
-      return data.keys().hasAll(['name', 'role', 'active'])
-        && data.name is string
-        && (!('pinHash' in data) || (data.pinHash is string && data.pinHash.size() >= 32))
-        && (!('email' in data) || data.email == null || data.email is string)
-        && (!('emailDomain' in data) || data.emailDomain == null || data.emailDomain is string)
-        && (!('emailType' in data) || data.emailType == null || data.emailType in ['company', 'external'])
-        && (!('externalGoogleAllowed' in data) || data.externalGoogleAllowed is bool)
-        && (!('issueLocationIds' in data) || data.issueLocationIds is list)
-        && validRole(data.role)
-        && data.active is bool
-        && (!('site' in data) || data.site is string)
-        && (!('location' in data) || data.location is string)
-        && (!('house' in data) || data.house == null || data.house is string)
-        && (!('locationId' in data) || data.locationId == null || data.locationId is string)
-        && (!('shiftId' in data) || data.shiftId == null || data.shiftId is string)
-        && (!('vanId' in data) || data.vanId == null || data.vanId is string)
-        && (!('authorizedLocations' in data) || data.authorizedLocations is list)
-        && (!('pin' in data) || data.pin is string)
-        && (
-          validAdminWriteData(data)
-          || validSupervisorWriteData(data)
-          || validBhtWriteData(data)
-        );
-    }
-
-    function roleCanSelfRotatePin(role) {
-      return roleIsBht(role) || role == 'supervisor' || role == 'admin';
-    }
-
-    function authUidMatchesTargetUser() {
-      return request.auth != null
-        && resource.data.authUid is string
-        && resource.data.authUid.size() > 0
-        && request.auth.uid == resource.data.authUid
-        && (!('authUid' in request.resource.data) || request.resource.data.authUid == resource.data.authUid);
-    }
-
-    function selfPinOnlyMutation() {
-      return request.resource.data
-        .diff(resource.data)
-        .affectedKeys()
-        .hasOnly(['pinHash', 'pinVersion', 'pinUpdatedAt', 'updatedAt', 'version']);
-    }
-
-    function validSelfPinRotateData(data) {
-      return roleCanSelfRotatePin(data.role)
-        && data.active == true
-        && data.pinHash is string
-        && data.pinHash.size() >= 32
-        && (!('pinVersion' in data) || data.pinVersion == 'v2_sha256_6digit');
-    }
-
-    function requesterCanSelfRotatePin(data) {
-      return authUidMatchesTargetUser()
-        && selfPinOnlyMutation()
-        && validSelfPinRotateData(data);
-    }
-
-    function validAccessGrantWriteData(data) {
-      return data.keys().hasAll([
-        'userId', 'userName', 'locationId', 'startsAt', 'expiresAt',
-        'reason', 'revoked', 'revokedAt', 'revokedReason',
-        'createdByUserId', 'createdByName'
-      ])
-        && data.userId is string
-        && data.userName is string
-        && data.locationId is string
-        && data.startsAt is timestamp
-        && data.expiresAt is timestamp
-        && data.reason is string
-        && data.reason.size() > 0
-        && data.revoked is bool
-        && (data.revokedAt == null || data.revokedAt is timestamp)
-        && (data.revokedReason == null || data.revokedReason is string)
-        && data.createdByUserId is string
-        && data.createdByName is string
-        && (
-          data.revoked != true
-          || (data.revokedReason is string && data.revokedReason.size() > 0)
-        );
+      return signedIn()
+        && exists(/databases/$(database)/documents/usersByAuthUid/$(request.auth.uid))
+        && mappedEocRoleAndLocationAllowed(roles, locationId);
     }
 
     function validVersionField(data) {
@@ -530,8 +357,7 @@ service cloud.firestore {
     }
 
     function templateCreateAllowed() {
-      return hasLegacyAuthSession()
-        || authRoleAllowed(['admin'])
+      return authRoleAllowed(['admin'])
         || (
           authRoleAllowed(['supervisor'])
           && request.auth != null
@@ -541,8 +367,7 @@ service cloud.firestore {
     }
 
     function templateUpdateAllowed() {
-      return hasLegacyAuthSession()
-        || authRoleAllowed(['admin'])
+      return authRoleAllowed(['admin'])
         || (
           authRoleAllowed(['supervisor'])
           && request.auth != null
@@ -587,8 +412,7 @@ service cloud.firestore {
     }
 
     function templateVersionCreateAllowed() {
-      return hasLegacyAuthSession()
-        || authRoleAllowed(['admin'])
+      return authRoleAllowed(['admin'])
         || (
           authRoleAllowed(['supervisor'])
           && request.auth != null
@@ -722,86 +546,19 @@ service cloud.firestore {
     }
 
     match /usersByAuthUid/{uid} {
-      allow get: if signedIn() && request.auth.uid == uid;
-      allow list: if authRoleAllowed(['admin']);
-
-      allow create: if signedIn()
-        && request.auth.uid == uid
-        && authEmailVerified()
-        && request.resource.data.userId is string
-        && request.resource.data.email is string
-        && request.resource.data.email == authEmail()
-        && request.resource.data.emailDomain is string
-        && request.resource.data.version == 1
-        && (
-          (
-            request.resource.data.userId == 'admin_owner'
-            && request.resource.data.email == 'mark@scottsdaleprovidence.com'
-            && exists(/databases/$(database)/documents/users/admin_owner)
-            && get(/databases/$(database)/documents/users/admin_owner).data.role == 'admin'
-            && get(/databases/$(database)/documents/users/admin_owner).data.active == true
-          )
-          || (
-            exists(/databases/$(database)/documents/userEmailLinks/$(request.resource.data.email))
-            && get(/databases/$(database)/documents/userEmailLinks/$(request.resource.data.email)).data.active == true
-            && get(/databases/$(database)/documents/userEmailLinks/$(request.resource.data.email)).data.userId == request.resource.data.userId
-            && (
-              !('linkedAuthUid' in get(/databases/$(database)/documents/userEmailLinks/$(request.resource.data.email)).data)
-              || get(/databases/$(database)/documents/userEmailLinks/$(request.resource.data.email)).data.linkedAuthUid == null
-              || get(/databases/$(database)/documents/userEmailLinks/$(request.resource.data.email)).data.linkedAuthUid == request.auth.uid
-            )
-          )
-        );
-
-      allow update, delete: if authRoleAllowed(['admin']);
+      allow read, write: if false;
     }
 
     match /userEmailLinks/{email} {
-      allow get: if authRoleAllowed(['admin'])
-        || (
-          signedIn()
-          && authEmailVerified()
-          && email == authEmail()
-        );
-      allow list: if authRoleAllowed(['admin']);
-
-      allow create: if (
-          signedIn()
-          && authEmailVerified()
-          && email == 'mark@scottsdaleprovidence.com'
-          && request.resource.data.email == 'mark@scottsdaleprovidence.com'
-          && request.resource.data.userId == 'admin_owner'
-          && request.resource.data.emailType == 'company'
-          && request.resource.data.externalGoogleAllowed == false
-        )
-        || authRoleAllowed(['admin']);
-
-      allow update: if authRoleAllowed(['admin'])
-        || (
-          signedIn()
-          && authEmailVerified()
-          && email == authEmail()
-          && request.resource.data.userId == resource.data.userId
-          && request.resource.data.email == resource.data.email
-          && request.resource.data.active == resource.data.active
-          && request.resource.data.linkedAuthUid == request.auth.uid
-        );
-
-      allow delete: if false;
+      allow read, write: if false;
     }
 
     // Users collection
     match /users/{userId} {
-      allow get: if (!workflowSecurityEnabled('identity_users') || hasCurrentSecuritySession())
+      allow get: if hasCurrentSecuritySession()
         && (
           workflowRoleAllowed('identity_users', ['admin'])
         || authAppUserId() == userId
-        || (
-          signedIn()
-          && authEmailVerified()
-          && userId == 'admin_owner'
-          && authEmail() == 'mark@scottsdaleprovidence.com'
-        )
         || (
           workflowRoleAllowed('identity_users', ['supervisor'])
           && roleIsBht(resource.data.role)
@@ -815,38 +572,7 @@ service cloud.firestore {
           && workflowLocationAllowed('identity_users', ['supervisor'], userLocationValue(resource.data))
         );
 
-      allow create: if !workflowSecurityEnabled('identity_users')
-        && validUserWriteData(request.resource.data)
-        && (
-          authRoleAllowed(['admin'])
-          || (
-            authRoleAllowed(['supervisor'])
-            && roleIsBht(request.resource.data.role)
-            && authLocationAllowed(userLocationValue(request.resource.data))
-          )
-        )
-        && validVersionField(request.resource.data);
-
-      allow update: if !workflowSecurityEnabled('identity_users')
-        && validUserWriteData(request.resource.data)
-        && (
-          authRoleAllowed(['admin'])
-          || requesterCanSelfRotatePin(request.resource.data)
-          || (
-            authRoleAllowed(['supervisor'])
-            && roleIsBht(resource.data.role)
-            && request.resource.data.role == resource.data.role
-            && request.resource.data.email == resource.data.email
-            && request.resource.data.active == resource.data.active
-            && request.resource.data.issueLocationIds == resource.data.issueLocationIds
-            && authLocationAllowed(userLocationValue(resource.data))
-          )
-        )
-        && validVersionField(request.resource.data)
-        && createdAtUnchanged();
-
-      allow delete: if !workflowSecurityEnabled('identity_users')
-        && authRoleAllowed(['admin']);
+      allow create, update, delete: if false;
     }
 
     // Clients collection (autocomplete suggestions)
@@ -872,29 +598,16 @@ service cloud.firestore {
         );
 
       allow list: if workflowSecurityEnabled('identity_users')
-        ? (
-          hasCurrentSecuritySession()
-          && (
-            workflowTokenRole() == 'admin'
-            || (
-              workflowTokenRole() == 'supervisor'
-              && workflowTokenLocationAllowed(resource.data.locationId)
-            )
-            || (
-              workflowTokenRole() in ['bht', 'tech']
-              && resource.data.locationId in workflowTokenIssueLocations()
-            )
-          )
-        )
-        : (
-          authRoleAllowed(['admin'])
+        && hasCurrentSecuritySession()
+        && (
+          workflowTokenRole() == 'admin'
           || (
-            authRoleAllowed(['supervisor'])
-            && authLocationAllowed(resource.data.locationId)
+            workflowTokenRole() == 'supervisor'
+            && workflowTokenLocationAllowed(resource.data.locationId)
           )
           || (
-            authRoleAllowed(['bht', 'tech'])
-            && resource.data.locationId in authIssueLocations()
+            workflowTokenRole() in ['bht', 'tech']
+            && resource.data.locationId in workflowTokenIssueLocations()
           )
         );
 
@@ -932,11 +645,11 @@ service cloud.firestore {
 
     // EOC Tasks collection
     match /eocTasks/{docId} {
-      // The strict EOC completion path is implemented as a server transaction.
-      // Keep this compatibility read unchanged until that client path is cut
-      // over; adding a second rule branch exceeds Firestore's hard expression
-      // budget for the existing atomic completion transaction.
-      allow read: if true;
+      allow read: if workflowLocationAllowed(
+        'eoc',
+        ['bht', 'tech', 'supervisor', 'admin'],
+        resource.data.locationId
+      );
 
       allow create: if request.resource.data.keys().hasAll([
         'taskType', 'locationId', 'shiftId', 'dueDate', 'status', 'cycleKey',
@@ -953,7 +666,7 @@ service cloud.firestore {
         && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
         && validVersionField(request.resource.data);
 
-      allow update: if (!workflowSecurityEnabled('eoc') || request.resource.data.status != 'completed')
+      allow update: if request.resource.data.status != 'completed'
         && validEocTaskStatus(request.resource.data.status)
         && validIgnoredTaskPayload(request.resource.data)
         && request.resource.data.shiftId is string
@@ -969,7 +682,12 @@ service cloud.firestore {
       allow delete: if authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.locationId);
 
       match /missedNotes/{noteId} {
-        allow read: if true;
+        allow read: if exists(/databases/$(database)/documents/eocTasks/$(docId))
+          && workflowLocationAllowed(
+            'eoc',
+            ['bht', 'tech', 'supervisor', 'admin'],
+            get(/databases/$(database)/documents/eocTasks/$(docId)).data.locationId
+          );
         allow create: if request.resource.data.taskId == docId
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
@@ -982,7 +700,7 @@ service cloud.firestore {
 
     // EOC Assignments (legacy — kept for historical data)
     match /eocAssignments/{docId} {
-      allow read: if true;
+      allow read: if workflowLocationAllowed('eoc', ['bht', 'tech', 'supervisor', 'admin'], resource.data.locationId);
 
       allow create: if request.resource.data.keys().hasAll([
         'locationId', 'shiftId', 'dueDate', 'assignedTechId', 'eocType', 'status'
@@ -1003,18 +721,13 @@ service cloud.firestore {
 
     // EOC Submissions
     match /eocSubmissions/{docId} {
-      allow read: if true;
+      allow read: if workflowLocationAllowed(
+        'eoc',
+        ['bht', 'tech', 'supervisor', 'admin'],
+        resource.data.locationId
+      );
 
-      allow create: if !workflowSecurityEnabled('eoc')
-        && request.resource.data.keys().hasAll([
-        'locationId', 'shiftId', 'eocType', 'submittedByUserId', 'submittedByName', 'templateScope'
-      ])
-        && request.resource.data.shiftId is string
-        && validShiftForLocation(request.resource.data.locationId, request.resource.data.shiftId)
-        && request.resource.data.templateScope is string
-        && validTemplateScope(request.resource.data.templateScope)
-        && eocRoleAndLocationAllowed(['bht', 'tech', 'supervisor', 'admin'], request.resource.data.locationId)
-        && validVersionField(request.resource.data);
+      allow create: if false;
 
       allow update: if createdAtUnchanged()
         && (!('shiftId' in request.resource.data)
@@ -1127,8 +840,6 @@ service cloud.firestore {
     match /shiftDebriefs/{docId} {
       allow get: if workflowRoleAllowed('debriefs_alerts', ['bht', 'tech', 'supervisor', 'admin'])
         && (
-          (!workflowSecurityEnabled('debriefs_alerts') && hasLegacyAuthSession())
-          ||
           !exists(/databases/$(database)/documents/shiftDebriefs/$(docId))
           || workflowExactIssueLocationAllowed('debriefs_alerts', resource.data.locationId)
           || resource.data.submittedByUserId == authAppUserId()
@@ -1138,13 +849,10 @@ service cloud.firestore {
           )
         );
       allow list: if workflowRoleAllowed('debriefs_alerts', ['supervisor', 'admin'])
-        && (
-          !workflowSecurityEnabled('debriefs_alerts')
-          || workflowExactIssueLocationAllowed('debriefs_alerts', resource.data.locationId)
-        );
+        && workflowExactIssueLocationAllowed('debriefs_alerts', resource.data.locationId);
 
       allow create: if validSubmittedShiftDebriefData(request.resource.data)
-        && ((!workflowSecurityEnabled('debriefs_alerts') && hasLegacyAuthSession()) || request.resource.data.submittedByUserId == authAppUserId())
+        && request.resource.data.submittedByUserId == authAppUserId()
         && (
           workflowLocationAllowed('debriefs_alerts', ['bht', 'tech'], request.resource.data.locationId)
           || workflowExactIssueLocationAllowed('debriefs_alerts', request.resource.data.locationId)
@@ -1171,8 +879,7 @@ service cloud.firestore {
             && request.resource.data.confirmed == resource.data.confirmed
             && request.resource.data.receivingUserIds == resource.data.receivingUserIds
             && (
-              (!workflowSecurityEnabled('debriefs_alerts') && hasLegacyAuthSession())
-              || authAppUserId() == resource.data.submittedByUserId
+              authAppUserId() == resource.data.submittedByUserId
               || workflowRoleAllowed('debriefs_alerts', ['supervisor', 'admin'])
             )
             && (
@@ -1199,10 +906,7 @@ service cloud.firestore {
                   'reassignmentReason', 'updatedAt', 'version'
                 ])
               && workflowLocationAllowed('debriefs_alerts', ['supervisor', 'admin'], resource.data.locationId)
-              && (
-                (!workflowSecurityEnabled('debriefs_alerts') && hasLegacyAuthSession())
-                || request.resource.data.reassignedByUserId == authAppUserId()
-              )
+              && request.resource.data.reassignedByUserId == authAppUserId()
               && !shiftDebriefSignoffStarted(resource.data)
               && request.resource.data.receivingUserIds.size() > 0
               && request.resource.data.confirmation.acknowledgments.size() == 0
@@ -1221,15 +925,12 @@ service cloud.firestore {
                 || request.resource.data.receivingUserNames == resource.data.receivingUserNames
               )
               && (
-                (!workflowSecurityEnabled('debriefs_alerts') && hasLegacyAuthSession())
-                || (
-                  authAppUserId() != resource.data.submittedByUserId
-                  && authAppUserId() in resource.data.receivingUserIds
-                  && request.resource.data.confirmation.acknowledgments
+                authAppUserId() != resource.data.submittedByUserId
+                && authAppUserId() in resource.data.receivingUserIds
+                && request.resource.data.confirmation.acknowledgments
                     .diff(resource.data.confirmation.acknowledgments)
                     .affectedKeys()
                     .hasOnly([authAppUserId()])
-                )
               )
             )
           )
@@ -1241,103 +942,26 @@ service cloud.firestore {
 
     // EOC Issues
     match /eocIssues/{docId} {
-      allow read: if workflowSecurityEnabled('issues_feedback_audit')
-        ? (
-          hasCurrentSecuritySession()
-          && (
-            workflowTokenRole() == 'admin'
-            || (
-              ('locationId' in resource.data)
-              && workflowTokenLocationAllowed(resource.data.locationId)
-            )
-          )
-        )
-        : (
-          ('locationId' in resource.data)
-          && exactIssueLocationAllowed(resource.data.locationId)
-        );
-
-      allow create: if !workflowSecurityEnabled('issues_feedback_audit')
-        && request.resource.data.keys().hasAll([
-        'locationId', 'eocType', 'label', 'status', 'reportedByUserId'
-      ])
-        && request.resource.data.status == 'open'
-        && workflowExactIssueLocationAllowed('issues_feedback_audit', request.resource.data.locationId)
-        && workflowRoleAllowed('issues_feedback_audit', ['bht', 'tech', 'supervisor', 'admin'])
-        && validVersionField(request.resource.data);
-
-      allow update: if !workflowSecurityEnabled('issues_feedback_audit') && (
-          (
-            validBhtResolutionTransition(resource.data, request.resource.data)
-            && (hasLegacyAuthSession() || strictBhtIssueActor(request.resource.data))
-            && createdAtUnchanged()
-          )
+      allow read: if hasCurrentSecuritySession()
+        && (
+          workflowTokenRole() == 'admin'
           || (
-            request.resource.data.status in ['open', 'in_progress', 'pending_supervisor_review', 'resolved', 'voided']
-            && authRoleAndLocationAllowed(['supervisor', 'admin'], request.resource.data.locationId)
-            && request.resource.data.locationId == resource.data.locationId
-            && validVersionField(request.resource.data)
-            && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-              'source', 'sourceTrackingId', 'trackingId', 'recurrenceEligible'
-            ])
-            && (
-              !(
-                (('parentIssueId' in resource.data) && resource.data.parentIssueId != null && request.resource.data.parentIssueId == null)
-                || (('linkedTrackingId' in resource.data) && resource.data.linkedTrackingId != null && request.resource.data.linkedTrackingId == null)
-              )
-              || authRoleAllowed(['admin'])
-            )
-            && (
-              !(request.resource.data.status in ['resolved', 'voided'])
-              || (
-                request.resource.data.closedAt != null
-                && (
-                  (request.resource.data.status == 'resolved'
-                    && request.resource.data.keys().hasAny(['resolvedNotes'])
-                    && request.resource.data.resolvedNotes is string
-                    && request.resource.data.resolvedNotes.size() > 0)
-                  || (request.resource.data.status == 'voided'
-                    && request.resource.data.keys().hasAny(['voidReason'])
-                    && request.resource.data.voidReason is string
-                    && request.resource.data.voidReason.size() > 0)
-                )
-              )
-            )
-            && createdAtUnchanged()
+            ('locationId' in resource.data)
+            && workflowTokenLocationAllowed(resource.data.locationId)
           )
         );
-      allow delete: if false;
+
+      allow create, update, delete: if false;
 
       match /activity/{activityId} {
         allow read: if workflowExactIssueLocationAllowed('issues_feedback_audit', get(/databases/$(database)/documents/eocIssues/$(docId)).data.locationId);
-        allow create: if !workflowSecurityEnabled('issues_feedback_audit')
-          && (hasLegacyAuthSession() || signedIn())
-          && request.resource.data.issueId == docId
-          && exactIssueLocationAllowed(request.resource.data.locationId)
-          && request.resource.data.immutable == true
-          && (
-            hasLegacyAuthSession()
-            || request.resource.data.actorUserId == authAppUserId()
-            || authRoleAllowed(['supervisor', 'admin'])
-          )
-          && (
-            !('relationshipAudit' in request.resource.data)
-            || request.resource.data.relationshipAudit != true
-            || hasLegacyAuthSession()
-            || authRoleAllowed(['supervisor', 'admin'])
-          )
-          && (
-            request.resource.data.eventType != 'relationship_unlinked'
-            || hasLegacyAuthSession()
-            || authRoleAllowed(['admin'])
-          )
-          && validVersionField(request.resource.data);
+        allow create: if false;
         allow update, delete: if false;
       }
 
       match /attachments/{attachmentId} {
         allow read: if workflowExactIssueLocationAllowed('issues_feedback_audit', get(/databases/$(database)/documents/eocIssues/$(docId)).data.locationId);
-        allow create: if workflowSessionReady('issues_feedback_audit') && (hasLegacyAuthSession() || signedIn())
+        allow create: if workflowSessionReady('issues_feedback_audit') && signedIn()
           && request.resource.data.attachmentId == attachmentId
           && request.resource.data.issueId == docId
           && request.resource.data.locationId == get(/databases/$(database)/documents/eocIssues/$(docId)).data.locationId
@@ -1357,8 +981,7 @@ service cloud.firestore {
           && request.resource.data.mimeType == 'image/jpeg'
           && request.resource.data.state in ['waiting', 'uploading', 'uploaded', 'failed']
           && (
-            (!workflowSecurityEnabled('issues_feedback_audit') && hasLegacyAuthSession())
-            || workflowRoleAllowed('issues_feedback_audit', ['supervisor', 'admin'])
+            workflowRoleAllowed('issues_feedback_audit', ['supervisor', 'admin'])
             || (
               workflowRoleAllowed('issues_feedback_audit', ['bht', 'tech'])
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -1373,7 +996,7 @@ service cloud.firestore {
 
       match /attachmentHistory/{historyId} {
         allow read: if workflowExactIssueLocationAllowed('issues_feedback_audit', get(/databases/$(database)/documents/eocIssues/$(docId)).data.locationId);
-        allow create: if workflowSessionReady('issues_feedback_audit') && (hasLegacyAuthSession() || signedIn())
+        allow create: if workflowSessionReady('issues_feedback_audit') && signedIn()
           && request.resource.data.issueId == docId
           && request.resource.data.immutable == true
           && validVersionField(request.resource.data);
@@ -1411,15 +1034,14 @@ service cloud.firestore {
 
     // App feedback is intentionally separate from operational EOC issues.
     match /appFeedback/{docId} {
-      allow read: if (!workflowSecurityEnabled('issues_feedback_audit') && hasLegacyAuthSession())
-        || workflowRoleAllowed('issues_feedback_audit', ['admin'])
+      allow read: if workflowRoleAllowed('issues_feedback_audit', ['admin'])
         || (
           workflowRoleAllowed('issues_feedback_audit', ['bht', 'tech'])
           && resource.data.submittedByUserId == authAppUserId()
         );
 
-      allow create: if ((!workflowSecurityEnabled('issues_feedback_audit') && hasLegacyAuthSession()) || workflowRoleAllowed('issues_feedback_audit', ['bht', 'tech']))
-        && ((!workflowSecurityEnabled('issues_feedback_audit') && hasLegacyAuthSession()) || request.resource.data.submittedByUserId == authAppUserId())
+      allow create: if workflowRoleAllowed('issues_feedback_audit', ['bht', 'tech'])
+        && request.resource.data.submittedByUserId == authAppUserId()
         && request.resource.data.feedbackType == 'app_feedback'
         && request.resource.data.originalText is string
         && request.resource.data.originalText.size() > 0
@@ -1440,8 +1062,8 @@ service cloud.firestore {
           && createdAtUnchanged()
         )
         || (
-          ((!workflowSecurityEnabled('issues_feedback_audit') && hasLegacyAuthSession()) || workflowRoleAllowed('issues_feedback_audit', ['bht', 'tech']))
-          && ((!workflowSecurityEnabled('issues_feedback_audit') && hasLegacyAuthSession()) || resource.data.submittedByUserId == authAppUserId())
+          workflowRoleAllowed('issues_feedback_audit', ['bht', 'tech'])
+          && resource.data.submittedByUserId == authAppUserId()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['createdAt', 'updatedAt'])
           && request.resource.data.originalText == resource.data.originalText
           && request.resource.data.status == 'new'
@@ -1453,55 +1075,31 @@ service cloud.firestore {
 
     // Supervisor Alerts
     match /alerts/{docId} {
-      allow read: if workflowSecurityEnabled('debriefs_alerts')
-        ? (
-          hasCurrentSecuritySession()
+      allow read: if hasCurrentSecuritySession()
+        && (
+          resource.data.audience == 'bht'
           && (
-            resource.data.audience == 'bht'
-            && (
-              (
-                ('targetUserId' in resource.data)
-                && resource.data.targetUserId == request.auth.token.profileId
-              )
-              || (
-                workflowTokenRole() == 'admin'
-                || (
-                  workflowTokenRole() == 'supervisor'
-                  && ('locationId' in resource.data)
-                  && workflowTokenLocationAllowed(resource.data.locationId)
-                )
-              )
+            (
+              ('targetUserId' in resource.data)
+              && resource.data.targetUserId == request.auth.token.profileId
             )
             || (
-              resource.data.audience == 'supervisor'
-              && (
-                workflowTokenRole() == 'admin'
-                || (
-                  workflowTokenRole() == 'supervisor'
-                  && ('locationId' in resource.data)
-                  && workflowTokenLocationAllowed(resource.data.locationId)
-                )
+              workflowTokenRole() == 'admin'
+              || (
+                workflowTokenRole() == 'supervisor'
+                && ('locationId' in resource.data)
+                && workflowTokenLocationAllowed(resource.data.locationId)
               )
             )
-          )
-        )
-        : (
-          hasLegacyAuthSession()
-          || (
-            resource.data.audience == 'bht'
-            && resource.data.targetUserId == authAppUserId()
           )
           || (
             resource.data.audience == 'supervisor'
-            && authRoleAllowed(['supervisor', 'admin'])
             && (
-              (
-                resource.data.type in ['eoc_issue', 'eoc_issue_update', 'shift_debrief_submitted', 'shift_debrief_missing', 'shift_debrief_no_receivers', 'shift_debrief_incoming_ack_late']
-                && exactIssueLocationAllowed(resource.data.locationId)
-              )
+              workflowTokenRole() == 'admin'
               || (
-                !(resource.data.type in ['eoc_issue', 'eoc_issue_update', 'shift_debrief_submitted', 'shift_debrief_missing', 'shift_debrief_no_receivers', 'shift_debrief_incoming_ack_late'])
-                && authRoleAndLocationAllowed(['supervisor', 'admin'], resource.data.locationId)
+                workflowTokenRole() == 'supervisor'
+                && ('locationId' in resource.data)
+                && workflowTokenLocationAllowed(resource.data.locationId)
               )
             )
           )
@@ -1537,19 +1135,9 @@ service cloud.firestore {
 
     // Access Grants (temporary backup location access lifecycle)
     match /accessGrants/{docId} {
-      allow read: if !workflowSecurityEnabled('identity_users')
-        || workflowRoleAllowed('identity_users', ['supervisor', 'admin']);
+      allow read: if workflowRoleAllowed('identity_users', ['supervisor', 'admin']);
 
-      allow create: if !workflowSecurityEnabled('identity_users')
-        && validAccessGrantWriteData(request.resource.data)
-        && workflowRoleAllowed('identity_users', ['admin'])
-        && validVersionField(request.resource.data);
-
-      allow update: if !workflowSecurityEnabled('identity_users')
-        && validAccessGrantWriteData(request.resource.data)
-        && workflowRoleAllowed('identity_users', ['admin'])
-        && validVersionField(request.resource.data)
-        && createdAtUnchanged();
+      allow create, update: if false;
 
       allow delete: if false;
     }
@@ -1557,19 +1145,14 @@ service cloud.firestore {
     match /issueAccess/{appUserId} {
       allow get: if workflowSessionReady('identity_users') && (authAppUserId() == appUserId || authRoleAllowed(['admin']));
       allow list: if workflowRoleAllowed('identity_users', ['admin']);
-      allow create, update: if !workflowSecurityEnabled('identity_users')
-        && workflowRoleAllowed('identity_users', ['admin'])
-        && request.resource.data.userId == appUserId
-        && request.resource.data.locationIds is list
-        && request.resource.data.active is bool
-        && validVersionField(request.resource.data);
+      allow create, update: if false;
       allow delete: if false;
     }
 
     match /userHomeState/{appUserId} {
       allow get: if workflowSessionReady('debriefs_alerts') && (authAppUserId() == appUserId || authRoleAllowed(['admin']));
       allow list: if false;
-      allow create, update: if workflowSessionReady('debriefs_alerts') && (hasLegacyAuthSession() || authAppUserId() == appUserId)
+      allow create, update: if workflowSessionReady('debriefs_alerts') && authAppUserId() == appUserId
         && request.resource.data.keys().hasOnly([
           'reviewedDebriefIds',
           'lastReviewedDebriefId',
@@ -1584,8 +1167,7 @@ service cloud.firestore {
 
     // Audit Logs
     match /auditLogs/{docId} {
-      allow read: if (!workflowSecurityEnabled('issues_feedback_audit') && hasLegacyAuthSession())
-        || workflowRoleAllowed('issues_feedback_audit', ['admin']);
+      allow read: if workflowRoleAllowed('issues_feedback_audit', ['admin']);
 
       allow create: if request.resource.data.keys().hasAll([
         'action', 'collectionPath', 'documentId',
@@ -1682,11 +1264,8 @@ service cloud.firestore {
 
     // EOC Vehicles
     match /eocVehicles/{docId} {
-      allow read: if !workflowSecurityEnabled('operations_admin')
-        || (
-          workflowRoleAllowed('operations_admin', ['bht', 'tech', 'supervisor', 'admin'])
-          && workflowOperationsLocationAllowed(resource.data)
-        );
+      allow read: if workflowRoleAllowed('operations_admin', ['bht', 'tech', 'supervisor', 'admin'])
+        && workflowOperationsLocationAllowed(resource.data);
       allow create: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
         && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data);
@@ -1715,11 +1294,8 @@ service cloud.firestore {
 
     // Fleet maintenance templates
     match /fleetMaintenanceTemplates/{docId} {
-      allow read: if !workflowSecurityEnabled('operations_admin')
-        || (
-          workflowRoleAllowed('operations_admin', ['bht', 'tech', 'supervisor', 'admin'])
-          && workflowOperationsLocationAllowed(resource.data)
-        );
+      allow read: if workflowRoleAllowed('operations_admin', ['bht', 'tech', 'supervisor', 'admin'])
+        && workflowOperationsLocationAllowed(resource.data);
       allow create: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
         && workflowOperationsLocationAllowed(request.resource.data)
         && validVersionField(request.resource.data);
@@ -1814,28 +1390,18 @@ service cloud.firestore {
 
     // Compliance collections
     match /complianceEmployees/{employeeId} {
-      allow read: if !workflowSecurityEnabled('operations_admin')
-        || workflowLocationAllowed('operations_admin', ['supervisor', 'admin'], resource.data.site);
+      allow read: if workflowLocationAllowed('operations_admin', ['supervisor', 'admin'], resource.data.site);
       allow create, update: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && (!workflowSecurityEnabled('operations_admin')
-          || workflowTokenLocationAllowed(request.resource.data.site));
+        && workflowTokenLocationAllowed(request.resource.data.site);
       allow delete: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && (!workflowSecurityEnabled('operations_admin')
-          || workflowTokenLocationAllowed(resource.data.site));
+        && workflowTokenLocationAllowed(resource.data.site);
     }
     match /complianceItems/{itemId} {
-      allow read: if !workflowSecurityEnabled('operations_admin')
-        || workflowOperationsComplianceLocationAllowed(resource.data);
+      allow read: if workflowOperationsComplianceLocationAllowed(resource.data);
       allow create, update: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && (
-          !workflowSecurityEnabled('operations_admin')
-          || workflowOperationsComplianceLocationAllowed(request.resource.data)
-        );
+        && workflowOperationsComplianceLocationAllowed(request.resource.data);
       allow delete: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
-        && (
-          !workflowSecurityEnabled('operations_admin')
-          || workflowOperationsComplianceLocationAllowed(resource.data)
-        );
+        && workflowOperationsComplianceLocationAllowed(resource.data);
     }
     match /cintasServices/{serviceId} {
       allow read: if workflowRoleAllowed('operations_admin', ['supervisor', 'admin'])
@@ -1855,8 +1421,8 @@ service cloud.firestore {
 
     // Transports collection
     match /transports/{transportId} {
-      allow read: if !workflowSecurityEnabled('transports')
-        || workflowTransportReadAllowed(resource.data);
+      allow read: if workflowSecurityEnabled('transports')
+        && workflowTransportReadAllowed(resource.data);
 
       allow create: if request.resource.data.keys().hasAll([
         'site', 'createdByUserId', 'createdByName', 'status', 'departedAt', 'createdAt'
@@ -1900,11 +1466,7 @@ service cloud.firestore {
         && workflowRoleAllowed('settings', ['admin']);
     }
 
-    // Dormant workflow-by-workflow security boundary. A server-issued, exact
-    // versioned token claim selects workflows after the server has read the
-    // protected rollout configuration. Current tokens have no such claim, so
-    // compatibility behavior is unchanged without adding document reads to
-    // already-large Firestore transactions.
+    // Server-issued, versioned token claims select the protected workflows.
     function workflowSecurityEnabled(workflowId) {
       return signedIn()
         && 'workflowSecurityVersion' in request.auth.token
@@ -1965,103 +1527,87 @@ service cloud.firestore {
 
     function workflowRoleAllowed(workflowId, roles) {
       return workflowSecurityEnabled(workflowId)
-        ? (hasCurrentSecuritySession() && workflowTokenRole() in roles)
-        : authRoleAllowed(roles);
+        && hasCurrentSecuritySession()
+        && workflowTokenRole() in roles;
     }
 
     function workflowSessionReady(workflowId) {
-      return !workflowSecurityEnabled(workflowId) || hasCurrentSecuritySession();
+      return workflowSecurityEnabled(workflowId) && hasCurrentSecuritySession();
     }
 
     function workflowLocationAllowed(workflowId, roles, locationId) {
       return workflowSecurityEnabled(workflowId)
-        ? (
-            hasCurrentSecuritySession()
-            && workflowTokenRole() in roles
-            && workflowTokenLocationAllowed(locationId)
-          )
-        : authRoleAndLocationAllowed(roles, locationId);
+        && hasCurrentSecuritySession()
+        && workflowTokenRole() in roles
+        && workflowTokenLocationAllowed(locationId);
     }
 
     function workflowOperationsLocationAllowed(data) {
       return workflowSecurityEnabled('operations_admin')
-        ? (
-            workflowTokenRole() == 'admin'
-            || (
-              ('mainLocation' in data)
-              && data.mainLocation is string
-              && data.mainLocation.size() > 0
-              && workflowTokenLocationAllowed(data.mainLocation)
-            )
+        && (
+          workflowTokenRole() == 'admin'
+          || (
+            ('mainLocation' in data)
+            && data.mainLocation is string
+            && data.mainLocation.size() > 0
+            && workflowTokenLocationAllowed(data.mainLocation)
           )
-        : fleetLocationAllowed(data);
+        );
     }
 
     function workflowOperationsRuntimeLocationAllowed(data) {
       return workflowSecurityEnabled('operations_admin')
-        ? (
-            (
-              ('mainLocation' in data)
-              && data.mainLocation is string
-              && data.mainLocation.size() > 0
-              && workflowTokenLocationAllowed(data.mainLocation)
-            )
-            || (
-              data.vehicleId is string
-              && exists(/databases/$(database)/documents/eocVehicles/$(data.vehicleId))
-              && workflowTokenLocationAllowed(
-                fleetMainLocationFromData(get(/databases/$(database)/documents/eocVehicles/$(data.vehicleId)).data)
-              )
+        && (
+          (
+            ('mainLocation' in data)
+            && data.mainLocation is string
+            && data.mainLocation.size() > 0
+            && workflowTokenLocationAllowed(data.mainLocation)
+          )
+          || (
+            data.vehicleId is string
+            && exists(/databases/$(database)/documents/eocVehicles/$(data.vehicleId))
+            && workflowTokenLocationAllowed(
+              fleetMainLocationFromData(get(/databases/$(database)/documents/eocVehicles/$(data.vehicleId)).data)
             )
           )
-        : fleetRuntimeLocationAllowed(data);
+        );
     }
 
     function workflowOperationsComplianceLocationAllowed(data) {
       return workflowSecurityEnabled('operations_admin')
-        ? (
-            workflowTokenRole() == 'admin'
-            || (
-              ('targetType' in data)
-              && data.targetType == 'employee'
-              && ('employeeSite' in data)
-              && data.employeeSite is string
-              && workflowTokenLocationAllowed(data.employeeSite)
-            )
-            || (
-              ('targetType' in data)
-              && data.targetType == 'location'
-              && ('mainLocation' in data)
-              && data.mainLocation is string
-              && workflowTokenLocationAllowed(data.mainLocation)
-            )
+        && (
+          workflowTokenRole() == 'admin'
+          || (
+            ('targetType' in data)
+            && data.targetType == 'employee'
+            && ('employeeSite' in data)
+            && data.employeeSite is string
+            && workflowTokenLocationAllowed(data.employeeSite)
           )
-        : (
-            (('employeeSite' in data) && authLocationAllowed(data.employeeSite))
-            || (('mainLocation' in data) && authLocationAllowed(data.mainLocation))
-            || (('locationId' in data) && authLocationAllowed(data.locationId))
-          );
+          || (
+            ('targetType' in data)
+            && data.targetType == 'location'
+            && ('mainLocation' in data)
+            && data.mainLocation is string
+            && workflowTokenLocationAllowed(data.mainLocation)
+          )
+        );
     }
 
     function workflowExactIssueLocationAllowed(workflowId, locationId) {
       return workflowSecurityEnabled(workflowId)
-        ? (
-            hasCurrentSecuritySession()
-            && workflowTokenLocationAllowed(locationId)
-          )
-        : exactIssueLocationAllowed(locationId);
+        && hasCurrentSecuritySession()
+        && workflowTokenLocationAllowed(locationId);
     }
 
     function workflowTransportWriteAllowed(data) {
       return workflowSecurityEnabled('transports')
-        ? (
-            hasCurrentSecuritySession()
-            && data.site in ['OTC', 'RES']
-            && workflowTokenRole() in ['bht', 'tech', 'supervisor', 'admin']
-            && workflowTokenLocationAllowed(data.site)
-            && (workflowTokenRole() in ['supervisor', 'admin'] || data.createdByUserId == request.auth.token.profileId)
-          )
-        : authTransportWriteAllowed(data);
+        && hasCurrentSecuritySession()
+        && data.site in ['OTC', 'RES']
+        && workflowTokenRole() in ['bht', 'tech', 'supervisor', 'admin']
+        && workflowTokenLocationAllowed(data.site)
+        && (workflowTokenRole() in ['supervisor', 'admin'] || data.createdByUserId == request.auth.token.profileId);
     }
 
     function workflowTransportReadAllowed(data) {
@@ -2077,24 +1623,21 @@ service cloud.firestore {
 
     function workflowTransportDeleteAllowed(data) {
       return workflowSecurityEnabled('transports')
-        ? (
-            hasCurrentSecuritySession()
-            && (
-              workflowTokenRole() == 'admin'
-              || (
-                workflowTokenRole() in ['bht', 'tech']
-                && data.site in ['OTC', 'RES']
-                && workflowTokenLocationAllowed(data.site)
-                && data.createdByUserId == request.auth.token.profileId
-                && data.status in ['open', 'arrived']
-              )
-            )
+        && hasCurrentSecuritySession()
+        && (
+          workflowTokenRole() == 'admin'
+          || (
+            workflowTokenRole() in ['bht', 'tech']
+            && data.site in ['OTC', 'RES']
+            && workflowTokenLocationAllowed(data.site)
+            && data.createdByUserId == request.auth.token.profileId
+            && data.status in ['open', 'arrived']
           )
-        : authTransportDeleteAllowed(data);
+        );
     }
 
     match /appMetrics/{docId} {
-      allow read: if hasLegacyAuthSession() || authRoleAllowed(['admin']);
+      allow read: if workflowRoleAllowed('settings', ['admin']);
       allow write: if false;
     }
 

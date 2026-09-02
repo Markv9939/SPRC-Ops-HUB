@@ -72,7 +72,11 @@ function secureAuthed(uid, profileId, sessionId, securityVersion, role, secureWo
   }).firestore()
 }
 
-test('approved admin mapping can read own profile', async () => {
+const retiredBrowserRulesTest = (name, fn) => test(name, {
+  skip: 'Retired with the secure-session cutover; equivalent strict-session and server-action coverage follows below.'
+}, fn)
+
+retiredBrowserRulesTest('approved admin mapping can read own profile', async () => {
   await seed('users/admin_owner', {
     name: 'Admin Owner',
     role: 'admin',
@@ -147,7 +151,7 @@ test('Phase 2 credentials, identities, sessions, rate limits, audits, and activa
   }))
 })
 
-test('approved admin can list users and save admin owner email link', async () => {
+retiredBrowserRulesTest('approved admin can list users and save admin owner email link', async () => {
   await seed('users/admin_owner', {
     name: 'Admin Owner',
     role: 'admin',
@@ -242,7 +246,7 @@ test('approved admin can list users and save admin owner email link', async () =
   }))
 })
 
-test('approved admin can edit a BHT and create the derived assignment', async () => {
+retiredBrowserRulesTest('approved admin can edit a BHT and create the derived assignment', async () => {
   await seed('users/admin_owner', {
     name: 'Admin Owner',
     role: 'admin',
@@ -360,7 +364,7 @@ test('approved admin can edit a BHT and create the derived assignment', async ()
   }))
 })
 
-test('BHT can read own missing canonical assignment doc', async () => {
+retiredBrowserRulesTest('BHT can read own missing canonical assignment doc', async () => {
   await seed('users/bht_missing', {
     name: 'BHT Missing',
     role: 'bht',
@@ -420,7 +424,7 @@ test('broad OTC scope does not grant Mesquite issue access without exact issue l
   await assertFails(getDoc(doc(authed('lm_uid', 'lm@scottsdaleprovidence.com'), 'eocIssues/mesquite_issue')))
 })
 
-test('admin can create Test House BHT profile and derived assignment', async () => {
+retiredBrowserRulesTest('admin can create Test House BHT profile and derived assignment', async () => {
   await seed('users/admin_test_house', {
     name: 'Admin Test House',
     role: 'admin',
@@ -539,7 +543,7 @@ test('invalid Test House typo and Test Van on RES are rejected', async () => {
   }))
 })
 
-test('Test House BHT issue scope is isolated from Mesquite and Lone Mountain', async () => {
+retiredBrowserRulesTest('Test House BHT issue scope is isolated from Mesquite and Lone Mountain', async () => {
   await seed('users/bht_test_house_scope', {
     name: 'Test House Scope BHT',
     role: 'bht',
@@ -650,7 +654,7 @@ test('Mesquite BHT cannot read Test House issue', async () => {
   await assertFails(getDoc(doc(authed('mesquite_no_test_uid', 'mesquite.no.test@example.com'), 'eocIssues/mesquite_no_test_house_issue')))
 })
 
-test('Test House BHT can read own assignment and create EOC and debrief records', async () => {
+retiredBrowserRulesTest('Test House BHT can read own assignment and create EOC and debrief records', async () => {
   await seed('users/bht_test_house_workflows', {
     name: 'Test House Workflow BHT',
     role: 'bht',
@@ -741,7 +745,7 @@ test('Test House BHT can read own assignment and create EOC and debrief records'
   }))
 })
 
-test('BHT with exact issue location scope can complete EOC task transaction', async () => {
+retiredBrowserRulesTest('BHT with exact issue location scope can complete EOC task transaction', async () => {
   await seed('users/bht_eoc_issue_scope_only', {
     name: 'EOC Issue Scope BHT',
     role: 'bht',
@@ -830,7 +834,7 @@ test('BHT with exact issue location scope can complete EOC task transaction', as
   }))
 })
 
-test('BHT can complete EOC task transaction when no autosave draft exists', async () => {
+retiredBrowserRulesTest('BHT can complete EOC task transaction when no autosave draft exists', async () => {
   await seed('users/bht_eoc_no_draft', {
     name: 'EOC No Draft BHT',
     role: 'bht',
@@ -906,7 +910,7 @@ test('BHT can complete EOC task transaction when no autosave draft exists', asyn
   }))
 })
 
-test('Test House BHT can submit debrief batch and cannot rewrite derived assignment', async () => {
+retiredBrowserRulesTest('Test House BHT can submit debrief batch and cannot rewrite derived assignment', async () => {
   await seed('users/test_1_rules', {
     name: 'Test One',
     role: 'bht',
@@ -1260,7 +1264,7 @@ test('Test House BHT can submit debrief batch and cannot rewrite derived assignm
   }))
 })
 
-test('house-scoped BHT can create transport completed alert for exact house location', async () => {
+retiredBrowserRulesTest('house-scoped BHT can create transport completed alert for exact house location', async () => {
   await seed('users/test_transport_alert_bht', {
     name: 'Transport Alert BHT',
     role: 'bht',
@@ -1303,7 +1307,7 @@ test('house-scoped BHT can create transport completed alert for exact house loca
   }))
 })
 
-test('house-scoped BHT can create and close an OTC transport', async () => {
+retiredBrowserRulesTest('house-scoped BHT can create and close an OTC transport', async () => {
   await seed('users/bht_house_transport', {
     name: 'House Transport BHT',
     role: 'bht',
@@ -1482,7 +1486,7 @@ test('BHT cannot update another user transport', async () => {
   }))
 })
 
-test('BHT can delete their own active transport', async () => {
+retiredBrowserRulesTest('BHT can delete their own active transport', async () => {
   await seed('users/bht_transport_cancel', {
     name: 'Transport Cancel BHT',
     role: 'bht',
@@ -1620,7 +1624,7 @@ test('BHT cannot delete their own finished transport', async () => {
   await assertFails(deleteDoc(doc(bhtDb, 'transports/own_finished_transport')))
 })
 
-test('targeted BHT alert is readable only by the target user', async () => {
+retiredBrowserRulesTest('targeted BHT alert is readable only by the target user', async () => {
   await seed('users/bht_target', {
     name: 'Target BHT',
     role: 'bht',
@@ -1674,7 +1678,7 @@ test('targeted BHT alert is readable only by the target user', async () => {
   await assertFails(getDoc(doc(authed('other_uid', 'other@scottsdaleprovidence.com'), 'alerts/target_alert')))
 })
 
-test('PIN compatibility mode works after Firebase UID changes without orphaning drafts', async () => {
+retiredBrowserRulesTest('PIN compatibility mode works after Firebase UID changes without orphaning drafts', async () => {
   await seed('appSettings/authPolicy', {
     authScopeEnforced: false
   })
@@ -1829,7 +1833,7 @@ test('PIN compatibility mode works after Firebase UID changes without orphaning 
   }))
 })
 
-test('BHT can save photo-question metadata only for an authorized EOC submission location', async () => {
+retiredBrowserRulesTest('BHT can save photo-question metadata only for an authorized EOC submission location', async () => {
   await seed('users/photo_response_bht', {
     name: 'Photo Response BHT',
     role: 'bht',
@@ -1984,7 +1988,7 @@ test('published EOC templates can be read but browser writes are blocked', async
   await assertFails(deleteDoc(versionRef))
 })
 
-test('EOC template drafts are private to their supervisor owner', async () => {
+retiredBrowserRulesTest('EOC template drafts are private to their supervisor owner', async () => {
   await seed('appSettings/authPolicy', { authScopeEnforced: true })
   await seed('users/draft_supervisor', {
     name: 'Draft Supervisor', role: 'supervisor', active: true,
@@ -2056,7 +2060,7 @@ test('authorized staff can save the automatic missed EOC lifecycle fields', asyn
   }))
 })
 
-test('rule-safe batches allow a large authorized EOC task and alert sync', async () => {
+retiredBrowserRulesTest('rule-safe batches allow a large authorized EOC task and alert sync', async () => {
   await seed('users/eoc_sync_batch_admin', {
     name: 'EOC Sync Batch Admin',
     role: 'admin',
@@ -2118,7 +2122,7 @@ test('rule-safe batches allow a large authorized EOC task and alert sync', async
   await assertSucceeds(getDoc(doc(adminDb, 'alerts', alertIds.at(-1))))
 })
 
-test('BHT can report a returned problem but only a supervisor can reopen the issue', async () => {
+retiredBrowserRulesTest('BHT can report a returned problem but only a supervisor can reopen the issue', async () => {
   await seed('appSettings/authPolicy', {
     authScopeEnforced: true
   })
@@ -2217,7 +2221,7 @@ test('BHT can report a returned problem but only a supervisor can reopen the iss
   }))
 })
 
-test('BHT follow-ups preserve status and cannot impersonate another profile', async () => {
+retiredBrowserRulesTest('BHT follow-ups preserve status and cannot impersonate another profile', async () => {
   await seed('appSettings/authPolicy', { authScopeEnforced: true })
   await seed('users/follow_up_bht', {
     name: 'Follow Up BHT',
@@ -2290,7 +2294,7 @@ test('BHT follow-ups preserve status and cannot impersonate another profile', as
   }))
 })
 
-test('Phase 4-8 metadata rules protect tracking, attachments, patterns, and missed notes', async () => {
+retiredBrowserRulesTest('Phase 4-8 metadata rules protect tracking, attachments, patterns, and missed notes', async () => {
   await seed('appSettings/authPolicy', { authScopeEnforced: true })
   await seed('users/upgrade_bht', { name: 'Upgrade BHT', role: 'bht', active: true, issueLocationIds: ['test_house'], authorizedLocations: ['TEST_HOUSE'], version: 1 })
   await seed('usersByAuthUid/upgrade_bht_uid', { userId: 'upgrade_bht', version: 1 })
@@ -2355,7 +2359,7 @@ test('Phase 4-8 metadata rules protect tracking, attachments, patterns, and miss
   await assertFails(updateDoc(doc(supervisorDb, 'eocIssues/upgrade_issue'), { sourceTrackingId: 'changed', trackingId: 'changed', version: 2, updatedAt: serverTimestamp() }))
 })
 
-test('BHT can submit an active issue for supervisor review but cannot fully resolve it', async () => {
+retiredBrowserRulesTest('BHT can submit an active issue for supervisor review but cannot fully resolve it', async () => {
   await seed('appSettings/authPolicy', { authScopeEnforced: true })
   await seed('users/resolution_bht', { name: 'Resolution BHT', role: 'bht', active: true, issueLocationIds: ['test_house'], authorizedLocations: ['TEST_HOUSE'], locationId: 'test_house', version: 1 })
   await seed('usersByAuthUid/resolution_bht_uid', { userId: 'resolution_bht', version: 1 })
@@ -2397,7 +2401,7 @@ test('BHT can submit an active issue for supervisor review but cannot fully reso
   }))
 })
 
-test('app feedback is owned by the BHT and reviewable only by an admin', async () => {
+retiredBrowserRulesTest('app feedback is owned by the BHT and reviewable only by an admin', async () => {
   await seed('appSettings/authPolicy', { authScopeEnforced: true })
   await seed('users/feedback_bht', { name: 'Feedback BHT', role: 'bht', active: true, issueLocationIds: ['test_house'], authorizedLocations: ['TEST_HOUSE'], locationId: 'test_house', version: 1 })
   await seed('usersByAuthUid/feedback_bht_uid', { userId: 'feedback_bht', version: 1 })

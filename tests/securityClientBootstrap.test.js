@@ -7,7 +7,7 @@ import {
   evaluateMonitoredSecuritySession,
   restoreDormantClientSession
 } from '../src/services/securityClientBootstrap.js'
-import { SECURITY_SESSION_MAX_MS, readStoredSecuritySession } from '../src/services/securityClientSessionModel.js'
+import { SECURITY_SESSION_MAX_MS, persistSecuritySession, readStoredSecuritySession } from '../src/services/securityClientSessionModel.js'
 
 const baseNowMs = Date.UTC(2026, 7, 25, 18)
 
@@ -106,20 +106,22 @@ function adapters(overrides = {}) {
   return { adapters: { ...base, ...overrides, storage }, state, storage }
 }
 
-test('disabled compile/config boundaries preserve legacy fallback without calling the server', async () => {
+test('the compiled secure client calls the server without trusting an unauthenticated browser config read', async () => {
   const compileOff = adapters({ compiledEnabled: false })
   assert.equal((await beginDormantClientPinSession('275184', compileOff.adapters)).status, 'disabled')
   assert.equal(compileOff.state.callCount, 0)
 
   const configOff = adapters({ loadConfig: async () => ({ ...enabledConfig(), clientBootstrapEnabled: false }) })
-  assert.equal((await beginDormantClientPinSession('275184', configOff.adapters)).status, 'disabled')
-  assert.equal(configOff.state.callCount, 0)
+  assert.equal((await beginDormantClientPinSession('275184', configOff.adapters)).status, 'authenticated')
+  assert.equal(configOff.state.callCount, 1)
 })
 
-test('a valid non-enrolled canary PIN returns to the unchanged legacy login path', async () => {
+test('a non-enrolled server response fails closed after compatibility retirement', async () => {
   const context = adapters({ callServerPinLogin: async () => ({ status: 'not_enrolled' }) })
-  const result = await beginDormantClientPinSession('275184', context.adapters)
-  assert.equal(result.status, 'disabled')
+  await assert.rejects(
+    () => beginDormantClientPinSession('275184', context.adapters),
+    error => error instanceof SecurityClientBootstrapError && error.code === 'failed-precondition'
+  )
   assert.equal(context.state.currentUser, null)
   assert.equal(readStoredSecuritySession(context.storage), null)
 })
@@ -187,6 +189,25 @@ test('ordinary logout clears one device and same-device tabs observe the shared 
   assert.equal(device.state.signOutCount, 1)
 })
 
+test('a stale tab cannot clear a newer same-browser secure session', async () => {
+  const oldTab = adapters()
+  await beginDormantClientPinSession('275184', oldTab.adapters)
+  const oldSession = readStoredSecuritySession(oldTab.storage)
+  const newerSession = {
+    ...oldSession,
+    sessionId: 'session_phase3_newer_tab_02',
+    profileId: 'phase3_newer_bht',
+    authUid: 'staff_phase3_newer_uid'
+  }
+  persistSecuritySession(oldTab.storage, newerSession)
+
+  const result = await endDormantClientSession(oldTab.adapters, { expectedSessionId: oldSession.sessionId })
+  assert.equal(result.cleared, false)
+  assert.equal(result.reason, 'newer_session_present')
+  assert.deepEqual(readStoredSecuritySession(oldTab.storage), newerSession)
+  assert.equal(oldTab.state.signOutCount, 0)
+})
+
 test('revocation and authorization changes end sessions while shift and van assignments may refresh', async () => {
   const context = adapters()
   await beginDormantClientPinSession('275184', context.adapters)
@@ -225,4 +246,48 @@ test('offline restore without cached profile is held until reconnect instead of 
   const reconnected = await restoreDormantClientSession(reopened.adapters)
   assert.equal(reconnected.status, 'authenticated')
   assert.equal(reconnected.user.id, 'phase3_bht')
+})
+
+test('offline restore preserves a locally valid session while Firebase identity or claims are unavailable', async () => {
+  const context = adapters()
+  await beginDormantClientPinSession('275184', context.adapters)
+  const stored = readStoredSecuritySession(context.storage)
+
+  const missingIdentity = adapters({ storage: context.storage })
+  await assert.rejects(
+    () => restoreDormantClientSession(missingIdentity.adapters, { offline: true }),
+    error => error instanceof SecurityClientBootstrapError && error.code === 'offline-cache-unavailable'
+  )
+  assert.deepEqual(readStoredSecuritySession(context.storage), stored)
+  assert.equal(missingIdentity.state.signOutCount, 0)
+
+  const staleClaims = adapters({
+    storage: context.storage,
+    getIdTokenClaims: async () => ({ profileId: 'wrong_profile' })
+  })
+  staleClaims.state.currentUser = { uid: 'staff_phase3_uid' }
+  await assert.rejects(
+    () => restoreDormantClientSession(staleClaims.adapters, { offline: true }),
+    error => error instanceof SecurityClientBootstrapError && error.code === 'offline-cache-unavailable'
+  )
+  assert.deepEqual(readStoredSecuritySession(context.storage), stored)
+  assert.equal(staleClaims.state.signOutCount, 0)
+})
+
+test('a network-unavailable restore preserves the saved session even when the browser briefly reports online', async () => {
+  const context = adapters()
+  await beginDormantClientPinSession('275184', context.adapters)
+  const stored = readStoredSecuritySession(context.storage)
+  const reopened = adapters({
+    storage: context.storage,
+    loadProfile: async () => { throw { code: 'firestore/unavailable', message: 'network unavailable' } }
+  })
+  reopened.state.currentUser = { uid: 'staff_phase3_uid' }
+
+  await assert.rejects(
+    () => restoreDormantClientSession(reopened.adapters, { offline: false }),
+    error => error instanceof SecurityClientBootstrapError && error.code === 'offline-cache-unavailable'
+  )
+  assert.deepEqual(readStoredSecuritySession(context.storage), stored)
+  assert.equal(reopened.state.signOutCount, 0)
 })

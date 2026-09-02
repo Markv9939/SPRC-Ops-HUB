@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
-import crypto from 'node:crypto'
 import process from 'node:process'
 import test from 'node:test'
 import { getApps } from 'firebase-admin/app'
 import { Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
+import { createServerPinCredential } from '../src/staffPinCredentialModel.js'
 
 process.env.GCLOUD_PROJECT ||= 'demo-sprc-functions'
+process.env.STAFF_PIN_AUTH_SECRET ||= 'retention-emulator-secret-with-more-than-thirty-two-characters'
 const {
   assignEocTemplateHandler,
   archiveEocTemplateHandler,
   emergencyPrivacyRemoveHandler,
-  establishPinSessionHandler,
   previewEocTemplatePurgeHandler,
   publishEocTemplateHandler,
   purgeEocTemplateHandler,
@@ -22,7 +22,26 @@ const {
 } = await import('../src/index.js')
 const db = getFirestore()
 const bucket = getStorage().bucket()
-const pinHash = pin => crypto.createHash('sha256').update(`sprc-pin-v2-6digit:${pin}`).digest('hex')
+const staffPinSecret = process.env.STAFF_PIN_AUTH_SECRET
+
+async function seedSecureAdmin(profileId, uid, pin, securityVersion = 1) {
+  const sessionId = `session_${profileId}_device_01`
+  await db.doc(`users/${profileId}`).set({
+    role: 'admin', active: true, deleted: false, name: 'Secure Admin',
+    securityVersion, authorizedLocations: [], issueLocationIds: []
+  })
+  await db.doc(`usersByAuthUid/${uid}`).set({ userId: profileId, version: 2 })
+  await db.doc(`staffAuthIdentities/${profileId}`).set({ profileId, authUid: uid, schemaVersion: 2 })
+  await db.doc(`staffSessions/${sessionId}`).set({
+    profileId, authUid: uid, securityVersion, active: true, revokedAt: null,
+    expiresAt: Timestamp.fromMillis(Date.now() + 60 * 60 * 1000)
+  })
+  await db.doc(`staffPinCredentials/${profileId}`).set({
+    ...(await createServerPinCredential(pin, staffPinSecret, { salt: `salt-${profileId}` })),
+    active: true
+  })
+  return { uid, token: { profileId, sessionId, securityVersion } }
+}
 
 test.beforeEach(async () => {
   const collections = await db.listCollections()
@@ -59,35 +78,27 @@ test('reopened issues cancel retention cleanup', async () => {
 })
 
 test('emergency privacy removal verifies admin PIN, deletes bytes, and audits', async () => {
-  await db.doc('users/admin_test').set({ role: 'admin', active: true, name: 'Admin Test', pinHash: pinHash('385104') })
+  const requestAuth = await seedSecureAdmin('admin_test', 'admin_test_uid', '385104')
   await db.doc('eocIssues/privacy_issue').set({ status: 'open', locationId: 'test_house' })
   await db.doc('eocIssues/privacy_issue/attachments/private').set({ state: 'uploaded', storagePath: 'issueAttachments/test_house/privacy_issue/private.jpg', version: 1 })
   await bucket.file('issueAttachments/test_house/privacy_issue/private.jpg').save(Buffer.from([1, 2, 3]), { contentType: 'image/jpeg' })
-  await assert.rejects(() => emergencyPrivacyRemoveHandler({ auth: { uid: 'anon' }, data: { adminProfileId: 'admin_test', pin: '000000', issueId: 'privacy_issue', attachmentId: 'private', reason: 'Contains identifying information.' } }), /Admin PIN/)
-  const result = await emergencyPrivacyRemoveHandler({ auth: { uid: 'anon' }, data: { adminProfileId: 'admin_test', pin: '385104', issueId: 'privacy_issue', attachmentId: 'private', reason: 'Contains identifying information.' } })
+  await assert.rejects(() => emergencyPrivacyRemoveHandler({ auth: requestAuth, data: { adminProfileId: 'admin_test', currentPin: '000000', issueId: 'privacy_issue', attachmentId: 'private', reason: 'Contains identifying information.' } }), /Admin PIN/)
+  const result = await emergencyPrivacyRemoveHandler({ auth: requestAuth, data: { adminProfileId: 'admin_test', currentPin: '385104', issueId: 'privacy_issue', attachmentId: 'private', reason: 'Contains identifying information.' } })
   assert.equal(result.removed, true)
   assert.equal((await db.doc('eocIssues/privacy_issue/attachments/private').get()).data().state, 'privacy_removed')
   assert.equal((await db.collection('auditLogs').where('action', '==', 'attachment_privacy_removed').get()).size, 1)
-  const repeated = await emergencyPrivacyRemoveHandler({ auth: { uid: 'anon' }, data: { adminProfileId: 'admin_test', pin: '385104', issueId: 'privacy_issue', attachmentId: 'private', reason: 'Contains identifying information.' } })
+  const repeated = await emergencyPrivacyRemoveHandler({ auth: requestAuth, data: { adminProfileId: 'admin_test', currentPin: '385104', issueId: 'privacy_issue', attachmentId: 'private', reason: 'Contains identifying information.' } })
   assert.equal(repeated.alreadyRemoved, true)
   assert.equal((await db.collection('auditLogs').where('action', '==', 'attachment_privacy_removed').get()).size, 1)
 })
 
 test('emergency privacy removal locks repeated invalid PIN attempts', async () => {
-  await db.doc('users/admin_lock_test').set({ role: 'admin', active: true, name: 'Locked Admin', pinHash: pinHash('492815') })
+  const requestAuth = await seedSecureAdmin('admin_lock_test', 'admin_lock_test_uid', '492815')
   for (let attempt = 1; attempt <= 4; attempt += 1) {
-    await assert.rejects(() => emergencyPrivacyRemoveHandler({ auth: { uid: 'anon' }, data: { adminProfileId: 'admin_lock_test', pin: '000000', issueId: 'missing', attachmentId: 'missing', reason: 'Synthetic invalid attempt.' } }), error => error?.code === 'permission-denied')
+    await assert.rejects(() => emergencyPrivacyRemoveHandler({ auth: requestAuth, data: { adminProfileId: 'admin_lock_test', currentPin: '000000', issueId: 'missing', attachmentId: 'missing', reason: 'Synthetic invalid attempt.' } }), error => error?.code === 'permission-denied')
   }
-  await assert.rejects(() => emergencyPrivacyRemoveHandler({ auth: { uid: 'anon' }, data: { adminProfileId: 'admin_lock_test', pin: '000000', issueId: 'missing', attachmentId: 'missing', reason: 'Synthetic invalid attempt.' } }), error => error?.code === 'resource-exhausted')
-  await assert.rejects(() => emergencyPrivacyRemoveHandler({ auth: { uid: 'anon' }, data: { adminProfileId: 'admin_lock_test', pin: '492815', issueId: 'missing', attachmentId: 'missing', reason: 'Synthetic locked attempt.' } }), error => error?.code === 'resource-exhausted')
-})
-
-test('verified PIN sessions securely map the current Firebase UID to the staff profile', async () => {
-  await db.doc('users/pin_session_supervisor').set({ role: 'supervisor', active: true, name: 'PIN Session Supervisor', pinHash: pinHash('275184') })
-  await assert.rejects(() => establishPinSessionHandler({ auth: { uid: 'pin_session_uid' }, data: { profileId: 'pin_session_supervisor', pin: '000000' } }), error => error?.code === 'permission-denied')
-  const result = await establishPinSessionHandler({ auth: { uid: 'pin_session_uid' }, data: { profileId: 'pin_session_supervisor', pin: '275184' } })
-  assert.equal(result.profileId, 'pin_session_supervisor')
-  assert.equal((await db.doc('usersByAuthUid/pin_session_uid').get()).data().userId, 'pin_session_supervisor')
+  await assert.rejects(() => emergencyPrivacyRemoveHandler({ auth: requestAuth, data: { adminProfileId: 'admin_lock_test', currentPin: '000000', issueId: 'missing', attachmentId: 'missing', reason: 'Synthetic invalid attempt.' } }), error => error?.code === 'resource-exhausted')
+  await assert.rejects(() => emergencyPrivacyRemoveHandler({ auth: requestAuth, data: { adminProfileId: 'admin_lock_test', currentPin: '492815', issueId: 'missing', attachmentId: 'missing', reason: 'Synthetic locked attempt.' } }), error => error?.code === 'resource-exhausted')
 })
 
 test('template publishing is owner-scoped, immutable, and idempotent', async () => {
@@ -226,8 +237,7 @@ test('admin archive review reassigns defaults and resolves the supervisor reques
 test('permanent template deletion requires an archived unused template and the current admin PIN', async () => {
   await db.doc('users/purge_supervisor').set({ role: 'supervisor', active: true, name: 'Purge Supervisor', authorizedLocations: ['OTC'] })
   await db.doc('usersByAuthUid/purge_supervisor_uid').set({ userId: 'purge_supervisor' })
-  await db.doc('users/purge_admin').set({ role: 'admin', active: true, name: 'Purge Admin', authorizedLocations: [], pinHash: pinHash('614295') })
-  await db.doc('usersByAuthUid/purge_admin_uid').set({ userId: 'purge_admin' })
+  const purgeAdminAuth = await seedSecureAdmin('purge_admin', 'purge_admin_uid', '614295')
   const published = await publishEocTemplateHandler({
     auth: { uid: 'purge_supervisor_uid' },
     data: { operationId: 'purge_publish', template: { name: 'Unused Template', eocType: 'house', sections: [{ id: 'unused_section', title: 'Unused', questions: [{ trackingId: 'unused_question', label: 'Unused check', questionType: 'pass_issue' }] }] } }
@@ -239,12 +249,12 @@ test('permanent template deletion requires an archived unused template and the c
   const impact = await previewEocTemplatePurgeHandler({ auth: { uid: 'purge_admin_uid' }, data: { templateId: published.templateId } })
   assert.equal(impact.purgeAllowed, true)
   await assert.rejects(() => purgeEocTemplateHandler({
-    auth: { uid: 'purge_admin_uid' },
-    data: { operationId: 'purge_wrong_pin', templateId: published.templateId, adminProfileId: 'purge_admin', pin: '000000', reason: 'Remove unused test template.' }
+    auth: purgeAdminAuth,
+    data: { operationId: 'purge_wrong_pin', templateId: published.templateId, adminProfileId: 'purge_admin', currentPin: '000000', reason: 'Remove unused test template.' }
   }), error => error?.code === 'permission-denied')
   const result = await purgeEocTemplateHandler({
-    auth: { uid: 'purge_admin_uid' },
-    data: { operationId: 'purge_success', templateId: published.templateId, adminProfileId: 'purge_admin', pin: '614295', reason: 'Remove unused test template.' }
+    auth: purgeAdminAuth,
+    data: { operationId: 'purge_success', templateId: published.templateId, adminProfileId: 'purge_admin', currentPin: '614295', reason: 'Remove unused test template.' }
   })
   assert.equal(result.purged, true)
   assert.equal((await db.doc(`eocTemplateLibrary/${published.templateId}`).get()).exists, false)

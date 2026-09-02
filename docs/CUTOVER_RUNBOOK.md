@@ -1,6 +1,6 @@
 # SPRC Ops Hub Deployment and Reset Runbook
 
-Last updated: 2026-08-09
+Last updated: 2026-09-01
 
 ## Normal Release
 
@@ -12,16 +12,16 @@ Last updated: 2026-08-09
 
 ## Core Reset Safety
 
-The only configured Firebase project is production project `sprc-tx-l`. A reset is destructive and requires owner approval.
+The pre-secure core-reset tool and npm commands were retired after the custom-token/strict-session security closeout. They created browser-readable PIN hashes and an auth policy that is incompatible with the current security foundation. Do not recover or run them from Git history against production.
 
-1. Run `npm run reset:core:preview` to inventory every collection without writing.
-2. Run `npm run reset:core:backup` to create and validate a JSON backup outside the repository.
+Any future reset must be designed as a new, separately reviewed server-credential/session-aware migration with a fresh backup and rollback contract. The steps below are retained only as historical context and are not executable current instructions.
+
+1. Inventory every collection without writing.
+2. Create and validate a complete JSON backup outside the repository.
 3. Review the exact Auth user count, delete count, preserve count, and unclassified collections.
 4. Do not continue if any collection is unclassified or any preserved catalog appears in the delete set.
 5. Run the confirmed reset only with the exact project ID, typed confirmation phrase, and approved expected counts.
-6. Immediately run `npm run reset:core:verify` before browser login.
-
-The confirmed command is intentionally not stored as an npm shortcut. Obtain the required flags from `node scripts/resetProductionCore.js --help` and compare them with the approved preview.
+6. Validate server PIN credentials, identity mappings, sessions, strict rules, and every workflow before browser login.
 
 ## Preserved Core
 

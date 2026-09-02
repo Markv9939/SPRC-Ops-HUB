@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { db, auth } from './firebase'
+import { db } from './firebase'
 import { collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, getDocs, doc } from 'firebase/firestore'
-import { signOut } from 'firebase/auth'
 import PinLogin from './components/PinLogin'
 import Header from './components/Header'
 import BhtHub from './components/BhtHub'
@@ -17,7 +16,6 @@ import ToastHost from './components/ToastHost'
 import DialogHost from './components/DialogHost'
 import { syncEocTasksForUserScope } from './services/eocTaskEngine'
 import { syncFleetTasksForUserScope } from './services/fleetTaskEngine'
-import { refreshScopedSessionUser } from './services/accessGrantService'
 import { changeOwnPin } from './services/userPinService'
 import { getOfflineDraft, listAllOfflineActions, listOfflineDrafts, saveOfflineDraft } from './services/offlineStore'
 import {
@@ -56,42 +54,13 @@ import {
 } from './utils/orgModel'
 import { toTransportRecordDate } from './utils/transportRecord'
 import {
-  SECURITY_CLIENT_BOOTSTRAP_COMPILED,
   endSecurityClientSession,
   restoreSecurityClientSession,
   subscribeToSecurityClientSession
 } from './services/securityClientRuntime'
-import {
-  compatibilitySessionRequiresFreshLogin,
-  isSecurityCompatibilityUser
-} from './services/securityClientSessionModel'
-import { subscribeToAuthPolicy } from './services/authPolicyService'
 import { createProtectedTransport, shouldUseProtectedTransport } from './services/protectedTransportService'
 
-const AUTO_LOCK_TIMEOUT = 60 * 60 * 1000 // 60 minutes in milliseconds
 const TRANSPORT_SITES = new Set(MAIN_LOCATIONS)
-
-function loadLegacyStoredUser() {
-  const saved = sessionStorage.getItem('bhtUser')
-  if (!saved) return null
-  const lastActivityTime = parseInt(localStorage.getItem('lastActivity') || '0')
-  if (Date.now() - lastActivityTime > AUTO_LOCK_TIMEOUT) {
-    sessionStorage.removeItem('bhtUser')
-    localStorage.removeItem('lastActivity')
-    return null
-  }
-  try {
-    return JSON.parse(saved)
-  } catch {
-    sessionStorage.removeItem('bhtUser')
-    return null
-  }
-}
-
-function loadSecurityCompatibilityUser() {
-  const storedUser = loadLegacyStoredUser()
-  return isSecurityCompatibilityUser(storedUser) ? storedUser : null
-}
 const ACTIVE_TRANSPORT_STATUSES = new Set(['open', 'arrived'])
 const DASHBOARD_TABS = new Set([
   'dashboard',
@@ -301,8 +270,8 @@ function App() {
     () => parseAppRoute(location.pathname, location.search),
     [location.pathname, location.search]
   )
-  const [user, setUser] = useState(() => SECURITY_CLIENT_BOOTSTRAP_COMPILED ? null : loadLegacyStoredUser())
-  const [securityBootstrapPending, setSecurityBootstrapPending] = useState(SECURITY_CLIENT_BOOTSTRAP_COMPILED)
+  const [user, setUser] = useState(null)
+  const [securityBootstrapPending, setSecurityBootstrapPending] = useState(true)
   const [transports, setTransports] = useState([])
   const page = activeRoute.page
   const currentTransportId = activeRoute.currentTransportId || null
@@ -363,7 +332,6 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!SECURITY_CLIENT_BOOTSTRAP_COMPILED) return undefined
     let cancelled = false
     let retryOnReconnect = false
     let restoreRunning = false
@@ -376,10 +344,7 @@ function App() {
         const result = await restoreSecurityClientSession({ offline: navigator.onLine === false })
         if (cancelled) return
         retryOnReconnect = false
-        if (result.status === 'authenticated') setUser(result.user)
-        else if (result.status === 'disabled') setUser(loadLegacyStoredUser())
-        else if (result.status === 'signed_out') setUser(loadSecurityCompatibilityUser())
-        else setUser(null)
+        setUser(result.status === 'authenticated' ? result.user : null)
       } catch (error) {
         if (cancelled) return
         console.warn('Secure session restore was unavailable:', error)
@@ -467,13 +432,8 @@ function App() {
   }, [navigate])
 
   function handleLogin(userData) {
-    if (userData?.securitySessionVersion === 3) {
-      sessionStorage.removeItem('bhtUser')
-      localStorage.removeItem('lastActivity')
-    } else {
-      sessionStorage.setItem('bhtUser', JSON.stringify(userData))
-      localStorage.setItem('lastActivity', Date.now().toString())
-    }
+    sessionStorage.removeItem('bhtUser')
+    localStorage.removeItem('lastActivity')
     setUser(userData)
     const route = parseAppRoute(location.pathname)
     const isManagement = isSupervisorRole(userData?.role) || isAdminRole(userData?.role)
@@ -511,34 +471,14 @@ function App() {
   }
 
   const handleLogout = useCallback(async () => {
-    if (user?.securitySessionVersion === 3) {
-      await endSecurityClientSession()
-    } else {
-      try {
-        await signOut(auth)
-      } catch (err) {
-        console.warn('Firebase signOut failed:', err)
-      }
-    }
+    await endSecurityClientSession()
     sessionStorage.removeItem('bhtUser')
     setUser(null)
     setTransports([])
     setBhtDebriefAssignment(null)
     localStorage.removeItem('lastActivity')
     navigate('/', { replace: true })
-  }, [navigate, user?.securitySessionVersion])
-
-  useEffect(() => {
-    if (!isSecurityCompatibilityUser(user)) return undefined
-    let handled = false
-    return subscribeToAuthPolicy(policy => {
-      if (handled || !compatibilitySessionRequiresFreshLogin(user, policy)) return
-      handled = true
-      handleLogout()
-        .then(() => alert('Security was updated. Enter your six-digit PIN again to continue.'))
-        .catch(error => console.warn('Compatibility session close failed during security cutover:', error))
-    }, error => console.warn('Security policy monitoring was unavailable:', error))
-  }, [handleLogout, user])
+  }, [navigate])
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false)
@@ -664,89 +604,6 @@ function App() {
       onTransientError: error => console.warn('Secure session will be rechecked after reconnect:', error)
     })
   }, [navigate, user?.id, user?.securitySessionVersion])
-
-  // Track user activity for the unchanged legacy 60-minute auto-lock.
-  useEffect(() => {
-    if (!user || user.securitySessionVersion === 3) return
-
-    const updateActivity = () => {
-      localStorage.setItem('lastActivity', Date.now().toString())
-    }
-
-    // Update activity on user interaction
-    const events = ['mousedown', 'keydown', 'scroll', 'touchstart']
-    events.forEach(event => {
-      document.addEventListener(event, updateActivity)
-    })
-
-    // Check for inactivity every minute
-    const inactivityCheck = setInterval(() => {
-      const lastActivityTime = parseInt(localStorage.getItem('lastActivity') || Date.now().toString())
-      const timeSinceActivity = Date.now() - lastActivityTime
-
-      if (timeSinceActivity > AUTO_LOCK_TIMEOUT) {
-        alert('Session expired due to inactivity. Please log in again.')
-        handleLogout()
-      }
-    }, 60000) // Check every minute
-
-    return () => {
-      events.forEach(event => {
-        document.removeEventListener(event, updateActivity)
-      })
-      clearInterval(inactivityCheck)
-    }
-  }, [handleLogout, user])
-
-  // Keep session scope aligned with live `accessGrants` lifecycle and account deactivation.
-  useEffect(() => {
-    if (!user?.id || isOffline || user.securitySessionVersion === 3) return
-
-    let cancelled = false
-    const refreshSessionScope = async () => {
-      try {
-        const refreshedUser = await refreshScopedSessionUser(user.id)
-        if (cancelled) return
-
-        if (!refreshedUser) {
-          alert('Your account is no longer active. Please log in again.')
-          sessionStorage.removeItem('bhtUser')
-          localStorage.removeItem('lastActivity')
-          setUser(null)
-          setTransports([])
-          setBhtDebriefAssignment(null)
-          navigate('/', { replace: true })
-          return
-        }
-
-        setUser(prev => {
-          if (!prev || prev.id !== refreshedUser.id) return prev
-          const mergedUser = {
-            ...refreshedUser,
-            authUid: prev.authUid || null,
-            authScopeEnforced: prev.authScopeEnforced === true,
-            securityCompatibilityVersion: prev.securityCompatibilityVersion
-          }
-
-          if (toScopeSignature(prev) === toScopeSignature(mergedUser)) return prev
-          sessionStorage.setItem('bhtUser', JSON.stringify(mergedUser))
-          return mergedUser
-        })
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Failed to refresh session scope:', err)
-        }
-      }
-    }
-
-    refreshSessionScope()
-    const intervalId = setInterval(refreshSessionScope, 60000)
-
-    return () => {
-      cancelled = true
-      clearInterval(intervalId)
-    }
-  }, [user?.id, user?.securitySessionVersion, isOffline, navigate])
 
   // Load transports from Firestore — BHT only.
   // Supervisor/Admin manage their own transport state inside SupervisorDashboard,

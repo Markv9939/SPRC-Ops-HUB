@@ -1,22 +1,18 @@
 /* global process */
-import { createHash } from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore, Timestamp } from 'firebase-admin/firestore'
+import { createServerPinCredential } from '../functions/src/staffPinCredentialModel.js'
 import { getShiftById } from '../src/data/eocConstants.js'
 import { getCurrentCycleDueDate } from '../src/utils/eocSchedule.js'
 
 const PROJECT_ID = 'sprc-ops-hub-phase3-e2e'
-const PIN_HASH_PEPPER = 'sprc-pin-v2-6digit'
+const staffPinSecret = process.env.STAFF_PIN_AUTH_SECRET || 'issue-browser-emulator-secret-with-more-than-thirty-two-characters'
 
 process.env.FIRESTORE_EMULATOR_HOST ||= '127.0.0.1:8080'
 
 initializeApp({ projectId: PROJECT_ID })
 const db = getFirestore()
 const securityFoundationEnabled = process.env.SPRC_E2E_SECURITY_MODE !== 'legacy'
-
-function hashPin(pin) {
-  return createHash('sha256').update(`${PIN_HASH_PEPPER}:${pin}`).digest('hex')
-}
 
 const now = Timestamp.now()
 const dueDate = getCurrentCycleDueDate(getShiftById('shift_1'))
@@ -54,8 +50,6 @@ const writes = [
     role: 'bht',
     active: true,
     deleted: false,
-    pinHash: hashPin('111111'),
-    pinVersion: 'v2_sha256_6digit',
     site: 'OTC',
     location: 'OTC',
     house: 'TEST_HOUSE',
@@ -65,6 +59,7 @@ const writes = [
     shiftId: 'shift_1',
     vanId: 'van_test',
     vanIds: ['van_test'],
+    securityVersion: 1,
     version: 1,
     createdAt: now,
     updatedAt: now
@@ -74,12 +69,11 @@ const writes = [
     role: 'supervisor',
     active: true,
     deleted: false,
-    pinHash: hashPin('222222'),
-    pinVersion: 'v2_sha256_6digit',
     site: 'OTC',
     location: 'OTC',
     authorizedLocations: ['OTC', 'TEST_HOUSE'],
     issueLocationIds: ['test_house'],
+    securityVersion: 1,
     version: 1,
     createdAt: now,
     updatedAt: now
@@ -89,8 +83,6 @@ const writes = [
     role: 'bht',
     active: true,
     deleted: false,
-    pinHash: hashPin('444444'),
-    pinVersion: 'v2_sha256_6digit',
     site: 'OTC',
     location: 'OTC',
     house: 'TEST_HOUSE',
@@ -100,6 +92,7 @@ const writes = [
     shiftId: 'shift_2',
     vanId: 'van_test',
     vanIds: ['van_test'],
+    securityVersion: 1,
     version: 1,
     createdAt: now,
     updatedAt: now
@@ -109,8 +102,6 @@ const writes = [
     role: 'bht',
     active: true,
     deleted: false,
-    pinHash: hashPin('555555'),
-    pinVersion: 'v2_sha256_6digit',
     site: 'OTC',
     location: 'OTC',
     house: 'TEST_HOUSE',
@@ -120,6 +111,7 @@ const writes = [
     shiftId: 'shift_1',
     vanId: 'van_test',
     vanIds: ['van_test'],
+    securityVersion: 1,
     version: 1,
     createdAt: now,
     updatedAt: now
@@ -129,12 +121,11 @@ const writes = [
     role: 'admin',
     active: true,
     deleted: false,
-    pinHash: hashPin('333333'),
-    pinVersion: 'v2_sha256_6digit',
     site: 'ALL',
     location: 'ALL',
     authorizedLocations: ['ALL', 'OTC', 'RES', 'TEST_HOUSE'],
     issueLocationIds: ['test_house', 'mesquite', 'lone_mountain', 'res'],
+    securityVersion: 1,
     version: 1,
     createdAt: now,
     updatedAt: now
@@ -153,6 +144,7 @@ const writes = [
     shiftId: 'shift_1',
     vanId: 'van_1',
     vanIds: ['van_1'],
+    securityVersion: 1,
     version: 1,
     createdAt: now,
     updatedAt: now
@@ -520,4 +512,17 @@ const batch = db.batch()
 writes.forEach(([path, data]) => batch.set(db.doc(path), data))
 await batch.commit()
 
-console.log(JSON.stringify({ projectId: PROJECT_ID, dueDate, dueDateShift2, seededDocuments: writes.length }))
+for (const [profileId, pin] of Object.entries({
+  phase3_bht: '111111',
+  phase3_supervisor: '222222',
+  phase3_same_house_bht: '444444',
+  phase3_tablet_bht: '555555',
+  phase3_admin: '333333'
+})) {
+  await db.doc(`staffPinCredentials/${profileId}`).set({
+    ...(await createServerPinCredential(pin, staffPinSecret, { salt: `issue-seed-${profileId}` })),
+    active: true
+  })
+}
+
+console.log(JSON.stringify({ projectId: PROJECT_ID, dueDate, dueDateShift2, seededDocuments: writes.length, serverCredentials: 5 }))

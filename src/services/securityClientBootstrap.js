@@ -8,7 +8,6 @@ import {
   persistSecuritySession,
   profileAuthorizationSignature,
   readStoredSecuritySession,
-  securityClientConfigEnabled,
   toSecureSessionUser,
   validateStoredSecuritySession
 } from './securityClientSessionModel.js'
@@ -30,13 +29,26 @@ function callableError(error) {
   return new SecurityClientBootstrapError('unavailable', 'Secure login is temporarily unavailable. Check the connection and try again.', error)
 }
 
-async function safeClear(adapters) {
+function isTransientRestoreError(error) {
+  const code = String(error?.code || '').replace(/^(firestore|auth)\//, '')
+  return ['unavailable', 'network-request-failed', 'deadline-exceeded', 'cancelled'].includes(code)
+}
+
+async function safeClear(adapters, { expectedSessionId = '', allowMissing = true } = {}) {
+  const current = readStoredSecuritySession(adapters.storage)
+  if (expectedSessionId && current?.sessionId && current.sessionId !== expectedSessionId) {
+    return { cleared: false, reason: 'newer_session_present' }
+  }
+  if (expectedSessionId && !current && !allowMissing) {
+    return { cleared: false, reason: 'session_already_replaced' }
+  }
   clearStoredSecuritySession(adapters.storage)
   try {
     await adapters.signOut()
   } catch {
     // A local record must still be cleared if Firebase sign-out cannot reach the network.
   }
+  return { cleared: true, reason: '' }
 }
 
 async function verifiedAuthContext(adapters, expected) {
@@ -66,17 +78,11 @@ async function loadVerifiedProfile(adapters, session, { cacheOnly = false, claim
 
 export async function beginDormantClientPinSession(pin, adapters) {
   if (adapters.compiledEnabled !== true) return { status: 'disabled' }
-  let config
-  try {
-    config = await adapters.loadConfig()
-  } catch (error) {
-    throw new SecurityClientBootstrapError('config-unavailable', 'Secure login readiness could not be verified. Check the connection and try again.', error)
-  }
-  if (!securityClientConfigEnabled(config, true)) return { status: 'disabled' }
 
   const deviceId = ensureSecurityDeviceId(adapters.storage, adapters.createId)
   const operationId = createSecurityOperationId(adapters.createId)
   let signedIn = false
+  let issuedSessionId = ''
   try {
     let callableResult
     try {
@@ -84,8 +90,11 @@ export async function beginDormantClientPinSession(pin, adapters) {
     } catch (error) {
       throw callableError(error)
     }
-    if (callableResult?.status === 'not_enrolled') return { status: 'disabled' }
+    if (callableResult?.status === 'not_enrolled') {
+      throw new SecurityClientBootstrapError('failed-precondition', 'Secure login is not available for this account. Contact an administrator.')
+    }
     const response = normalizeServerPinLoginResponse(callableResult, adapters.now())
+    issuedSessionId = response.session.id
     await adapters.usePersistentAuth()
     const credential = await adapters.signInWithCustomToken(response.customToken)
     signedIn = true
@@ -103,7 +112,7 @@ export async function beginDormantClientPinSession(pin, adapters) {
       session: provisional
     }
   } catch (error) {
-    if (signedIn) await safeClear(adapters)
+    if (signedIn) await safeClear(adapters, { expectedSessionId: issuedSessionId, allowMissing: true })
     if (error instanceof SecurityClientBootstrapError) throw error
     throw new SecurityClientBootstrapError('unavailable', 'Secure login could not be completed. Check the connection and try again.', error)
   }
@@ -113,24 +122,10 @@ export async function restoreDormantClientSession(adapters, { offline = false } 
   if (adapters.compiledEnabled !== true) return { status: 'disabled' }
   const stored = readStoredSecuritySession(adapters.storage)
 
-  if (!offline) {
-    let config
-    try {
-      config = await adapters.loadConfig()
-    } catch (error) {
-      if (!stored) throw new SecurityClientBootstrapError('config-unavailable', 'Secure session readiness could not be verified.', error)
-      throw new SecurityClientBootstrapError('config-unavailable', 'The saved secure session could not be verified.', error)
-    }
-    if (!securityClientConfigEnabled(config, true)) {
-      if (stored) await safeClear(adapters)
-      return { status: 'disabled' }
-    }
-  }
-
   if (!stored) return { status: 'signed_out' }
   const localValidation = validateStoredSecuritySession(stored, { nowMs: adapters.now() })
   if (!localValidation.valid) {
-    await safeClear(adapters)
+    await safeClear(adapters, { expectedSessionId: stored.sessionId, allowMissing: false })
     return { status: 'signed_out', reason: localValidation.reason }
   }
 
@@ -144,16 +139,16 @@ export async function restoreDormantClientSession(adapters, { offline = false } 
       offline
     }
   } catch (error) {
-    if (offline && error?.code !== 'session-revoked' && error?.code !== 'session-invalid') {
+    if (offline || isTransientRestoreError(error)) {
       throw new SecurityClientBootstrapError('offline-cache-unavailable', 'Reconnect to verify this saved session.', error)
     }
-    await safeClear(adapters)
+    await safeClear(adapters, { expectedSessionId: stored.sessionId, allowMissing: false })
     return { status: 'signed_out', reason: error?.code || 'restore_failed' }
   }
 }
 
-export async function endDormantClientSession(adapters) {
-  await safeClear(adapters)
+export async function endDormantClientSession(adapters, { expectedSessionId = '' } = {}) {
+  return safeClear(adapters, { expectedSessionId, allowMissing: !expectedSessionId })
 }
 
 export function evaluateMonitoredSecuritySession({ session, authUid, claims, rawProfile, nowMs }) {

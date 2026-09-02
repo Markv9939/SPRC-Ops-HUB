@@ -30,11 +30,7 @@ import {
   flushPendingSecurityDeviceClosures
 } from './securityAccountActions.js'
 
-function parseBoolean(value) {
-  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase())
-}
-
-export const SECURITY_CLIENT_BOOTSTRAP_COMPILED = parseBoolean(import.meta.env?.VITE_ENABLE_SECURITY_BOOTSTRAP_V3)
+export const SECURITY_CLIENT_BOOTSTRAP_COMPILED = true
 
 function createId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -86,10 +82,6 @@ function runtimeAdapters() {
     storage: globalThis.localStorage,
     now: () => Date.now(),
     createId,
-    loadConfig: async () => {
-      const snapshot = await getDocFromServer(doc(db, 'appSettings', 'securityFoundation'))
-      return snapshot.exists() ? snapshot.data() : {}
-    },
     callServerPinLogin: async payload => {
       const response = await httpsCallable(functions, 'beginStaffPinSessionV2')(payload)
       return response.data
@@ -117,9 +109,13 @@ export async function restoreSecurityClientSession({ offline = false } = {}) {
   return result
 }
 
-export async function endSecurityClientSession({ skipRemote = false } = {}) {
-  if (!skipRemote) await closeCurrentSecurityDeviceSession()
-  return endDormantClientSession(runtimeAdapters())
+export async function endSecurityClientSession({ skipRemote = false, expectedSessionId = '' } = {}) {
+  const current = readStoredSecuritySession(globalThis.localStorage)
+  if (expectedSessionId && current?.sessionId !== expectedSessionId) {
+    return { status: 'superseded' }
+  }
+  if (!skipRemote) await closeCurrentSecurityDeviceSession({ expectedSessionId })
+  return endDormantClientSession(runtimeAdapters(), { expectedSessionId })
 }
 
 export function subscribeToSecurityClientSession({ onUser, onInvalid, onTransientError }) {
@@ -139,13 +135,17 @@ export function subscribeToSecurityClientSession({ onUser, onInvalid, onTransien
     if (stopped) return
     stopped = true
     profileStop()
-    await endSecurityClientSession()
+    await endSecurityClientSession({ expectedSessionId: session.sessionId })
     onInvalid?.(reason)
   }
 
   const authStop = onIdTokenChanged(auth, async currentUser => {
     if (stopped) return
     if (!currentUser) {
+      if (navigator.onLine === false) {
+        onTransientError?.(new Error('Firebase identity is waiting for the device to reconnect.'))
+        return
+      }
       await invalidate('firebase_signed_out')
       return
     }

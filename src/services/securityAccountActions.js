@@ -48,9 +48,10 @@ function writePending(storage, entries) {
   else storage?.setItem?.(SECURITY_LOGOUT_PENDING_KEY, JSON.stringify(entries.slice(-10)))
 }
 
-export async function closeCurrentSecurityDeviceSession({ storage = globalThis.localStorage } = {}) {
+export async function closeCurrentSecurityDeviceSession({ storage = globalThis.localStorage, expectedSessionId = '' } = {}) {
   const session = readStoredSecuritySession(storage)
   if (!session?.sessionId) return { status: 'no_session' }
+  if (expectedSessionId && session.sessionId !== expectedSessionId) return { status: 'superseded' }
   const operationId = securityOperationId(createId)
   try {
     const result = await performSecurityAccountAction({

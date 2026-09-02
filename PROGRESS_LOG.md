@@ -4,6 +4,42 @@ Last updated: 2026-09-01
 Status: Active evidence log
 Quick orientation: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
+## 2026-09-01 — Final compatibility-retirement release candidate completed locally
+
+### Scope and behavior preserved
+
+- Continued from verified `Main` baseline `123dbec` without repeating Phases 1–9, the all-active rollout, strict-authorization rollout/rollback work, or completed live canaries.
+- Preserved the familiar six-digit PIN screen, stable server-issued custom-token identity, absolute 84-hour per-device persistence across browser close/reopen, independent multi-device sessions, one-device logout, automatic all-device security revocation, scoped supervisor management of BHT/tech accounts at one home location, and monitoring-only App Check.
+- Preserved every named operational workflow: Identity/Users, templates/photos, EOC/offline replay, debriefs/alerts/corrections/reassignment, issues/feedback/audits, transports, properties/fleet/compliance/Cintas/Settings, and supported offline owner/replay behavior.
+
+### Final retirement implementation
+
+- Removed browser PIN lookup/hash trust, compatibility sessions and fallback, direct browser PIN/account security mutation, server legacy-profile PIN migration/private endpoint code, and Firestore/Storage compatibility authorization branches. Server-only credentials, current device sessions, security-version checks, and protected Functions remain authoritative.
+- Added admin-only protected hard delete and completed protected account/session action coverage. Ordinary logout closes one device; PIN changes/resets, deactivation, role/location/access reductions, and end-all-sessions retain coordinated all-device revocation/audit behavior.
+- Tightened the remaining strict EOC/background queries and removed obsolete browser-write helpers plus old Google/email-link browser mapping writes from Firestore rules.
+- Fixed a real Android/Chromium offline-reopen timing case: a transient Firestore `unavailable` response can arrive while the browser briefly claims it is online. The client now preserves a locally valid saved session and rechecks it on reconnect instead of erasing it; local absolute expiry still ends immediately.
+- Added stale-tab protection so an older same-browser tab cannot sign out or clear a newer session. Added emulator-owner credentials to test-only Firestore REST evidence operations after strict rules correctly denied unauthenticated test setup/readback.
+- Replaced leaking Windows Playwright web-server subprocess wrappers with the existing directly managed Vite global server. All workflow suites now terminate cleanly.
+- Retired obsolete maintenance entry points that could reopen the old boundary: compatibility browser tests/cutover/staff-rollout commands, Anonymous-Auth production Storage smoke, and the pre-secure core reset and its shortcuts/tests. Git history retains their audit trail, but the current project no longer advertises or executes them.
+- Reconciled `README.md`, the security canary/rollback record, the cutover runbook, this Progress Log, and the Master Plan with the completed security architecture and current release boundary.
+
+### Verification evidence
+
+- Security unit contracts: 102 passed, 0 failed.
+- Security Firestore/Auth emulator contracts: 44 passed, 0 failed, including login/rate limits, stable identity, independent devices, all revocation triggers, scoped supervisor actions, malformed profiles, offline replay, two-device transport conflicts, idempotency, and negative cases.
+- Strict Firestore rules: 17 current strict/negative tests passed, 23 explicitly retired compatibility tests skipped, 0 failed. Storage rules: 4 passed, 0 failed.
+- Functions model tests: 8 passed. Functions/Firestore/Auth/Storage emulator tests: 9 passed. App/runtime Functions still declare Node 22; this workstation ran emulator Functions on Node `24.13.0`, so no new local Node 22 parity is claimed.
+- Full browser workflow matrix: 37 selected role/device journeys passed, 0 failed. This includes the 11-test secure identity/account/session suite across phone/tablet/desktop, Templates/Photos 2, EOC/offline 1, Debriefs/Alerts 7, Issues/Feedback/Audit 4, Transports 5, Operations Administration 3, Settings 3, and the exhaustive offline/reconnect owner matrix 1. Non-applicable viewport duplicates were intentionally skipped.
+- Production-built cold offline shell: 1 passed. Independent full-Chrome-process offline restart with the same persistent profile: 1 passed, with a nonblank PIN screen after relaunch.
+- ESLint passed. Production build passed with 1,908 modules. Compatibility-retirement gate passed every required preservation/removal check. The rewritten readiness verifier reports the local release candidate ready and only the explicit local Node 22 parity gap. `git diff --check` passed apart from one trailing blank line subsequently corrected and normal Windows line-ending warnings.
+- Firebase emulator product scripts reported success before Firebase CLI's known local updater-cache shutdown error. Browser Function runs also logged expired Firebase CLI credentials while attempting Secret Manager lookup; the explicitly supplied emulator-only process variable allowed the test Function to run. No `.secret.local` file or production secret was created, changed, or exposed.
+
+### Release/data boundary
+
+- This entry records local work only. Nothing in this release candidate has yet been committed, pushed, merged, deployed, or activated.
+- No PIN was reset or changed, no account was created/deactivated/deleted, no session was ended in production, no production record/config/Auth provider/App Check setting was changed, and Anonymous Authentication was not enabled.
+- Remaining closeout: final diff/document checks, commit/review/merge, coordinated Functions + Firestore rules + Storage rules + Hosting deployment, read-only live login/reload/role/workflow smoke, and final release evidence.
+
 ## 2026-09-01 — Strict canary rollback and Supervisor query correction
 
 ### Live evidence and safe rollback

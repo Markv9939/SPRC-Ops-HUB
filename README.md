@@ -87,15 +87,15 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Instruction alignment + approved exceptions: `docs/PROJECT_ALIGNMENT.md`
 - Session startup + operating rules: `PROJECT_INSTRUCTIONS.md`
 - Change history: `CHANGELOG.md`
-- Deployment and reset safety: `docs/CUTOVER_RUNBOOK.md`
+- Deployment and security release safety: `docs/CUTOVER_RUNBOOK.md`
 - Business context: `docs/SPRC_Master_Context.md`
 - SPRC Hub integration reference: `docs/CEO_Hub_Progress.md`
 
 ## Runtime
 - App entry: `src/App.jsx`
 - Active roles: `bht`, `supervisor`, `admin`
-- Data backend: Firebase Firestore; the exact three-profile canary receives a server-verified stable Firebase identity/session while non-canary staff retain the compatibility PIN path until a separately approved staged enrollment
-- Profile selection: six-digit PIN mapped to permanent `users/{id}` records
+- Data backend: Firebase Firestore with server-verified PIN credentials, stable custom-token identities, and strict current-session rules
+- Profile selection: the familiar six-digit PIN mapped server-side to permanent `users/{id}` records; sessions persist per device for an absolute maximum of 84 hours
 
 ## Commands
 - Install: `npm install`
@@ -107,7 +107,6 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Local security readiness audit: `npm run verify:security-readiness`
 - Guarded canary stage model tests: `npm run test:security-canary-stage`
 - Secure client/account/RES browser gate: `npm run test:security-client:emulator` (inside the documented Node 22 Firebase emulator wrapper)
-- Non-enrolled compatibility browser gate: `npm run test:security-compatibility:emulator` (inside the documented Node 22 Firebase emulator wrapper)
 - Focused secure templates/photos browser gate: `npm run test:security-templates-photos:browser` (inside the documented Firebase emulator/seed wrapper)
 - Focused secure EOC/offline-replay browser gate: `npm run test:security-eoc-offline:browser` (inside the documented Firebase emulator/seed wrapper)
 - Focused secure debriefs/alerts browser gate: `npm run test:security-debriefs-alerts:browser` (inside the documented Firebase emulator/seed wrapper)
@@ -118,14 +117,8 @@ SPRC Ops Hub centralizes daily operations across three levels:
 - Complete secure offline/reconnect browser gate: `npm run test:security-offline-matrix:emulator` (inside the documented Node 22 Firebase emulator wrapper)
 - Read-only App Check aggregate observation after approved monitoring rollout: `npm run security:canary -- --mode=app-check-observe --project=sprc-tx-l --hours=24`
 - Read-only live Identity/Users and rollback-anchor status: `npm run security:canary -- --mode=identity-status --project=sprc-tx-l --backup=<absolute verified backup path> --backup-sha256=<exact SHA-256>`
-- Read-only eligible BHT/tech candidates for one exact home location: `npm run security:staff-rollout -- --mode=candidates --project=sprc-tx-l --location=<exact-location-id>`
-- Guarded exact-cohort preview: `npm run security:staff-rollout -- --mode=preview --project=sprc-tx-l --location=<exact-location-id> --profile-ids=<comma-separated-profile-ids> --backup-dir=<absolute-path-outside-repo>`
-- Privacy-safe active-account and compatibility-retirement readiness audit: `npm run security:compatibility-readiness -- --project=sprc-tx-l`
-- Guarded all-active/strict cutover status, preview, apply, and rollback: `npm run security:compatibility-cutover -- --mode=<status|preview|apply|rollback> --project=sprc-tx-l --target=<all_active|strict_authorization>`
+- Compatibility-retirement release gate: `npm run verify:security-compatibility-retired`
 - Smoke: `npm run smoke:phase9:full`
-- Preview core reset (read-only): `npm run reset:core:preview`
-- Back up core reset data (read-only): `npm run reset:core:backup`
-- Verify fresh core state (read-only): `npm run reset:core:verify`
 - RES shift/template migration: `npm run migrate:res-shift-model`
 - Compliance employee bulk import: `npm run compliance:employees:add`
 

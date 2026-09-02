@@ -5,7 +5,7 @@ import test from 'node:test'
 import { cert, deleteApp, initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 import { Timestamp, getFirestore } from 'firebase-admin/firestore'
-import { containsCredentialMaterial, deriveLegacyPinHash, verifyServerPinCredential } from '../src/staffPinCredentialModel.js'
+import { containsCredentialMaterial, createServerPinCredential, verifyServerPinCredential } from '../src/staffPinCredentialModel.js'
 import { StaffAccountSecurityError, performDormantStaffSecurityAction } from '../src/staffAccountSecurityService.js'
 import { authorizeDormantOfflineReplay } from '../src/offlineReplaySecurityService.js'
 import { createProtectedTransport } from '../src/transportSecurityService.js'
@@ -51,7 +51,7 @@ function bht(pin = '481593', overrides = {}) {
     name: 'Mesquite BHT', role: 'bht', active: true, deleted: false,
     site: 'OTC', location: 'OTC', house: 'MESQUITE', locationId: 'mesquite',
     authorizedLocations: ['OTC'], issueLocationIds: ['mesquite'], shiftId: 'shift_1', vanId: 'van_1', vanIds: ['van_1'],
-    pinHash: deriveLegacyPinHash(pin), securityVersion: 1, version: 1, ...overrides
+    _testPin: pin, securityVersion: 1, version: 1, ...overrides
   }
 }
 
@@ -80,8 +80,15 @@ async function enablePhase4() {
 
 async function seedActor(profileId, profile, sessionId = `session_${profileId}_device_0001`) {
   const authUid = `auth_${profileId}`
+  const { _testPin, ...storedProfile } = profile
   await auth.createUser({ uid: authUid })
-  await db.doc(`users/${profileId}`).set({ ...profile, authUid })
+  await db.doc(`users/${profileId}`).set({ ...storedProfile, authUid })
+  if (_testPin) {
+    await db.doc(`staffPinCredentials/${profileId}`).set({
+      ...(await createServerPinCredential(_testPin, secret, { salt: `salt-${profileId}` })),
+      active: true
+    })
+  }
   await db.doc(`usersByAuthUid/${authUid}`).set({ userId: profileId, version: 2 })
   await db.doc(`staffAuthIdentities/${profileId}`).set({ profileId, authUid, schemaVersion: 2 })
   await db.doc(`staffSessions/${sessionId}`).set({
@@ -98,8 +105,15 @@ async function seedActor(profileId, profile, sessionId = `session_${profileId}_d
 
 async function seedTarget(profileId, profile, sessionCount = 0) {
   const authUid = `auth_${profileId}`
+  const { _testPin, ...storedProfile } = profile
   await auth.createUser({ uid: authUid })
-  await db.doc(`users/${profileId}`).set({ ...profile, authUid })
+  await db.doc(`users/${profileId}`).set({ ...storedProfile, authUid })
+  if (_testPin) {
+    await db.doc(`staffPinCredentials/${profileId}`).set({
+      ...(await createServerPinCredential(_testPin, secret, { salt: `salt-${profileId}` })),
+      active: true
+    })
+  }
   await db.doc(`staffAuthIdentities/${profileId}`).set({ profileId, authUid, schemaVersion: 2 })
   for (let index = 0; index < sessionCount; index += 1) {
     await db.doc(`staffSessions/session_${profileId}_device_000${index}`).set({
@@ -213,7 +227,7 @@ test('an in-location supervisor reset updates server and rollback credentials an
   assert.equal(revokeCalls, 1)
   const profile = (await db.doc('users/mesquite_bht').get()).data()
   assert.equal(profile.securityVersion, 2)
-  assert.equal(profile.pinHash, deriveLegacyPinHash('739251'))
+  assert.equal('pinHash' in profile, false)
   assert.equal(await verifyServerPinCredential('739251', secret, (await db.doc('staffPinCredentials/mesquite_bht').get()).data()), true)
   const sessions = await db.collection('staffSessions').where('profileId', '==', 'mesquite_bht').get()
   assert.equal(sessions.docs.every(snapshot => snapshot.data().active === false), true)

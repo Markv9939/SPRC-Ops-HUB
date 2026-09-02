@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-01
 Document status: Active living blueprint
-Current `Main` reference: secure-login closeout guard evidence PR #20 merged as `1f246db`; the guard release remains Hosting-deployed
+Current verified `Main` baseline: PR #21 merged as `123dbec`; the compatibility-retirement release candidate is being completed in the isolated closeout branch
 Related evidence log: [`PROGRESS_LOG.md`](PROGRESS_LOG.md)
 
 ## Mark's Notes Inbox
@@ -33,12 +33,12 @@ When Mark says **`update master plan`**, the person or agent doing the work must
 | Area | Current summary |
 |---|---|
 | **Active** | Core BHT, EOC, transport, issue handoff, Shift Debrief, supervisor review, and supported offline workflows remain the current operating baseline. |
-| **In progress** | Secure login now covers all 9 valid active profiles with stable identities. The first strict-authorization canary passed Admin access and the scoped Supervisor Users page, then exposed unscoped Supervisor Dashboard transport and Fleet background reads. Strict authorization was immediately rolled back without closing a session; a location-scoped client fix is locally committed as `93c0edf` and awaits push/review/Hosting release plus live strict retest. |
-| **Released support** | The familiar six-digit server-verified login, persistent absolute 84-hour per-device sessions, all-active-profile secure-login mode, strict-cutover guard, readiness/rollback tooling, and monitoring-only App Check collection are live. Read-only production evidence after rollback shows 9 active profiles, 0 invalid profiles, 9 ready credentials, 9 stable identities, secure login for all active profiles, and strict authorization off. |
-| **Paused** | Global strict authorization is temporarily off after the controlled rollback. Compatibility retirement is not allowed until the scoped query fix is released and the Admin, Supervisor, BHT, workflow, device, offline, negative-access, rollback, and reactivation gates pass. App Check enforcement remains off. |
-| **Next release sequence** | Review and Hosting-release `93c0edf`; repeat the live strict Admin/Supervisor/BHT canary with settled-page console evidence; re-enable strict authorization only after that gate passes; complete the planned strict rollback/reactivation proof; then obtain separate approval for the final compatibility-code/rule retirement release. |
+| **In progress** | Final compatibility retirement is locally implemented and fully regression-tested. The release candidate removes browser PIN trust, legacy/Anonymous fallback, direct browser account/PIN mutation, permissive rules branches, obsolete cutover/reset commands, and stale test-server behavior while preserving the staff-facing PIN experience and workflows. It is not yet committed, merged, or deployed. |
+| **Released support** | Production already uses server-verified six-digit PIN login for all active profiles, stable custom-token identity, persistent absolute 84-hour independent device sessions, strict authorization, workflow-scoped claims, protected server actions, and monitoring-only App Check. The strict Supervisor query correction is merged through `123dbec`. |
+| **Paused** | App Check enforcement remains off by design. No PIN reset, deactivation, session-ending, or production-data mutation is part of the compatibility-retirement release. |
+| **Next release sequence** | Finish document/diff verification, commit and review the retirement candidate, deploy Functions + Firestore rules + Storage rules + Hosting as one coordinated release, verify the live six-digit login/reload and read-only role/workflow scope, then record the final release evidence. |
 
-The synthetic Test House canary now exercises the complete server PIN/custom-token foundation while preserving the six-digit screen. This is not a broad migration: non-canary profiles still use compatibility behavior, Anonymous Authentication was not enabled as a shortcut, strict global authorization is off, and App Check is monitoring-only.
+The staged canary and staff rollout are complete. The current closeout preserves the familiar six-digit screen while making the server-verified custom-token identity the only supported login path. Anonymous Authentication is not used, and App Check remains monitoring-only.
 
 Configuration and live release state can drift. Recheck current evidence before using this summary for a production decision.
 
@@ -103,14 +103,14 @@ This section is only for large choices that are difficult to reverse or that con
 - **Decision:** Staff should continue using the simple six-digit PIN screen. The planned security foundation will validate the PIN on the server and issue a stable Firebase identity tied to the existing Ops profile.
 - **Reason:** Staff need a simple login, while protected records, photos, roles, and locations need consistent server proof.
 - **Effect:** Do not enable Anonymous Authentication or strict global enforcement as a shortcut. Build and prove the replacement in staged workflow groups.
-- **Status:** Confirmed direction. The secure PIN trust boundary is deployed for the three synthetic Test House canary profiles plus the approved three-profile Lone Mountain cohort. Two Lone Mountain profiles have completed normal first login; one remains. Other valid profiles still use compatibility behavior, and broader enforcement remains off.
+- **Status:** Current production direction and locally completed retirement contract. All active profiles use the server PIN/custom-token path; the compatibility fallback is removed in the release candidate.
 
 ### Use persistent 84-hour per-device sessions with automatic all-device revocation
 
 - **Decision:** A successful PIN session may persist across browser close/reopen on the same device for an absolute, non-sliding maximum of 84 hours. The same staff member may have independent sessions on multiple devices. Ordinary logout ends only that device's session.
 - **Reason:** Staff need uninterrupted access through a 3.5-day shift while still requiring a bounded session and reliable emergency cutoff.
 - **Effect:** Deactivation, PIN change, role reduction, home-location removal, temporary/issue-access change, and admin end-all-sessions must automatically invalidate every device with audit evidence. A role/location/access change signs the person out everywhere; the next login receives only current access. A temporary grant expiration may end that scoped session before the otherwise absolute 84-hour maximum so expired access cannot linger.
-- **Status:** Confirmed session contract; deployed for the synthetic canary and the approved Lone Mountain cohort. Live persistence, independent two-device use, one-device logout, supervisor end-all-sessions, and a real Android Chrome offline full-close/reopen have passed. The strict-cutover compatibility-session sign-out guard is locally tested but not yet released.
+- **Status:** Current contract. Live persistence, independent two-device use, one-device logout, supervisor end-all-sessions, and real Android Chrome offline full-close/reopen passed. The retirement candidate additionally passes emulator/browser expiry, revocation, stale-tab, offline-network timing, and reconnect gates.
 
 ### Preserve scoped supervisor BHT account creation and management
 
@@ -124,14 +124,14 @@ This section is only for large choices that are difficult to reverse or that con
 - **Decision:** Role and location protection must exist in the UI, service transactions, offline replay, Firebase rules, and protected Functions where applicable.
 - **Reason:** Hiding a tab does not prevent an unauthorized database or Storage request.
 - **Effect:** Every sensitive workflow test must prove the correct role can do normal work and the wrong role/location cannot.
-- **Status:** Confirmed operating contract. All eight named workflow groups are active and verified only for the exact three-profile synthetic canary. Broad strict enforcement and broader staff enrollment remain off.
+- **Status:** Confirmed operating contract. All eight named workflow groups are protected under strict current-session authorization; the final local matrix passed every group across the required role/device views.
 
 ### Preserve useful offline work and stop unsafe replay for review
 
 - **Decision:** Supported drafts, photos, and outbox work remain available during weak/no signal. Stale, conflicting, revoked, wrong-user, or unauthorized replay must stop as `needsReview` rather than syncing silently or retrying forever.
 - **Reason:** Staff work in real shifts with unreliable connectivity, but reconnecting must not bypass current ownership or authorization.
 - **Effect:** Online and offline paths must be designed and tested together; security hardening cannot discard valid local work. Unsynced work stays with its original owner. Normally that staff member signs back in and syncs it. If the owner is deactivated, hold it safely; do not change another person's PIN or sign in as them. A specialized recovery screen is deferred unless real evidence shows recurring need.
-- **Status:** Confirmed current contract. Owner/session/security/location binding and safe hold/review behavior are implemented and verified for all 11 supported queued-action types. Secure replay is active only for the exact synthetic canary; non-canary staff remain on compatibility behavior.
+- **Status:** Confirmed current contract. Owner/session/security/location binding and safe hold/review behavior are implemented and verified for all 11 supported queued-action types. Offline replay is bound to the current secure session for all staff.
 
 ### Pin each EOC to a published template version
 
@@ -160,9 +160,9 @@ These are the current high-level priorities. They guide planning but do not auth
 
 1. Preserve the daily workflows that already work for BHTs, supervisors, and admins.
 2. Keep staff-facing work simple, phone-friendly, and practical during busy shifts.
-3. Treat authorization as a staged reliability and safety project. Keep the familiar six-digit PIN experience while moving PIN verification and Firebase identity proof to the locally built dormant server path only after each rollout gate passes.
+3. Preserve the familiar six-digit PIN experience while keeping server verification, custom-token identity, current device sessions, and backend authorization as the only supported trust boundary.
 4. Do not enable Firebase Anonymous Authentication and do not turn on strict global authorization as a shortcut.
-5. Do not operationally assign custom EOC templates until template access, task generation, checklist loading, photo upload, and fallback protection work under a verified staff session.
+5. Keep custom EOC template access, task generation, checklist loading, photo upload, and fallback protection under the same verified staff session and scoped query boundary.
 6. Protect offline work while strengthening replay checks so stale, revoked, wrong-user, and conflicting actions stop for review instead of syncing quietly.
 7. Release security work in small workflow groups with role, location, phone, desktop, online, offline, and rollback evidence at every stage.
 
@@ -180,13 +180,13 @@ This is the approved sequence for finishing the secure PIN/custom-token update w
 8. **Complete:** Enable and prove `transports`, including the two-device active-transport conflict contract and a live synthetic create/complete/scoped-supervisor journey, rollback, and reactivation.
 9. **Complete:** Enable and prove `operations_admin`, then `settings`. Live supervisor Properties, Fleet, Compliance, and Cintas reads stayed OTC/Test House scoped; BHT Settings startup/reload passed. One approved, backed-up two-record fleet metadata correction supplied the exact existing OTC scope required by strict queries. Both stages passed rollback and reactivation.
 10. **Complete for this canary:** The 11-action offline/reconnect browser matrix passed. A 24-hour aggregate App Check observation contained all six protected endpoint groups across 63 samples; every sample correctly recorded App Check as absent, enforcement remained false, and no token/key was enabled. This is monitoring evidence, not enforcement readiness.
-11. **In progress:** Complete the three-profile Lone Mountain BHT cohort. Two profiles now have stable secure identities; one normal existing-PIN first login, ordinary working-shift observation, and the controlled cohort rollback/re-enrollment proof remain.
-12. **Complete:** PR #19 merged as `e54322b`; the compatibility-session cutover guard is Hosting-deployed and directly verified in `App-BsqUAcaI.js`. The privacy-safe readiness audit and checksum-backed cutover/rollback command are now part of `Main`. The guard remains inert while strict authorization is off. The command changes only the exact target setting, refuses stale previews, requires exact confirmation, creates immutable audit evidence, and restores the verified configuration; all-active rollback also closes sessions outside the prior allowlist and revokes their refresh tokens.
-13. **Pending production approval after Stage 11:** Change only the secure-login rollout state from additive canary to all-active-profile mode while strict authorization remains off. This is the reversible observation window: every valid active account uses server PIN verification/custom-token identity on its next normal login, while existing compatibility sessions can still finish or sign out normally.
-14. **Pending observation:** Require every active account to have a valid profile, unique server-ready credential, stable Firebase identity, and successful normal login. Current privacy-safe inventory is 9 active, 9 valid/credential-ready, 5 with stable identity, and 6 covered by the additive allowlist. The four missing identities are one real Lone Mountain BHT and three active test accounts; no active real supervisor/admin profile currently exists.
-15. **Pending final production approval:** Enable strict authorization only after all active identities and every prior workflow/device/offline/negative/rollback gate pass. The released guard signs any lingering compatibility browser out to the unchanged six-digit PIN screen. Verify BHT, supervisor, admin, location denial, reload, mobile/desktop, offline/reconnect, and rollback immediately.
-16. **Pending post-cutover closeout:** After the strict observation and rollback drill pass, remove the dormant browser-trusted PIN lookup, Anonymous Auth compatibility bootstrap, direct browser PIN mutation, compatibility session marker, server legacy-PIN migration/private endpoints, and Firestore/Storage compatibility branches. The `verify:security-compatibility-retired` gate must then pass while proving the familiar six-digit screen, protected server login/account actions, absolute 84-hour session, and strict current-session rules remain. Rebuild/deploy and repeat the focused regression matrix. Keep App Check monitoring-only unless Mark separately approves enforcement.
-17. **Final closeout:** Re-run runtime-parity, unit/emulator/rules/browser/offline/device/security checks, capture the exact rollback package and live evidence, update both durable documents, merge the final source, and confirm no security-update work remains.
+11. **Complete:** The three-profile Lone Mountain cohort, normal existing-PIN first logins, independent-device/logout checks, Android Chrome offline close/reopen correction, and broad-account identity readiness were completed before all-active activation.
+12. **Complete historical cutover support:** PR #19 merged as `e54322b`; its compatibility-session guard and checksum-backed rollout/cutover tooling supported the controlled transition. The final retirement candidate removes those now-obsolete commands so they cannot reopen compatibility mode.
+13. **Complete:** Secure login was changed to all-active-profile mode while strict authorization remained off for observation.
+14. **Complete:** Every active profile passed the valid-profile, unique server-credential, stable-identity, and normal-login readiness boundary.
+15. **Complete:** Strict authorization was enabled, rolled back when scoped background queries exposed defects, corrected workflow-by-workflow, re-enabled, and verified. The last scoped Supervisor query correction is merged through `123dbec`.
+16. **Locally complete; release pending:** Browser/server/rules compatibility trust paths and obsolete downgrade/reset commands are removed. The retirement gate, 102 unit contracts, 44 security emulator contracts, strict Firestore/Storage suites, full workflow browser matrix, offline owner/replay matrix, and cold offline shell/process gates passed. App Check remains monitoring-only.
+17. **Final release closeout in progress:** Commit/review/merge the exact candidate; deploy Functions, Firestore rules, Storage rules, and Hosting together; verify live six-digit login/reload and read-only role/workflow scope; then record exact release evidence and close the security update.
 
 Every stage follows one gate: implement and test locally, capture rollback, deploy dormant, enable only the named cohort/workflow, test positive and negative live behavior, exercise rollback, record evidence, and only then continue. PIN resets, deactivation, session ending, production-data changes, deployments, activation, and compatibility retirement retain their explicit approval boundaries.
 
@@ -257,20 +257,12 @@ The screen, stored record, alert, audit entry, and supervisor view should descri
 **Current**
 
 1. Staff enter a unique six-digit PIN.
-2. The app finds the permanent `users/{profileId}` profile and loads the person's name, role, active/deleted state, location access, shift, and van assignments.
-3. The selected profile ID becomes the working identity for routing, record ownership, displayed names, alerts, audit labels, and offline outbox ownership.
-4. BHT/tech users are routed to the BHT home. Supervisors and admins are routed to the management dashboard.
-5. The app stores the working profile in browser session storage and refreshes active account/access-grant scope while the session is online.
-6. The current app locks after 60 minutes of inactivity and requires PIN login again.
-7. Login requires a working backend connection. Previously loaded supported workflows can continue offline after a valid session, subject to the limitations in the Offline section.
-
-**Important current limitation**
-
-The PIN-selected profile is trusted by the app screens, but the database does not yet receive one consistent, server-verified staff identity. Current compatibility rules permit many older profile-ID workflows to continue. Newer UID-dependent work, including protected template operations and some photo paths, can fail without a Firebase session.
-
-**Locally implemented, dormant security direction**
-
-The isolated security branch keeps the same simple PIN screen, validates the PIN on a protected server process, issues a stable Firebase custom-token session tied to the existing profile, waits for Firebase authentication before showing protected pages, and rebuilds live role/location scope from the mapped staff profile. The session persists on the same device, remains independent across devices, and absolutely expires after 84 hours. The full local path remains behind disabled versioned boundaries; the normal build does not call it.
+2. A protected server Function verifies the server-only PIN credential, rate limit, active profile, and valid single-home BHT configuration without exposing PIN/hash material.
+3. The server issues a stable Firebase custom-token identity and an independent per-device session bound to the profile security version and current role/location/workflow scope.
+4. The client waits for Firebase identity/session readiness, loads a sanitized live profile, and only then routes BHT/tech staff to Home or supervisors/admins to the management dashboard.
+5. The same-device session persists across browser close/reopen for an absolute maximum of 84 hours. Ordinary logout closes only that device. Approved security/access changes revoke every device.
+6. Supported already-loaded work can continue offline. The saved secure session is preserved through transient offline startup failures and reverified on reconnect; locally expired sessions still end immediately.
+7. Browser storage never becomes the authority for role, location, PIN, profile state, or workflow authorization.
 
 ### 4.2 BHT / tech home and daily work
 
@@ -311,19 +303,9 @@ If no active assignment exists, the BHT should not be allowed to guess a locatio
 - Existing/in-progress EOCs keep the template version they started with; a newly assigned default applies to the next applicable cycle.
 - Permanent question tracking IDs preserve issue recurrence history when wording or order changes.
 
-**Released with limitation — `c6b0ec1`**
+**Current security status**
 
-The Guided Canvas builder, protected Functions, template reads, response-photo path, and related tests were released. The security audit found that ordinary PIN login currently does not establish the Firebase identity those protected paths require.
-
-Consequences that must remain visible in planning:
-
-- The template library/builder can load empty or show authorization errors.
-- Publish, assign, archive, purge, and related Function calls reject an unauthenticated request.
-- Supervisor/admin EOC task sync can fail while loading template assignments.
-- A task that references a custom template can fail to load that version and fall back to an older checklist.
-- EOC response-photo uploads can fail or remain queued.
-
-No production templates or assignments were changed during release verification. Until the authentication foundation is ready, custom templates should remain unassigned and must not be relied on for operational EOCs.
+The Guided Canvas builder, protected template Functions, template reads, response-photo Storage path, EOC submission, and scoped EOC queries now operate behind the same mapped current-session boundary. The final local workflow matrix passed supervisor library loading, BHT in-scope photo upload, wrong-location denial, owner-bound offline replay, and idempotent protected EOC submission.
 
 ### 4.4 Transport work
 
@@ -365,7 +347,7 @@ Supported transport creation, updates, and closeout can be saved locally and rep
 - Staff may take a photo or choose one from the device.
 - Photos are processed before upload and can wait in the offline attachment queue.
 - Issue records remain valid even if an optional photo upload fails; the app should show the pending failure and allow retry.
-- Photo access, retention, privacy removal, and known-path protection are sensitive security work. The current UID/session gap must be resolved before photo protection is considered complete.
+- Photo access, retention, privacy removal, and known-path protection remain sensitive security work. Current Storage rules require the mapped current session and exact workflow/location scope; retention/privacy removal remains server-controlled.
 
 **Alerts**
 
@@ -446,7 +428,7 @@ Supervisor/admin navigation includes Dashboard, Transports, Debriefs, Users, EOC
 
 ### Security reality today
 
-The UI applies these boundaries, and many services/rules enforce parts of them. However, the current compatibility architecture is not a complete backend security boundary. The staged security foundation must prove the boundaries at the database and Storage level, not only by hiding tabs or filtering data in React.
+The UI, custom-token claims, live profile/security version, server device-session records, protected Functions, and strict Firestore/Storage rules now enforce these boundaries together. Hiding a tab is still never treated as authorization proof; every list query and mutation must continue to pass its backend role/location/owner/version contract.
 
 ## 6. Offline Behavior
 
@@ -459,9 +441,9 @@ The UI applies these boundaries, and many services/rules enforce parts of them. 
 - Successful replay removes or marks the appropriate local work as synced.
 - Permission, stale-version, changed-correction-count, wrong-state, and similar safety failures become `needsReview` when recognized.
 
-### Required direction for security hardening
+### Current secure offline contract
 
-Before replaying sensitive work, the app must also prove that Firebase Auth is ready and the server-mapped staff profile matches the outbox owner. Disabled users, changed access, changed PIN/session, wrong-user work, stale actions, and permission failures must stop for review instead of retrying forever. Original-owner work is held safely until that person can sign in; deactivated-owner work is not forced through under another identity. A specialized recovery tool is later-only unless recurring operational evidence justifies it.
+Before replaying sensitive work, the app proves that Firebase Auth is ready and the server-mapped staff profile matches the outbox owner. Disabled users, changed access, changed PIN/session, wrong-user work, stale actions, and permission failures stop for review instead of retrying forever. Original-owner work is held safely until that person can sign in; deactivated-owner work is not forced through under another identity. A specialized recovery tool remains later-only unless recurring operational evidence justifies it.
 
 Offline capability must not be “fixed” by discarding drafts or forcing staff to remain online during normal shift work.
 
@@ -484,16 +466,14 @@ These rules apply to current and future work:
 
 ## 8. Current Security Foundation Assessment
 
-### Confirmed production/release state from the 2026-08-25 audit
+### Current production and release-candidate state
 
-- Production/release reference is `c6b0ec1`.
-- `appSettings/authPolicy.authScopeEnforced` was verified as `false` during the release audit.
-- Seven active profiles and zero `usersByAuthUid` mappings were reported by the read-only readiness check.
-- Anonymous Auth was not establishing a fresh Firebase session.
-- PIN profile IDs remain the app's working identity for most screens and operational records.
-- Firebase UID is required for protected template data/Functions, issue and EOC photo Storage paths, private template drafts, and emergency photo privacy removal.
-- Current compatibility rules include broad legacy bypasses and explicit public reads/writes. The audit found exposure in rule design; it did not find evidence that records were accessed or misused.
-- PIN lookup and deterministic hashing currently run in browser code, and failed-attempt lockout is primarily device-local.
+- The verified production source baseline is `Main` `123dbec`, with all-active server PIN/custom-token login and strict authorization already operating.
+- The final local release candidate removes the remaining browser-trusted PIN lookup/hash code, compatibility session marker, Anonymous/legacy fallback, direct browser PIN/account mutation, server migration/private legacy endpoint code, and Firestore/Storage compatibility branches.
+- Server-only salted credentials, rate limiting, stable UID mappings, current per-device session records, security-version revocation, workflow claims, protected account actions, and protected operational Functions remain.
+- The familiar six-digit screen, absolute 84-hour same-device persistence, independent multi-device sessions, one-device logout, all-device security revocation, scoped Users management, and original-owner offline replay remain required behavior.
+- App Check remains monitoring-only and unenforced. Anonymous Authentication is neither needed nor used.
+- The former broad-rollout, compatibility-cutover, Anonymous Storage smoke, compatibility-browser, and pre-secure core-reset commands are retired so a maintenance command cannot silently reopen the old trust boundary.
 
 ### Historical local phase status before the production canary
 
@@ -508,7 +488,7 @@ This subsection preserves the earlier local-only checkpoint. It is superseded fo
 7. **App Check monitoring — production observation complete, not enforced:** The client and Functions record only presence/absence. The 24-hour aggregate covered login, account/access, offline replay, transport, EOC, and issue groups across 63 samples; all 63 recorded a missing token. Enforcement remains explicitly false. This proves the monitoring trail is complete, not that enforcement is safe to enable.
 8. **Canary and rollback — complete for the three synthetic profiles:** Every cumulative workflow stage passed guarded advance, live verification, rollback, and reactivation. The exact process and current boundary are in [`docs/security/SECURITY_CANARY_AND_ROLLBACK.md`](docs/security/SECURITY_CANARY_AND_ROLLBACK.md).
 9. **Protected EOC and issue mutations — locally complete and dormant:** The expression-limit-sensitive EOC submission and issue lifecycle writes now have versioned server transactions with current-session, role/location/owner, optimistic-version, idempotency, recurrence, alert, and immutable-audit protection. Strict browser writes are denied only for the selected workflow. See [`docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md`](docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md).
-10. **Retire compatibility mode — gated:** The synthetic all-workflow canary and rollback practice are complete. Retirement is still not authorized and cannot begin until active staff are enrolled in controlled cohorts, observed successfully, and Mark separately approves the production cutover.
+10. **Retire compatibility mode — locally complete, release pending:** Mark authorized continuous completion. The runtime/rules retirement gate is green, obsolete downgrade/reset commands are removed, and the complete unit/emulator/browser/offline matrix passed. Commit/review/deployment and final live read-only verification remain before closeout.
 
 ### Required proof before each security gate
 
@@ -529,10 +509,10 @@ This subsection preserves the earlier local-only checkpoint. It is superseded fo
 - Supervisor/admin dashboards for users, transports, EOC/issues, debriefs, properties, fleet, compliance, and Cintas; admin feedback/audit views.
 - Offline drafts/outbox for the supported action types documented above.
 
-### Released with limitations
+### Released under the secure-session boundary
 
-- Guided EOC template builder and protected template administration (`c6b0ec1`): released, but blocked for normal safe use by the missing verified Firebase staff session.
-- EOC response-photo upload: shipped, but depends on the same UID/session foundation.
+- Guided EOC template builder and protected template administration (`c6b0ec1` baseline plus later security releases): protected Functions and scoped current-session reads are active.
+- EOC response-photo upload: protected by the same mapped session, workflow, and location boundary as the related EOC.
 - Existing issue-photo and emergency-removal paths also carry UID/session dependencies that predate the builder release.
 
 ### In progress
@@ -560,11 +540,11 @@ This subsection preserves the earlier local-only checkpoint. It is superseded fo
 
 | Area | Status | Evidence / limitation |
 |---|---|---|
-| Main application baseline | Released | The baseline immediately before security-foundation completion PR #13 was `1028347`; PR #9 merged the corrected Identity/Users canary package, PR #11 added the Hosting-only secure supervisor PIN-generator correction, and PR #12 reconciled the deployed compatibility-reload correction on 2026-08-29. Git history is authoritative for PR #13's resulting `Main` merge commit. |
+| Main application baseline | Released | The verified baseline for final retirement is `Main` `123dbec`, including the strict Supervisor location-query correction merged in PR #21. |
 | Shift Debrief safeguards | Released | `8339827`; focused tests, emulator/rules tests, lint/build, push, Hosting and Firestore rules deployment were reported. |
 | Issue handoff/app feedback V2 | Released and enabled | `3c11306`; feature flag version 3 was verified for the approved four operational locations at release time. Recheck before future changes because configuration can drift. |
-| Guided EOC template builder | Released; secure synthetic canary passed | `c6b0ec1` remains the merged builder baseline. The mapped-session Templates/Photos and protected EOC paths now pass for the exact synthetic cohort; broader operational use follows staff enrollment rather than a remaining builder defect. |
-| Security foundation | Three-profile all-workflow canary complete; broad rollout pending | The exact synthetic cohort is cumulatively enabled through `settings`. Secure PIN/custom-token login, 84-hour device sessions, scoped Users, templates/photos, EOC/offline replay, debriefs/alerts, issues/feedback/audit, transports, operations administration, Settings, rollback, and compatibility fallback passed. Global strict auth, Anonymous Auth shortcut, App Check enforcement, broad enrollment, and compatibility retirement remain off. The approved completion package is source commit `79553ef` in PR #13. |
+| Guided EOC template builder | Released under secure sessions | The mapped-session Templates/Photos and protected EOC paths now pass scoped supervisor/BHT, wrong-location, photo, offline replay, and idempotent submission gates. |
+| Security foundation | Final compatibility-retirement release candidate locally green | All-active server PIN/custom-token login and strict authorization are already live. The final candidate removes remaining browser/legacy trust and obsolete downgrade commands while preserving the six-digit UX, 84-hour device sessions, account controls, all protected workflows, and offline work. Coordinated merge/deployment/live verification remain. App Check enforcement stays off. |
 | Documentation foundation | Restored and locally updated | Authoritative `MASTER_PLAN.md` and `PROGRESS_LOG.md` drafts plus project guidance, README links, and document hierarchy are restored and reconciled in this isolated branch; no production changes. |
 
 Current configuration and live Hosting state can change after this document is written. Recheck before any release or production decision.

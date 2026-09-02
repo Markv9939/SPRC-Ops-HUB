@@ -9,7 +9,8 @@ export const STAFF_ACCOUNT_ACTIONS = Object.freeze({
   RESET_PIN: 'reset_pin',
   END_ALL_SESSIONS: 'end_all_sessions',
   CLOSE_DEVICE_SESSION: 'close_device_session',
-  SOFT_DELETE: 'soft_delete'
+  SOFT_DELETE: 'soft_delete',
+  HARD_DELETE: 'hard_delete'
 })
 
 const PROFILE_PATCH_FIELDS = new Set([
@@ -71,7 +72,9 @@ export function accountMutationRevocationTriggers({ action, before = {}, after =
     triggers.push('pin_changed')
   }
   if (before.active === true && after.active === false) triggers.push('profile_deactivated')
-  if (action === STAFF_ACCOUNT_ACTIONS.SOFT_DELETE || after.deleted === true) triggers.push('profile_deactivated')
+  if ([STAFF_ACCOUNT_ACTIONS.SOFT_DELETE, STAFF_ACCOUNT_ACTIONS.HARD_DELETE].includes(action) || after.deleted === true) {
+    triggers.push('profile_deactivated')
+  }
   if (roleRank(after.role) < roleRank(before.role)) triggers.push('role_reduced')
 
   const beforeAccess = normalizedAccess(before)

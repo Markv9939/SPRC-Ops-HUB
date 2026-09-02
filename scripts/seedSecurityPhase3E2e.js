@@ -1,7 +1,7 @@
 /* global process */
-import { createHash } from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore, Timestamp } from 'firebase-admin/firestore'
+import { createServerPinCredential } from '../functions/src/staffPinCredentialModel.js'
 import { workflowsThroughStage } from './securityCanaryStageModel.js'
 
 const projectId = process.env.GCLOUD_PROJECT || 'demo-sprc-security-phase3-e2e'
@@ -21,19 +21,14 @@ const secureWorkflows = workflowsThroughStage(securityStage)
 const enrollmentMode = argument('enrollment')
 if (enrollmentMode && enrollmentMode !== 'canary') throw new Error('Use --enrollment=canary or omit it.')
 const enabledProfileIds = enrollmentMode === 'canary' ? ['phase3_browser_mobile'] : []
+const staffPinSecret = process.env.STAFF_PIN_AUTH_SECRET || 'security-browser-emulator-secret-with-more-than-thirty-two-characters'
 
-function hashPin(pin) {
-  return createHash('sha256').update(`sprc-pin-v2-6digit:${pin}`).digest('hex')
-}
-
-function bht(name, pin, shiftId, overrides = {}) {
+function bht(name, shiftId, overrides = {}) {
   return {
     name,
     role: 'bht',
     active: true,
     deleted: false,
-    pinHash: hashPin(pin),
-    pinVersion: 'v2_sha256_6digit',
     site: 'OTC',
     location: 'OTC',
     house: 'TEST_HOUSE',
@@ -51,14 +46,12 @@ function bht(name, pin, shiftId, overrides = {}) {
   }
 }
 
-function supervisor(name, pin, overrides = {}) {
+function supervisor(name, overrides = {}) {
   return {
     name,
     role: 'supervisor',
     active: true,
     deleted: false,
-    pinHash: hashPin(pin),
-    pinVersion: 'v2_sha256_6digit',
     site: 'OTC',
     location: 'OTC',
     house: null,
@@ -73,14 +66,12 @@ function supervisor(name, pin, overrides = {}) {
   }
 }
 
-function admin(name, pin, overrides = {}) {
+function admin(name, overrides = {}) {
   return {
     name,
     role: 'admin',
     active: true,
     deleted: false,
-    pinHash: hashPin(pin),
-    pinVersion: 'v2_sha256_6digit',
     site: 'GLOBAL',
     location: 'GLOBAL',
     house: null,
@@ -118,14 +109,14 @@ const writes = [
     ...(enabledProfileIds.length ? { enabledProfileIds } : {}),
     updatedAt: now
   }],
-  ['users/phase3_browser_mobile', bht('Phase 3 Mobile BHT', '111111', 'shift_1')],
-  ['users/phase3_browser_tablet', bht('Phase 3 Tablet BHT', '555555', 'shift_2')],
-  ['users/phase3_browser_desktop', bht('Phase 3 Desktop BHT', '444444', 'shift_2')],
-  ['users/phase4_self_bht', bht('Phase 4 Self BHT', '284619', 'shift_1', { house: 'MESQUITE', locationId: 'mesquite', authorizedLocations: ['OTC'], issueLocationIds: ['mesquite'], vanId: 'van_1', vanIds: ['van_1'] })],
-  ['users/phase4_supervisor', supervisor('Phase 4 Supervisor', '395172')],
-  ['users/phase4_target_bht', bht('Phase 4 Target BHT', '619274', 'shift_1', { house: 'MESQUITE', locationId: 'mesquite', authorizedLocations: ['OTC'], issueLocationIds: ['mesquite'], vanId: 'van_1', vanIds: ['van_1'] })],
-  ['users/phase4_end_sessions_bht', bht('Phase 4 End Sessions BHT', '472619', 'shift_2', { house: 'LONE_MOUNTAIN', locationId: 'lone_mountain', authorizedLocations: ['OTC'], issueLocationIds: ['lone_mountain'], vanId: 'van_2', vanIds: ['van_2'] })],
-  ['users/phase4_out_of_scope_res_bht', bht('Out of Scope RES BHT', '851472', 'res_shift_1_day', { site: 'RES', location: 'RES', house: null, locationId: 'res', authorizedLocations: ['RES'], issueLocationIds: ['res'], vanId: 'van_3', vanIds: ['van_3'] })],
+  ['users/phase3_browser_mobile', bht('Phase 3 Mobile BHT', 'shift_1')],
+  ['users/phase3_browser_tablet', bht('Phase 3 Tablet BHT', 'shift_2')],
+  ['users/phase3_browser_desktop', bht('Phase 3 Desktop BHT', 'shift_2')],
+  ['users/phase4_self_bht', bht('Phase 4 Self BHT', 'shift_1', { house: 'MESQUITE', locationId: 'mesquite', authorizedLocations: ['OTC'], issueLocationIds: ['mesquite'], vanId: 'van_1', vanIds: ['van_1'] })],
+  ['users/phase4_supervisor', supervisor('Phase 4 Supervisor')],
+  ['users/phase4_target_bht', bht('Phase 4 Target BHT', 'shift_1', { house: 'MESQUITE', locationId: 'mesquite', authorizedLocations: ['OTC'], issueLocationIds: ['mesquite'], vanId: 'van_1', vanIds: ['van_1'] })],
+  ['users/phase4_end_sessions_bht', bht('Phase 4 End Sessions BHT', 'shift_2', { house: 'LONE_MOUNTAIN', locationId: 'lone_mountain', authorizedLocations: ['OTC'], issueLocationIds: ['lone_mountain'], vanId: 'van_2', vanIds: ['van_2'] })],
+  ['users/phase4_out_of_scope_res_bht', bht('Out of Scope RES BHT', 'res_shift_1_day', { site: 'RES', location: 'RES', house: null, locationId: 'res', authorizedLocations: ['RES'], issueLocationIds: ['res'], vanId: 'van_3', vanIds: ['van_3'] })],
   ['accessGrants/phase3_mobile_active_scope', {
     userId: 'phase3_browser_mobile', userName: 'Phase 3 Mobile BHT', locationId: 'RES',
     startsAt: activeGrantStartsAt, expiresAt: activeGrantExpiresAt,
@@ -355,7 +346,7 @@ if (secureWorkflows.includes('issues_feedback_audit')) {
     version: 2
   }
   writes.push(
-    ['users/phase7_admin', admin('Phase 7 Admin', '737373')],
+    ['users/phase7_admin', admin('Phase 7 Admin')],
     ['eocIssues/security_stage7_pending_review', pendingIssue],
     ['eocIssues/security_stage7_res_out_of_scope', {
       ...pendingIssue,
@@ -474,4 +465,21 @@ if (secureWorkflows.includes('settings')) {
 
 for (const [path, data] of writes) await db.doc(path).set(data)
 
-console.log(`Seeded ${writes.length} synthetic security browser records through ${securityStage} in ${projectId}.`)
+for (const [profileId, pin] of Object.entries({
+  phase3_browser_mobile: '111111',
+  phase3_browser_tablet: '555555',
+  phase3_browser_desktop: '444444',
+  phase4_self_bht: '284619',
+  phase4_supervisor: '395172',
+  phase4_target_bht: '619274',
+  phase4_end_sessions_bht: '472619',
+  phase4_out_of_scope_res_bht: '851472',
+  phase7_admin: '737373'
+})) {
+  await db.doc(`staffPinCredentials/${profileId}`).set({
+    ...(await createServerPinCredential(pin, staffPinSecret, { salt: `browser-seed-${profileId}` })),
+    active: true
+  })
+}
+
+console.log(`Seeded ${writes.length} synthetic security browser records and server PIN credentials through ${securityStage} in ${projectId}.`)

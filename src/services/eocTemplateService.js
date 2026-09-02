@@ -249,7 +249,7 @@ export async function purgeUnusedTemplate({ templateId, adminProfileId, pin, rea
     operationId: makeOperationId('purge'),
     templateId: String(templateId || '').trim(),
     adminProfileId: String(adminProfileId || '').trim(),
-    pin: String(pin || '').trim(),
+    currentPin: String(pin || '').trim(),
     reason: String(reason || '').trim()
   })
   return response.data
