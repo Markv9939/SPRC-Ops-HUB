@@ -10,7 +10,6 @@ import { SESSION_ABSOLUTE_MAX_MS } from '../src/securityFoundationModel.js'
 import {
   containsCredentialMaterial,
   createServerPinCredential,
-  deriveLegacyPinHash,
   verifyServerPinCredential
 } from '../src/staffPinCredentialModel.js'
 import {
@@ -42,7 +41,7 @@ const auth = getAuth(app)
 const secret = 'phase-2-emulator-only-secret-with-more-than-thirty-two-characters'
 const baseNowMs = Date.UTC(2026, 7, 25, 18)
 
-function bhtProfile(pin, overrides = {}) {
+function bhtProfile(overrides = {}) {
   return {
     name: 'Phase 2 BHT',
     role: 'bht',
@@ -57,11 +56,18 @@ function bhtProfile(pin, overrides = {}) {
     shiftId: 'shift_1',
     vanId: 'van_test',
     vanIds: ['van_test'],
-    pinHash: deriveLegacyPinHash(pin),
     securityVersion: 1,
     version: 1,
     ...overrides
   }
+}
+
+async function seedLoginProfile(profileId, pin, overrides = {}) {
+  await db.doc(`users/${profileId}`).set(bhtProfile(overrides))
+  await db.doc(`staffPinCredentials/${profileId}`).set({
+    ...(await createServerPinCredential(pin, secret, { salt: `salt-${profileId}` })),
+    active: true
+  })
 }
 
 async function clearEmulators() {
@@ -117,7 +123,7 @@ test.after(async () => {
 })
 
 test('the versioned endpoint is fail-closed and makes no auth, credential, mapping, or session writes while disabled', async () => {
-  await db.doc('users/disabled_boundary_bht').set(bhtProfile('275184'))
+  await db.doc('users/disabled_boundary_bht').set(bhtProfile())
   await assert.rejects(
     () => begin({ pin: '275184' }),
     error => error instanceof StaffPinLoginError && error.code === 'failed-precondition'
@@ -129,13 +135,13 @@ test('the versioned endpoint is fail-closed and makes no auth, credential, mappi
   assert.equal((await auth.listUsers()).users.length, 0)
 })
 
-test('valid legacy credentials migrate safely, create a signed custom token, and return only sanitized profile/session data', async () => {
+test('valid server credentials create a signed custom token and return only sanitized profile/session data', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/legacy_bht').set(bhtProfile('275184', { pinHash: deriveLegacyPinHash('275184'), internalNote: 'never return' }))
+  await seedLoginProfile('credential_bht', '275184', { internalNote: 'never return' })
   const result = await begin({ pin: '275184' })
 
   assert.equal(typeof result.customToken, 'string')
-  assert.equal(result.profile.id, 'legacy_bht')
+  assert.equal(result.profile.id, 'credential_bht')
   assert.equal(result.profile.locationId, 'test_house')
   assert.equal(result.session.expiresAtMs - result.session.issuedAtMs, SESSION_ABSOLUTE_MAX_MS)
   assert.equal(result.replayed, false)
@@ -144,15 +150,14 @@ test('valid legacy credentials migrate safely, create a signed custom token, and
 
   const tokenPayload = decodeJwtPayload(result.customToken)
   assert.equal(tokenPayload.uid.startsWith('staff_'), true)
-  assert.equal(tokenPayload.claims.profileId, 'legacy_bht')
+  assert.equal(tokenPayload.claims.profileId, 'credential_bht')
   assert.equal(tokenPayload.claims.sessionId, result.session.id)
   assert.equal(tokenPayload.claims.securityVersion, 1)
   assert.equal(containsCredentialMaterial(tokenPayload.claims), false)
 
-  const credential = (await db.doc('staffPinCredentials/legacy_bht').get()).data()
-  assert.equal(credential.migratedFrom, 'legacy_pin_hash_v2')
+  const credential = (await db.doc('staffPinCredentials/credential_bht').get()).data()
   assert.equal(await verifyServerPinCredential('275184', secret, credential), true)
-  assert.equal((await db.doc('users/legacy_bht').get()).data().pinHash, deriveLegacyPinHash('275184'))
+  assert.equal('pinHash' in (await db.doc('users/credential_bht').get()).data(), false)
   assert.equal((await db.collection('staffSessions').get()).size, 1)
   assert.equal((await db.collection('securityLoginAudit').get()).size, 1)
 })
@@ -166,11 +171,11 @@ test('production canary enrollment leaves a valid non-enrolled profile on legacy
     rolloutState: 'production_canary',
     enabledProfileIds: ['enrolled_canary_bht']
   })
-  await db.doc('users/not_enrolled_bht').set(bhtProfile('275184'))
+  await seedLoginProfile('not_enrolled_bht', '275184')
   const result = await begin({ pin: '275184' })
 
   assert.deepEqual(result, { status: 'not_enrolled' })
-  assert.equal((await db.collection('staffPinCredentials').get()).size, 0)
+  assert.equal((await db.collection('staffPinCredentials').get()).size, 1)
   assert.equal((await db.collection('staffAuthIdentities').get()).size, 0)
   assert.equal((await db.collection('staffSessions').get()).size, 0)
   assert.equal((await db.collection('usersByAuthUid').get()).size, 0)
@@ -186,7 +191,7 @@ test('all-active rollout gives a previously non-enrolled valid profile the secur
     rolloutState: 'active',
     enabledProfileIds: ['original_canary_only']
   })
-  await db.doc('users/all_active_bht').set(bhtProfile('275184'))
+  await seedLoginProfile('all_active_bht', '275184')
   const result = await begin({
     pin: '275184',
     deviceId: 'all_active_device_01',
@@ -201,7 +206,7 @@ test('all-active rollout gives a previously non-enrolled valid profile the secur
 
 test('preferred server-only credentials work after migration without a client-readable legacy PIN hash', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/server_credential_bht').set(bhtProfile('385104', { pinHash: null }))
+  await db.doc('users/server_credential_bht').set(bhtProfile())
   await db.doc('staffPinCredentials/server_credential_bht').set({
     ...(await createServerPinCredential('385104', secret, { salt: 'preferred-credential-salt' })),
     active: true
@@ -213,7 +218,7 @@ test('preferred server-only credentials work after migration without a client-re
 
 test('disabled preferred credentials fail closed without falling back to the legacy browser hash', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/disabled_credential_bht').set(bhtProfile('385104'))
+  await db.doc('users/disabled_credential_bht').set(bhtProfile())
   await db.doc('staffPinCredentials/disabled_credential_bht').set({
     ...(await createServerPinCredential('385104', secret, { salt: 'disabled-credential-salt' })),
     active: false
@@ -231,16 +236,16 @@ test('disabled preferred credentials fail closed without falling back to the leg
 
 test('invalid, ambiguous, inactive, deleted, and malformed-location profiles have one indistinguishable public failure', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/ambiguous_a').set(bhtProfile('111111'))
-  await db.doc('users/ambiguous_b').set(bhtProfile('111111'))
-  await db.doc('users/inactive_bht').set(bhtProfile('222222', { active: false }))
-  await db.doc('users/deleted_bht').set(bhtProfile('333333', { deleted: true }))
-  await db.doc('users/malformed_bht').set(bhtProfile('444444', {
+  await seedLoginProfile('ambiguous_a', '111111')
+  await seedLoginProfile('ambiguous_b', '111111')
+  await seedLoginProfile('inactive_bht', '222222', { active: false })
+  await seedLoginProfile('deleted_bht', '333333', { deleted: true })
+  await seedLoginProfile('malformed_bht', '444444', {
     house: null,
     locationId: null,
     authorizedLocations: ['OTC'],
     issueLocationIds: []
-  }))
+  })
 
   const cases = [
     ['000000', 'negative_device_001', 'negative_operation_001'],
@@ -274,7 +279,7 @@ test('the fifth failed attempt locks the device even if the next PIN is correct,
     () => begin({ pin: '000000', deviceId, operationId: 'rate_operation_0005', nowMs: baseNowMs + 5 }),
     error => error.code === 'resource-exhausted'
   )
-  await db.doc('users/rate_limit_bht').set(bhtProfile('275184'))
+  await seedLoginProfile('rate_limit_bht', '275184')
   await assert.rejects(
     () => begin({ pin: '275184', deviceId, operationId: 'rate_operation_0006', nowMs: baseNowMs + 6 }),
     error => error.code === 'resource-exhausted'
@@ -317,7 +322,7 @@ test('shared-network rate limiting blocks distributed attempts across many devic
 
 test('one profile keeps one stable Firebase UID while separate devices receive independent absolute 84-hour sessions', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/multi_device_bht').set(bhtProfile('492815'))
+  await seedLoginProfile('multi_device_bht', '492815')
   const first = await begin({ pin: '492815', deviceId: 'multi_device_alpha', operationId: 'multi_operation_alpha', nowMs: baseNowMs })
   const second = await begin({ pin: '492815', deviceId: 'multi_device_bravo', operationId: 'multi_operation_bravo', nowMs: baseNowMs + 5000 })
   const firstToken = decodeJwtPayload(first.customToken)
@@ -333,7 +338,7 @@ test('one profile keeps one stable Firebase UID while separate devices receive i
 
 test('login claims include active temporary and issue access and the session stops at the earliest grant expiry', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/scoped_login_bht').set(bhtProfile('593817'))
+  await seedLoginProfile('scoped_login_bht', '593817')
   const grantExpiryMs = baseNowMs + (60 * 60 * 1000)
   await db.doc('accessGrants/scoped_login_grant').set({
     userId: 'scoped_login_bht', locationId: 'RES', revoked: false,
@@ -360,7 +365,7 @@ test('login claims include active temporary and issue access and the session sto
 
 test('replaying the same login operation is idempotent and never extends absolute expiry', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/replay_bht').set(bhtProfile('615827'))
+  await seedLoginProfile('replay_bht', '615827')
   const first = await begin({ pin: '615827', deviceId: 'replay_device_0001', operationId: 'replay_operation_0001', nowMs: baseNowMs })
   const replay = await begin({ pin: '615827', deviceId: 'replay_device_0001', operationId: 'replay_operation_0001', nowMs: baseNowMs + 60000 })
   assert.equal(replay.replayed, true)
@@ -373,7 +378,7 @@ test('replaying the same login operation is idempotent and never extends absolut
 
 test('two devices racing the first login converge on one stable Firebase identity', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/concurrent_login_bht').set(bhtProfile('583106'))
+  await seedLoginProfile('concurrent_login_bht', '583106')
   const [first, second] = await Promise.all([
     begin({ pin: '583106', deviceId: 'concurrent_device_0001', operationId: 'concurrent_operation_0001' }),
     begin({ pin: '583106', deviceId: 'concurrent_device_0002', operationId: 'concurrent_operation_0002' })
@@ -386,7 +391,7 @@ test('two devices racing the first login converge on one stable Firebase identit
 
 test('security-version changes invalidate sessions and revoked operation IDs cannot be replayed', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/revoked_bht').set(bhtProfile('728394', { securityVersion: 3 }))
+  await seedLoginProfile('revoked_bht', '728394', { securityVersion: 3 })
   const first = await begin({ pin: '728394', deviceId: 'revoked_device_01', operationId: 'revoked_operation_01', nowMs: baseNowMs })
   const sessionRef = db.doc(`staffSessions/${first.session.id}`)
   const stored = (await sessionRef.get()).data()
@@ -408,9 +413,9 @@ test('security-version changes invalidate sessions and revoked operation IDs can
   assert.equal(replacement.session.issuedAtMs, baseNowMs + 4)
 })
 
-test('Auth provisioning failure leaves no migrated credential, mapping, identity, or session', async () => {
+test('Auth provisioning failure preserves the server credential but creates no mapping, identity, or session', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/auth_failure_bht').set(bhtProfile('839405'))
+  await seedLoginProfile('auth_failure_bht', '839405')
   const failingAuth = {
     getUser: async () => {
       const error = new Error('Synthetic missing user')
@@ -425,7 +430,12 @@ test('Auth provisioning failure leaves no migrated credential, mapping, identity
     createCustomToken: (...args) => auth.createCustomToken(...args)
   }
   await assert.rejects(() => begin({ pin: '839405', authAdapter: failingAuth }), /provisioning failure/i)
-  assert.equal((await db.doc('staffPinCredentials/auth_failure_bht').get()).exists, false)
+  assert.equal((await db.doc('staffPinCredentials/auth_failure_bht').get()).exists, true)
+  assert.equal(await verifyServerPinCredential(
+    '839405',
+    secret,
+    (await db.doc('staffPinCredentials/auth_failure_bht').get()).data()
+  ), true)
   assert.equal((await db.doc('staffAuthIdentities/auth_failure_bht').get()).exists, false)
   assert.equal((await db.collection('staffSessions').get()).size, 0)
   assert.equal((await db.collection('usersByAuthUid').get()).size, 0)
@@ -434,7 +444,7 @@ test('Auth provisioning failure leaves no migrated credential, mapping, identity
 
 test('custom-token failure leaves one recoverable session and retry reuses it without extending expiry', async () => {
   await enableDormantEndpoint()
-  await db.doc('users/token_failure_bht').set(bhtProfile('941627'))
+  await seedLoginProfile('token_failure_bht', '941627')
   let shouldFail = true
   const recoverableAuth = {
     getUser: (...args) => auth.getUser(...args),

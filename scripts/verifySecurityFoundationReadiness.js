@@ -1,5 +1,9 @@
-import { readFileSync, existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import process from 'node:process'
+
+const read = path => readFileSync(path, 'utf8')
+const packageJson = JSON.parse(read('package.json'))
+const functionsPackage = JSON.parse(read('functions/package.json'))
 
 const requiredFiles = [
   'MASTER_PLAN.md',
@@ -10,153 +14,131 @@ const requiredFiles = [
   'docs/security/PHASE_4_TO_8_LOCAL_SECURITY_READINESS.md',
   'docs/security/PHASE_9_PROTECTED_OPERATIONAL_MUTATIONS.md',
   'docs/security/SECURITY_CANARY_AND_ROLLBACK.md',
-  'scripts/manageSecurityFoundationCanary.js',
-  'scripts/inspectSecurityCompatibilityReadiness.js',
-  'scripts/manageSecurityCompatibilityCutover.js',
-  'scripts/securityCompatibilityCutoverModel.js',
-  'scripts/securityCompatibilityRetirementModel.js',
   'scripts/verifySecurityCompatibilityRetirement.js',
-  'scripts/appCheckObservationModel.js',
-  'scripts/securityCanaryEvidenceModel.js',
-  'scripts/securityCanaryStageModel.js',
-  'scripts/startSecurityE2eServer.js',
-  'playwright.security.templates.config.js',
-  'tests/e2e/securityTemplatesPhotosStage.spec.js',
-  'playwright.security.eoc.config.js',
-  'tests/e2e/securityEocOfflineStage.spec.js',
-  'playwright.security.debriefs.config.js',
-  'tests/e2e/securityDebriefsAlertsStage.spec.js',
-  'playwright.security.issues.config.js',
-  'tests/e2e/securityIssuesFeedbackAuditStage.spec.js',
-  'playwright.security.transports.config.js',
-  'tests/e2e/securityTransportsStage.spec.js',
-  'playwright.security.operations.config.js',
-  'tests/e2e/securityOperationsAdminStage.spec.js',
-  'playwright.security.settings.config.js',
-  'tests/e2e/securitySettingsStage.spec.js',
-  'playwright.security.offline.config.js',
-  'tests/e2e/securityOfflineReconnectMatrix.spec.js',
-  'playwright.security.offline-shell.config.js',
-  'tests/e2e/securityOfflineProductionShell.spec.js',
-  'tests/e2e/support/securityProductionOfflineServer.js',
-  'tests/e2e/support/securityOfflineProcessRestartRunner.js',
-  'scripts/verifySecurityOfflineProcessRestart.js',
-  'playwright.security.compatibility.config.js',
-  'tests/e2e/securityCompatibilityCanary.spec.js',
   'tests/e2e/support/securityViteGlobalServer.js',
-  'tests/offlineReconnectMatrix.test.js',
-  'tests/appCheckObservationModel.test.js',
-  'tests/securityCanaryEvidenceModel.test.js',
-  'tests/securityCompatibilityRetirementModel.test.js',
+  'tests/e2e/securityOfflineProductionShell.spec.js',
   'functions/src/staffPinLoginService.js',
   'functions/src/staffAccountSecurityService.js',
-  'functions/src/accessScopeSecurityService.js',
   'functions/src/offlineReplaySecurityService.js',
-  'functions/src/workflowSecurityModel.js',
-  'functions/src/transportSecurityService.js',
   'functions/src/operationalMutationSecurityService.js',
   'src/services/securityClientRuntime.js',
+  'src/services/securityClientBootstrap.js',
   'src/services/offlineActionCatalog.js',
-  'src/services/offlineSecurityModel.js',
-  'src/services/protectedOperationalMutationService.js',
-  'src/services/scopedSnapshotService.js',
   'src/services/appCheckMonitoringModel.js'
 ]
 
+const retiredFiles = [
+  'playwright.security.compatibility.config.js',
+  'tests/e2e/securityCompatibilityCanary.spec.js',
+  'scripts/verifyProductionStorageSmoke.js',
+  'scripts/manageSecurityStaffRollout.js',
+  'scripts/inspectSecurityCompatibilityReadiness.js',
+  'scripts/manageSecurityCompatibilityCutover.js',
+  'scripts/resetProductionCore.js'
+]
+
+const retiredCommands = [
+  'test:storage:production-smoke',
+  'test:security-compatibility:browser',
+  'test:security-compatibility:emulator',
+  'security:staff-rollout',
+  'security:compatibility-readiness',
+  'security:compatibility-cutover',
+  'reset:core:preview',
+  'reset:core:backup',
+  'reset:core:verify'
+]
+
 const missingFiles = requiredFiles.filter(path => !existsSync(path))
-const functionsPackage = JSON.parse(readFileSync('functions/package.json', 'utf8'))
-const packageJson = JSON.parse(readFileSync('package.json', 'utf8'))
-const indexSource = readFileSync('functions/src/index.js', 'utf8')
-const firebaseSource = readFileSync('src/firebase.js', 'utf8')
-const ruleSource = readFileSync('firestore.rules', 'utf8')
-const canaryManagerSource = readFileSync('scripts/manageSecurityFoundationCanary.js', 'utf8')
+const remainingRetiredFiles = retiredFiles.filter(existsSync)
+const remainingRetiredCommands = retiredCommands.filter(name => packageJson.scripts?.[name])
 const declaredNode = String(functionsPackage.engines?.node || '')
 const currentNode = process.versions.node
-const nodeMajor = currentNode.split('.')[0]
+const indexSource = read('functions/src/index.js')
+const pinLoginSource = read('src/components/PinLogin.jsx')
+const appSource = read('src/App.jsx')
+const staffLoginSource = read('functions/src/staffPinLoginService.js')
+const firestoreRules = read('firestore.rules')
+const storageRules = read('storage.rules')
+const packageSource = read('package.json')
+
+const browserCommands = [
+  'test:security-client:emulator',
+  'test:security-templates-photos:browser',
+  'test:security-eoc-offline:browser',
+  'test:security-debriefs-alerts:browser',
+  'test:security-issues-feedback-audit:browser',
+  'test:security-transports:browser',
+  'test:security-operations-admin:browser',
+  'test:security-settings:browser',
+  'test:security-offline-matrix:emulator',
+  'test:security-offline-shell:browser',
+  'test:security-offline-shell:process'
+]
 
 const checks = {
   requiredFilesPresent: missingFiles.length === 0,
   declaredNode22: declaredNode === '22',
-  runtimeParity: nodeMajor === declaredNode,
-  securityUnitCommandPresent: Boolean(packageJson.scripts?.['test:security-foundation']),
-  securityEmulatorCommandPresent: Boolean(packageJson.scripts?.['test:security-foundation:emulator']),
-  guardedStageTransitionPresent: Boolean(packageJson.scripts?.['test:security-canary-stage'])
-    && canaryManagerSource.includes("mode === 'stage-preview'")
-    && canaryManagerSource.includes("mode === 'stage-advance'")
-    && canaryManagerSource.includes("mode === 'stage-rollback'")
-    && canaryManagerSource.includes('closeCanarySessions')
-    && canaryManagerSource.includes('revokeCanaryRefreshTokens'),
-  operationsDataPreflightPresent: canaryManagerSource.includes('requireOperationsAdminDataReadiness')
-    && canaryManagerSource.includes('Correct it through a separately approved, backed-up data migration before advancing.'),
-  templatesPhotosBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-templates-photos:browser']),
-  eocOfflineBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-eoc-offline:browser']),
-  debriefsAlertsBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-debriefs-alerts:browser']),
-  issuesFeedbackAuditBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-issues-feedback-audit:browser']),
-  transportsBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-transports:browser']),
-  operationsAdminBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-operations-admin:browser']),
-  settingsBrowserCommandPresent: Boolean(packageJson.scripts?.['test:security-settings:browser']),
-  completeOfflineReconnectMatrixPresent: Boolean(packageJson.scripts?.['test:security-offline-matrix:browser'])
-    && Boolean(packageJson.scripts?.['test:security-offline-matrix:emulator'])
-    && readFileSync('src/services/offlineActionCatalog.js', 'utf8').includes('SUPPORTED_SECURE_OFFLINE_ACTION_TYPES'),
-  productionOfflineColdStartGatePresent: Boolean(packageJson.scripts?.['test:security-offline-shell:browser'])
-    && Boolean(packageJson.scripts?.['test:security-offline-shell:process'])
-    && readFileSync('tests/e2e/securityOfflineProductionShell.spec.js', 'utf8').includes('sprc-ops-shell-v13')
-    && readFileSync('tests/e2e/support/securityOfflineProcessRestartRunner.js', 'utf8').includes('launchPersistentContext')
-    && readFileSync('src/main.jsx', 'utf8').includes('offlineShellReady')
-    && readFileSync('public/sw.js', 'utf8').includes("fetch('/asset-manifest.json'")
-    && readFileSync('vite.config.js', 'utf8').includes("manifest: 'asset-manifest.json'"),
-  secureClientAndCompatibilityBrowserGatesPresent: Boolean(packageJson.scripts?.['test:security-client:emulator'])
-    && Boolean(packageJson.scripts?.['test:security-compatibility:emulator'])
-    && readFileSync('tests/e2e/securityCompatibilityCanary.spec.js', 'utf8').includes('stableProfileClaim'),
-  appCheckNotEnforced: indexSource.includes('enforceAppCheck: false') && !indexSource.includes('enforceAppCheck: true'),
-  appCheckClientExactGate: firebaseSource.includes('VITE_APP_CHECK_MONITORING_VERSION')
-    && firebaseSource.includes('VITE_ENABLE_APP_CHECK_MONITORING'),
-  appCheckReadOnlyObservationGatePresent: canaryManagerSource.includes("mode === 'app-check-observe'")
-    && canaryManagerSource.includes('summarizeAppCheckObservation')
-    && canaryManagerSource.includes('Monitoring-only observation refuses to continue.'),
-  identityReadOnlyStatusGatePresent: canaryManagerSource.includes("mode === 'identity-status'")
-    && canaryManagerSource.includes('summarizeIdentityCanaryEvidence')
-    && canaryManagerSource.includes('Identity status requires the verified --backup path'),
-  compatibilityRetirementReadinessGatePresent: Boolean(packageJson.scripts?.['security:compatibility-readiness'])
-    && Boolean(packageJson.scripts?.['security:compatibility-cutover'])
-    && Boolean(packageJson.scripts?.['verify:security-compatibility-retired'])
-    && readFileSync('scripts/inspectSecurityCompatibilityReadiness.js', 'utf8').includes('strictAuthorizationReady')
-    && readFileSync('scripts/securityCompatibilityCutoverModel.js', 'utf8').includes('ROLL BACK')
-    && readFileSync('scripts/securityCompatibilityRetirementModel.js', 'utf8').includes('browserPinTrustRemoved')
-    && readFileSync('src/App.jsx', 'utf8').includes('compatibilitySessionRequiresFreshLogin'),
-  serverIssuedWorkflowScopeClaims: indexSource.includes('manageStaffSecurityV4')
-    && readFileSync('functions/src/staffPinLoginService.js', 'utf8').includes('authorizedLocations')
-    && readFileSync('functions/src/staffPinLoginService.js', 'utf8').includes('issueLocationIds'),
-  noAnonymousAuthShortcut: !indexSource.includes('signInAnonymously'),
-  workflowBoundaryPresent: ruleSource.includes('workflowSecurityVersion == 6')
-    && ruleSource.includes('hasCurrentSecuritySession()')
-    && ruleSource.includes('session.scopeExpiresAt > request.time'),
-  directScopeWritesRetiredInStrictMode: ruleSource.includes("allow create: if !workflowSecurityEnabled('identity_users')")
-    && ruleSource.includes("allow create, update: if !workflowSecurityEnabled('identity_users')"),
-  serverOnlySecurityCollections: ruleSource.includes('match /securityWorkflowAudit/{auditId}')
-    && ruleSource.includes('allow read, write: if false;'),
-  protectedOperationalMutationsPresent: indexSource.includes('submitProtectedEocV9')
-    && indexSource.includes('mutateProtectedIssueV9')
-    && ruleSource.includes("allow create: if !workflowSecurityEnabled('issues_feedback_audit')")
+  localRuntimeParity: currentNode.split('.')[0] === declaredNode,
+  coreVerificationCommandsPresent: [
+    'test:security-foundation',
+    'test:security-foundation:emulator',
+    'test:rules',
+    'test:storage-rules',
+    'verify:security-compatibility-retired'
+  ].every(name => Boolean(packageJson.scripts?.[name])),
+  completeBrowserMatrixPresent: browserCommands.every(name => Boolean(packageJson.scripts?.[name])),
+  retiredToolsRemoved: remainingRetiredFiles.length === 0 && remainingRetiredCommands.length === 0,
+  noAnonymousAuthShortcut: !packageSource.includes('signInAnonymously')
+    && !pinLoginSource.includes('signInAnonymously')
+    && !indexSource.includes('signInAnonymously'),
+  browserPinTrustRemoved: !pinLoginSource.includes("where('pinHash'")
+    && !pinLoginSource.includes("from '../utils/pinHash'")
+    && !appSource.includes('compatibilitySessionRequiresFreshLogin'),
+  serverOnlyCredentialVerification: staffLoginSource.includes('staffPinCredentials')
+    && !staffLoginSource.includes("where('pinHash'")
+    && !staffLoginSource.includes('legacy_pin_hash'),
+  protectedAccountAndWorkflowFunctionsPresent: [
+    'beginStaffPinSessionV2',
+    'manageStaffSecurityV4',
+    'authorizeOfflineReplayV5',
+    'createProtectedTransportV6',
+    'submitProtectedEocV9',
+    'mutateProtectedIssueV9'
+  ].every(name => indexSource.includes(name)),
+  strictFirestoreCurrentSessionRequired: firestoreRules.includes('hasCurrentSecuritySession()')
+    && firestoreRules.includes('allow create, update, delete: if false;')
+    && !firestoreRules.includes('authScopeEnforced'),
+  strictStorageCurrentSessionRequired: storageRules.includes('currentWorkflowSession(locationId)')
+    && !storageRules.includes('compatibility'),
+  appCheckMonitoringOnly: indexSource.includes('enforceAppCheck: false')
+    && !indexSource.includes('enforceAppCheck: true'),
+  absolute84HourAndOfflineShellPreserved: read('src/services/securityClientSessionModel.js').includes('84 * 60 * 60 * 1000')
+    && read('public/sw.js').includes("fetch('/asset-manifest.json'")
+    && read('tests/e2e/securityOfflineProductionShell.spec.js').includes('cold offline restart')
 }
 
+const localReleaseCandidateReady = Object.entries(checks)
+  .filter(([name]) => name !== 'localRuntimeParity')
+  .every(([, passed]) => passed)
 const releaseBlockers = []
-if (!checks.runtimeParity) releaseBlockers.push(`Node runtime parity not verified: declared ${declaredNode}, local ${currentNode}.`)
-releaseBlockers.push('Broad staff rollout and compatibility-retirement approval are intentionally outside this local verifier; the completed synthetic canary does not authorize either change.')
+if (!checks.localRuntimeParity) {
+  releaseBlockers.push(`Local Functions emulator uses Node ${currentNode}; the declared and production runtime is Node ${declaredNode}. Reconfirm deployment/runtime checks during release.`)
+}
 
 const report = {
   generatedAt: new Date().toISOString(),
-  localDormantImplementationReady: Object.entries(checks)
-    .filter(([name]) => name !== 'runtimeParity')
-    .every(([, passed]) => passed),
-  productionReleaseScope: 'broad_staff_rollout',
-  productionReleaseReady: false,
+  mode: 'security_compatibility_retirement_readiness',
+  localReleaseCandidateReady,
+  productionReleaseReady: localReleaseCandidateReady && checks.localRuntimeParity,
   declaredNode,
   currentNode,
   checks,
   missingFiles,
+  remainingRetiredFiles,
+  remainingRetiredCommands,
   releaseBlockers
 }
 
 console.log(JSON.stringify(report, null, 2))
-if (!report.localDormantImplementationReady) process.exitCode = 1
+if (!localReleaseCandidateReady) process.exitCode = 1

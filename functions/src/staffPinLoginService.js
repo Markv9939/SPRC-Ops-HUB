@@ -8,8 +8,6 @@ import {
 } from './securityFoundationModel.js'
 import {
   STAFF_PIN_LOGIN_CONFIG_VERSION,
-  createServerPinCredential,
-  deriveLegacyPinHash,
   derivePinLookupKey,
   derivePrivateIdentifier,
   deriveStableStaffAuthUid,
@@ -144,33 +142,22 @@ async function writeFailureAudit(db, { reason, deviceRateId, networkRateId, nowM
 
 async function findCandidateProfiles({ db, pin, secret }) {
   const lookupKey = derivePinLookupKey(pin, secret)
-  const preferredSnapshot = await db.collection('staffPinCredentials').where('lookupKey', '==', lookupKey).limit(3).get()
-  if (!preferredSnapshot.empty) {
-    const matches = []
-    for (const credentialSnapshot of preferredSnapshot.docs) {
-      const credential = credentialSnapshot.data()
-      if (credential.active === true && await verifyServerPinCredential(pin, secret, credential)) {
-        const profileSnapshot = await db.doc(`users/${credentialSnapshot.id}`).get()
-        if (profileSnapshot.exists) {
-          matches.push({
-            profileId: credentialSnapshot.id,
-            profile: profileSnapshot.data(),
-            source: 'server_credential'
-          })
-        }
+  const credentialSnapshots = await db.collection('staffPinCredentials').where('lookupKey', '==', lookupKey).limit(3).get()
+  const matches = []
+  for (const credentialSnapshot of credentialSnapshots.docs) {
+    const credential = credentialSnapshot.data()
+    if (credential.active === true && await verifyServerPinCredential(pin, secret, credential)) {
+      const profileSnapshot = await db.doc(`users/${credentialSnapshot.id}`).get()
+      if (profileSnapshot.exists) {
+        matches.push({
+          profileId: credentialSnapshot.id,
+          profile: profileSnapshot.data(),
+          source: 'server_credential'
+        })
       }
     }
-    return { matches, ambiguous: matches.length > 1, source: 'server_credential' }
   }
-
-  const legacyHash = deriveLegacyPinHash(pin)
-  const legacySnapshot = await db.collection('users').where('pinHash', '==', legacyHash).limit(3).get()
-  const matches = legacySnapshot.docs.map(profileSnapshot => ({
-    profileId: profileSnapshot.id,
-    profile: profileSnapshot.data(),
-    source: 'legacy_pin_hash'
-  }))
-  return { matches, ambiguous: matches.length > 1, source: 'legacy_pin_hash' }
+  return { matches, ambiguous: matches.length > 1, source: 'server_credential' }
 }
 
 function validateCandidate(candidate) {
@@ -295,10 +282,6 @@ export async function beginDormantStaffPinSession({
   const profileRef = db.doc(`users/${candidate.profileId}`)
   const credentialRef = db.doc(`staffPinCredentials/${candidate.profileId}`)
   const auditRef = db.doc(`securityLoginAudit/login_${operationHash}`)
-  const upgradedCredential = candidate.source === 'legacy_pin_hash'
-    ? await createServerPinCredential(pin, secret)
-    : null
-
   const transactionResult = await db.runTransaction(async transaction => {
     const [configSnapshot, profileSnapshot, credentialSnapshot, identitySnapshot, mappingSnapshot, existingSessionSnapshot] = await Promise.all([
       transaction.get(db.doc(CONFIG_PATH)),
@@ -316,12 +299,8 @@ export async function beginDormantStaffPinSession({
     }
     const currentProfile = profileSnapshot.data() || {}
     validateCandidate({ profileId: candidate.profileId, profile: currentProfile })
-    if (candidate.source === 'server_credential') {
-      const currentCredential = credentialSnapshot.data() || {}
-      if (!credentialSnapshot.exists || currentCredential.active !== true || !await verifyServerPinCredential(pin, secret, currentCredential)) {
-        throw publicLoginFailure()
-      }
-    } else if (currentProfile.pinHash !== deriveLegacyPinHash(pin)) {
+    const currentCredential = credentialSnapshot.data() || {}
+    if (!credentialSnapshot.exists || currentCredential.active !== true || !await verifyServerPinCredential(pin, secret, currentCredential)) {
       throw publicLoginFailure()
     }
     if (identitySnapshot.exists && identitySnapshot.data().authUid !== authUid) {
@@ -389,21 +368,6 @@ export async function beginDormantStaffPinSession({
     }, { merge: true })
     const profileUpdate = { authUid, securityVersion, updatedAt: Timestamp.fromMillis(nowMs) }
     transaction.set(profileRef, profileUpdate, { merge: true })
-    if (upgradedCredential) {
-      transaction.set(credentialRef, {
-        ...upgradedCredential,
-        active: true,
-        migratedFrom: 'legacy_pin_hash_v2',
-        createdAt: Timestamp.fromMillis(nowMs),
-        updatedAt: Timestamp.fromMillis(nowMs)
-      })
-      transaction.set(db.doc(`staffPinLookup/${upgradedCredential.lookupKey}`), {
-        profileId: candidate.profileId,
-        active: true,
-        migratedFrom: 'legacy_pin_hash_v2',
-        updatedAt: Timestamp.fromMillis(nowMs)
-      }, { merge: true })
-    }
     transaction.set(auditRef, {
       action: 'staff_pin_session_created',
       profileId: candidate.profileId,

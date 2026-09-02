@@ -1,29 +1,9 @@
-import { useState, useEffect } from 'react'
-import { db, auth } from '../firebase'
-import { collection, query, where, getDocs } from 'firebase/firestore'
-import { signInAnonymously } from 'firebase/auth'
-import { hashPin } from '../utils/pinHash'
-import { isActiveNonDeletedUser } from '../services/pinConflictService'
-import { getScopedSessionUser } from '../services/accessGrantService'
-import { getAuthPolicy } from '../services/authPolicyService'
-import { establishPinSession } from '../services/pinSessionService'
+import { useState } from 'react'
 import {
-  SECURITY_CLIENT_BOOTSTRAP_COMPILED,
   beginSecurityClientPinLogin
 } from '../services/securityClientRuntime'
-import { toSecurityCompatibilityUser } from '../services/securityClientSessionModel'
 import { isOfflineMode } from '../utils/networkGuard'
 import { PIN_LENGTH, isValidPin, normalizePin } from '../utils/pinPolicy'
-import {
-  GLOBAL_SCOPE,
-  isAdminRole,
-  normalizeMainLocation,
-  normalizeRole,
-  normalizeScopeValues
-} from '../utils/orgModel'
-
-const MAX_FAILED_ATTEMPTS = 5
-const LOCKOUT_DURATION_MS = 5 * 60 * 1000 // 5 minutes
 const LOGIN_STEP_TIMEOUT_MS = 15000
 
 function withTimeout(promise, timeoutMs, timeoutMessage) {
@@ -38,107 +18,10 @@ function PinLogin({ onLogin }) {
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [failedAttempts, setFailedAttempts] = useState(0)
-  const [lockoutUntil, setLockoutUntil] = useState(null)
-
-  useEffect(() => {
-    const storedAttempts = localStorage.getItem('failedAttempts')
-    const storedLockout = localStorage.getItem('lockoutUntil')
-
-    if (storedAttempts) {
-      setFailedAttempts(parseInt(storedAttempts, 10))
-    }
-
-    if (storedLockout) {
-      const lockoutTime = parseInt(storedLockout, 10)
-      if (Date.now() < lockoutTime) {
-        setLockoutUntil(lockoutTime)
-      } else {
-        localStorage.removeItem('lockoutUntil')
-        localStorage.removeItem('failedAttempts')
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!SECURITY_CLIENT_BOOTSTRAP_COMPILED && lockoutUntil && Date.now() < lockoutUntil) {
-      const timer = setInterval(() => {
-        if (Date.now() >= lockoutUntil) {
-          setLockoutUntil(null)
-          setFailedAttempts(0)
-          setError('')
-          localStorage.removeItem('lockoutUntil')
-          localStorage.removeItem('failedAttempts')
-          clearInterval(timer)
-        }
-      }, 1000)
-
-      return () => clearInterval(timer)
-    }
-  }, [lockoutUntil])
-
-  const expectedUserScopes = (userData) => normalizeScopeValues([
-    ...(userData?.site ? [userData.site] : []),
-    ...(Array.isArray(userData?.authorizedLocations) ? userData.authorizedLocations : [])
-  ])
-
-  const claimsMatchPinUser = (authSession, userData) => {
-    if (!authSession?.authClaimsReady) return true
-
-    const expectedRole = normalizeRole(userData?.role)
-    const expectedScopes = expectedUserScopes(userData)
-    const actualRole = normalizeRole(authSession.authClaimRole)
-    const actualScopes = normalizeScopeValues(authSession.authClaimLocations)
-
-    const roleMatches = expectedRole === actualRole
-    const scopesMatch = expectedScopes.every(scope => actualScopes.includes(scope))
-    return roleMatches && scopesMatch
-  }
-
-  const ensureAuthSession = async ({ forceAnonymous = false } = {}) => {
-    try {
-      const credential = (!forceAnonymous && auth.currentUser)
-        ? { user: auth.currentUser }
-        : await signInAnonymously(auth)
-      let authClaimsReady = false
-      let authClaimRole = null
-      let authClaimLocations = []
-
-      try {
-        const token = await credential.user.getIdTokenResult()
-        authClaimRole = typeof token?.claims?.role === 'string' ? token.claims.role : null
-        authClaimLocations = Array.isArray(token?.claims?.locations) ? token.claims.locations : []
-        authClaimsReady = Boolean(authClaimRole)
-      } catch (tokenError) {
-        console.warn('Auth token claims lookup failed:', tokenError)
-      }
-
-      return {
-        authUid: credential.user.uid,
-        authClaimsReady,
-        authClaimRole,
-        authClaimLocations
-      }
-    } catch (authError) {
-      console.warn('Anonymous auth bootstrap failed:', authError)
-      return {
-        authUid: null,
-        authClaimsReady: false,
-        authClaimRole: null,
-        authClaimLocations: []
-      }
-    }
-  }
 
   const handleSubmit = async (pinOverride) => {
     const currentPin = typeof pinOverride === 'string' ? pinOverride : pin
     if (isLoading) return
-
-    if (!SECURITY_CLIENT_BOOTSTRAP_COMPILED && lockoutUntil && Date.now() < lockoutUntil) {
-      const remainingMinutes = Math.ceil((lockoutUntil - Date.now()) / 60000)
-      setError(`Account locked. Try again in ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}`)
-      return
-    }
 
     if (!isValidPin(currentPin)) {
       setError(`PIN must be ${PIN_LENGTH} digits`)
@@ -155,154 +38,19 @@ function PinLogin({ onLogin }) {
         return
       }
 
-      let securityResult
       try {
-        securityResult = await withTimeout(
+        const securityResult = await withTimeout(
           beginSecurityClientPinLogin(currentPin),
           LOGIN_STEP_TIMEOUT_MS,
           'Secure login timed out. Please check connection and try again.'
         )
+        if (securityResult.status !== 'authenticated') {
+          throw new Error('Secure login is not enabled for this app version. Contact an administrator.')
+        }
+        onLogin(securityResult.user)
       } catch (securityError) {
         setError(securityError?.message || 'Secure login failed. Please try again.')
         setPin('')
-        return
-      }
-      if (securityResult.status === 'authenticated') {
-        localStorage.removeItem('failedAttempts')
-        localStorage.removeItem('lockoutUntil')
-        setFailedAttempts(0)
-        onLogin(securityResult.user)
-        return
-      }
-
-      if (lockoutUntil && Date.now() < lockoutUntil) {
-        const remainingMinutes = Math.ceil((lockoutUntil - Date.now()) / 60000)
-        setError(`Account locked. Try again in ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}`)
-        return
-      }
-
-      const pinHash = await hashPin(currentPin)
-      const usersRef = collection(db, 'users')
-      const hashQuery = query(usersRef, where('pinHash', '==', pinHash), where('active', '==', true))
-      const querySnapshot = await withTimeout(
-        getDocs(hashQuery),
-        LOGIN_STEP_TIMEOUT_MS,
-        'Login timed out while verifying PIN. Please check connection and try again.'
-      )
-
-      const activePinUsers = querySnapshot.docs
-        .map(docSnap => ({
-          id: docSnap.id,
-          ...docSnap.data()
-        }))
-        .filter(isActiveNonDeletedUser)
-
-      if (activePinUsers.length === 0) {
-        const newFailedAttempts = failedAttempts + 1
-        setFailedAttempts(newFailedAttempts)
-        localStorage.setItem('failedAttempts', newFailedAttempts.toString())
-
-        if (newFailedAttempts >= MAX_FAILED_ATTEMPTS) {
-          const lockUntil = Date.now() + LOCKOUT_DURATION_MS
-          setLockoutUntil(lockUntil)
-          localStorage.setItem('lockoutUntil', lockUntil.toString())
-          setError('Too many failed attempts. Account locked for 5 minutes.')
-        } else {
-          setError(`Invalid PIN (${MAX_FAILED_ATTEMPTS - newFailedAttempts} attempts remaining)`)
-        }
-
-        setPin('')
-      } else {
-        if (activePinUsers.length > 1) {
-          setError('PIN conflict found. Contact admin.')
-          setPin('')
-          return
-        }
-
-        const pinUser = activePinUsers[0]
-        const userData = pinUser
-
-        localStorage.removeItem('failedAttempts')
-        localStorage.removeItem('lockoutUntil')
-        setFailedAttempts(0)
-
-        const policy = await withTimeout(
-          getAuthPolicy(),
-          LOGIN_STEP_TIMEOUT_MS,
-          'Login timed out while loading access policy. Please try again.'
-        )
-        const authScopeEnforced = policy?.authScopeEnforced === true
-        const authSession = await withTimeout(
-          ensureAuthSession(),
-          LOGIN_STEP_TIMEOUT_MS,
-          'Login timed out while starting the secure file session. Please try again.'
-        )
-        const normalizedRole = normalizeRole(userData.role)
-
-        try {
-          await withTimeout(
-            establishPinSession({ profileId: pinUser.id, pin: currentPin }),
-            LOGIN_STEP_TIMEOUT_MS,
-            'Secure session setup timed out.'
-          )
-        } catch (sessionLinkError) {
-          console.warn('Secure PIN session mapping was unavailable:', sessionLinkError)
-        }
-
-        // When claim enforcement is on, prevent stale claim sessions from constraining PIN identity.
-        if (authScopeEnforced && !claimsMatchPinUser(authSession, userData)) {
-          setError('Access blocked: auth claims do not match this PIN account. Use the matching claim-enabled account.')
-          setPin('')
-          return
-        }
-
-        if (authScopeEnforced && !authSession.authClaimsReady) {
-          setError('Access blocked: auth claims are required for this environment. Contact admin.')
-          setPin('')
-          return
-        }
-
-        let scopedSessionUser
-        try {
-          scopedSessionUser = await withTimeout(
-            getScopedSessionUser(pinUser.id, userData),
-            LOGIN_STEP_TIMEOUT_MS,
-            'Login timed out while loading access scope. Please try again.'
-          )
-        } catch (scopeError) {
-          console.warn('Access-grant scope lookup failed. Falling back to base scope:', scopeError)
-          const baseScopes = [...new Set([
-            ...(userData.site ? [userData.site] : []),
-            ...(Array.isArray(userData.authorizedLocations) ? userData.authorizedLocations : [])
-          ])]
-          const normalizedSite = isAdminRole(normalizedRole)
-            ? GLOBAL_SCOPE
-            : (normalizeMainLocation(userData.site) || normalizeMainLocation(baseScopes[0]) || '')
-          scopedSessionUser = {
-            id: pinUser.id,
-            name: userData.name,
-            role: normalizedRole,
-            site: normalizedSite,
-            locationId: userData.locationId || null,
-            shiftId: userData.shiftId || null,
-            vanId: userData.vanId || null,
-            vanIds: Array.isArray(userData.vanIds)
-              ? userData.vanIds.map(v => String(v || '').trim().toLowerCase()).filter(Boolean)
-              : (userData.vanId ? [String(userData.vanId).trim().toLowerCase()] : []),
-            authorizedLocations: normalizeScopeValues(baseScopes),
-            primaryScopes: normalizeScopeValues(baseScopes),
-            activeBackupGrants: [],
-            scopeRefreshedAt: new Date().toISOString(),
-            authScopeEnforced,
-            ...authSession
-          }
-        }
-
-        onLogin(toSecurityCompatibilityUser({
-          ...scopedSessionUser,
-          authScopeEnforced,
-          ...authSession
-        }))
       }
     } catch (err) {
       console.error('Login error:', err)
@@ -399,7 +147,7 @@ function PinLogin({ onLogin }) {
 
         <button
           onClick={handleSubmit}
-          disabled={isLoading || (!SECURITY_CLIENT_BOOTSTRAP_COMPILED && lockoutUntil && Date.now() < lockoutUntil)}
+          disabled={isLoading}
           style={{
             width: '100%',
             padding: '14px',
@@ -409,9 +157,9 @@ function PinLogin({ onLogin }) {
             borderRadius: '10px',
             fontSize: '18px',
             fontWeight: 'bold',
-            cursor: (isLoading || (!SECURITY_CLIENT_BOOTSTRAP_COMPILED && lockoutUntil && Date.now() < lockoutUntil)) ? 'not-allowed' : 'pointer',
+            cursor: isLoading ? 'not-allowed' : 'pointer',
             marginTop: '5px',
-            opacity: (isLoading || (!SECURITY_CLIENT_BOOTSTRAP_COMPILED && lockoutUntil && Date.now() < lockoutUntil)) ? 0.6 : 1,
+            opacity: isLoading ? 0.6 : 1,
             boxShadow: '0 8px 20px rgba(21,62,102,0.40)'
           }}
         >

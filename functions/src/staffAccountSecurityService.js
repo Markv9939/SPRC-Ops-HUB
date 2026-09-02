@@ -7,7 +7,6 @@ import {
 import {
   containsCredentialMaterial,
   createServerPinCredential,
-  deriveLegacyPinHash,
   derivePrivateIdentifier,
   normalizeStaffPin,
   sanitizeStaffProfile,
@@ -111,12 +110,11 @@ export async function loadMappedActor({ db, requestAuth, nowMs, requireCurrentSe
   return { id: actorProfileId, authUid, sessionId, ...actor }
 }
 
-async function verifyCurrentPin({ db, profileId, profile, pin, secret }) {
+async function verifyCurrentPin({ db, profileId, pin, secret }) {
   const credentialSnapshot = await db.doc(`staffPinCredentials/${profileId}`).get()
-  if (credentialSnapshot.exists && credentialSnapshot.data()?.active === true) {
-    return verifyServerPinCredential(pin, secret, credentialSnapshot.data())
-  }
-  return String(profile.pinHash || '') === deriveLegacyPinHash(pin)
+  return credentialSnapshot.exists
+    && credentialSnapshot.data()?.active === true
+    && verifyServerPinCredential(pin, secret, credentialSnapshot.data())
 }
 
 function managementActionForSave(before, after) {
@@ -257,9 +255,6 @@ async function createDormantStaffProfile({
   const credentialRef = db.doc(`staffPinCredentials/${requestedTarget}`)
   const lookupRef = db.doc(`staffPinLookup/${credential.lookupKey}`)
   const assignmentRef = db.doc(`shiftAssignments/asg_${requestedTarget}`)
-  const legacyPinHash = deriveLegacyPinHash(nextPin)
-  const legacyMatches = await db.collection('users').where('pinHash', '==', legacyPinHash).limit(3).get()
-
   const result = await db.runTransaction(async transaction => {
     const [configSnapshot, targetSnapshot, existingAudit, lookupSnapshot, credentialSnapshot, assignmentSnapshot] = await Promise.all([
       transaction.get(db.doc(CONFIG_PATH)),
@@ -279,15 +274,8 @@ async function createDormantStaffProfile({
     if (lookupSnapshot.exists && lookupSnapshot.data()?.profileId !== requestedTarget) {
       throw new StaffAccountSecurityError('already-exists', 'That PIN is already in use. Choose a different PIN.')
     }
-    for (const match of legacyMatches.docs) {
-      if (match.id !== requestedTarget) throw new StaffAccountSecurityError('already-exists', 'That PIN is already in use. Choose a different PIN.')
-    }
-
     const createdProfile = {
       ...profile,
-      pinHash: legacyPinHash,
-      pinVersion: 'v2_sha256_6digit',
-      pinUpdatedAt: timestamp,
       securityVersion: 1,
       version: 1,
       createdAt: timestamp,
@@ -408,6 +396,75 @@ export async function performDormantStaffSecurityAction({
     throw new StaffAccountSecurityError('not-found', 'The staff profile is unavailable.')
   }
 
+  if (action === STAFF_ACCOUNT_ACTIONS.HARD_DELETE) {
+    const actorRole = normalizeSecurityRole(currentActor.role)
+    if (actorRole !== 'admin') throw new StaffAccountSecurityError('permission-denied', 'Only an admin can permanently delete a staff profile.')
+    if (currentActor.id === requestedTarget) {
+      throw new StaffAccountSecurityError('failed-precondition', 'You cannot permanently delete the account you are currently using.')
+    }
+    const expectedVersion = Number(requestData.expectedVersion || 0)
+    const credentialRef = db.doc(`staffPinCredentials/${requestedTarget}`)
+    const identityRef = db.doc(`staffAuthIdentities/${requestedTarget}`)
+    const assignmentRef = db.doc(`shiftAssignments/asg_${requestedTarget}`)
+    const [credentialSnapshot, identitySnapshot] = await Promise.all([credentialRef.get(), identityRef.get()])
+    const targetAuthUid = String(target.authUid || identitySnapshot.data()?.authUid || '').trim()
+    const mappingRef = targetAuthUid ? db.doc(`usersByAuthUid/${targetAuthUid}`) : null
+    const lookupKey = String(credentialSnapshot.data()?.lookupKey || '').trim()
+    const lookupRef = lookupKey ? db.doc(`staffPinLookup/${lookupKey}`) : null
+    const timestamp = Timestamp.fromMillis(nowMs)
+    const result = await db.runTransaction(async transaction => {
+      const reads = [transaction.get(db.doc(CONFIG_PATH)), transaction.get(targetRef), transaction.get(auditRef)]
+      if (mappingRef) reads.push(transaction.get(mappingRef))
+      const [configSnapshot, freshTargetSnapshot, existingAudit] = await Promise.all(reads)
+      if (!configSnapshot.exists || !protectedAccountActionsEnabled(configSnapshot.data())) {
+        throw new StaffAccountSecurityError('failed-precondition', 'Protected staff account actions are not enabled.')
+      }
+      if (existingAudit.exists) return { audit: existingAudit.data(), replayed: true }
+      const freshTarget = freshTargetSnapshot.data() || {}
+      if (!freshTargetSnapshot.exists) throw new StaffAccountSecurityError('not-found', 'The staff profile is unavailable.')
+      if (expectedVersion > 0 && Number(freshTarget.version || 0) !== expectedVersion) {
+        throw new StaffAccountSecurityError('aborted', 'This staff profile changed in another session. Reload it before deleting it.')
+      }
+      const audit = {
+        schemaVersion: 4,
+        action,
+        actorProfileId: currentActor.id,
+        actorAuthUid: currentActor.authUid,
+        actorRole,
+        targetProfileId: requestedTarget,
+        targetAuthUid,
+        fingerprint,
+        triggers: ['profile_deactivated'],
+        changes: { deleted: { before: false, after: true } },
+        reason: auditReason(requestData.reason),
+        allDevicesRevoked: true,
+        cleanupStatus: 'pending',
+        appCheckPresent: appCheckPresent === true,
+        resultSecurityVersion: Number(freshTarget.securityVersion || 1) + 1,
+        resultProfile: sanitizeStaffProfile(requestedTarget, { ...freshTarget, active: false }),
+        createdAt: timestamp
+      }
+      if (containsCredentialMaterial(audit)) throw new Error('Audit payload unexpectedly contains credential material.')
+      transaction.create(auditRef, audit)
+      transaction.delete(targetRef)
+      transaction.delete(credentialRef)
+      transaction.delete(identityRef)
+      transaction.delete(assignmentRef)
+      if (mappingRef) transaction.delete(mappingRef)
+      if (lookupRef) transaction.delete(lookupRef)
+      return { audit, replayed: false }
+    })
+    const cleanup = await closeAllSessionsAndTokens({
+      db,
+      auth,
+      targetProfileId: requestedTarget,
+      authUid: targetAuthUid,
+      operationHash,
+      nowMs
+    })
+    return publicResult(result.audit, cleanup, result.replayed)
+  }
+
   if (action === STAFF_ACCOUNT_ACTIONS.CLOSE_DEVICE_SESSION) {
     const sessionId = cleanId(requestData.sessionId || currentActor.sessionId, 'Session ID')
     const sessionRef = db.doc(`staffSessions/${sessionId}`)
@@ -450,13 +507,11 @@ export async function performDormantStaffSecurityAction({
   let nextPin = null
   let currentPin = null
   let newCredential = null
-  let legacyPinHash = null
   if ([STAFF_ACCOUNT_ACTIONS.SELF_CHANGE_PIN, STAFF_ACCOUNT_ACTIONS.RESET_PIN].includes(action) || requestData.newPin) {
     try {
       nextPin = normalizeStaffPin(requestData.newPin)
       if (obviousPin(nextPin)) throw new Error('Choose a less obvious PIN. Repeated or sequential digits are not allowed.')
       newCredential = await createServerPinCredential(nextPin, secret)
-      legacyPinHash = deriveLegacyPinHash(nextPin)
     } catch (error) {
       throw new StaffAccountSecurityError('invalid-argument', String(error?.message || 'A valid new PIN is required.'))
     }
@@ -467,7 +522,7 @@ export async function performDormantStaffSecurityAction({
       throw new StaffAccountSecurityError('invalid-argument', 'Your current six-digit PIN is required.')
     }
     if (currentPin === nextPin) throw new StaffAccountSecurityError('invalid-argument', 'New PIN must be different from current PIN.')
-    if (!await verifyCurrentPin({ db, profileId: currentActor.id, profile: target, pin: currentPin, secret })) {
+    if (!await verifyCurrentPin({ db, profileId: currentActor.id, pin: currentPin, secret })) {
       throw new StaffAccountSecurityError('permission-denied', 'Current PIN is incorrect.')
     }
   }
@@ -512,9 +567,6 @@ export async function performDormantStaffSecurityAction({
   }
 
   const lookupRef = newCredential ? db.doc(`staffPinLookup/${newCredential.lookupKey}`) : null
-  const legacyMatches = legacyPinHash
-    ? await db.collection('users').where('pinHash', '==', legacyPinHash).limit(3).get()
-    : null
   const targetSessions = await db.collection('staffSessions').where('profileId', '==', requestedTarget).get()
   const targetCredentialRef = db.doc(`staffPinCredentials/${requestedTarget}`)
   const targetIdentitySnapshot = await db.doc(`staffAuthIdentities/${requestedTarget}`).get()
@@ -550,18 +602,12 @@ export async function performDormantStaffSecurityAction({
     if (lookupSnapshot?.exists && lookupSnapshot.data()?.profileId !== requestedTarget) {
       throw new StaffAccountSecurityError('already-exists', 'That PIN is already in use. Choose a different PIN.')
     }
-    for (const match of legacyMatches?.docs || []) {
-      if (match.id !== requestedTarget) throw new StaffAccountSecurityError('already-exists', 'That PIN is already in use. Choose a different PIN.')
-    }
     if (action === STAFF_ACCOUNT_ACTIONS.SELF_CHANGE_PIN) {
       const freshCredential = currentCredentialSnapshot?.exists ? currentCredentialSnapshot.data() : null
       const currentPinStillValid = Boolean(freshCredential) && freshCredential.active !== false
         ? await verifyServerPinCredential(currentPin, secret, freshCredential)
         : false
-      const legacyPinStillValid = !freshCredential
-        && typeof freshTarget.pinHash === 'string'
-        && freshTarget.pinHash === deriveLegacyPinHash(currentPin)
-      if (!currentPinStillValid && !legacyPinStillValid) {
+      if (!currentPinStillValid) {
         throw new StaffAccountSecurityError('aborted', 'Your PIN changed in another session. Sign in again before changing it.')
       }
     }
@@ -592,9 +638,6 @@ export async function performDormantStaffSecurityAction({
       userUpdate.deleteReason = 'Protected staff account action'
     }
     if (newCredential) {
-      userUpdate.pinHash = legacyPinHash
-      userUpdate.pinVersion = 'v2_sha256_6digit'
-      userUpdate.pinUpdatedAt = timestamp
       transaction.set(targetCredentialRef, {
         ...newCredential,
         active: true,

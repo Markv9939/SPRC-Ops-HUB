@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { db } from '../firebase'
-import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, getDoc, getDocs, getDocsFromServer, updateDoc, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
+import { collection, query, where, orderBy, onSnapshot, Timestamp, doc, getDoc, getDocs, getDocsFromServer } from 'firebase/firestore'
 import { ChevronRight, Eye, EyeOff, RefreshCw } from 'lucide-react'
 import DashboardSummaryPanel from './DashboardSummaryPanel'
 import SupervisorEocPanel from './SupervisorEocPanel'
@@ -14,14 +14,10 @@ import AppFeedbackPanel from './AppFeedbackPanel'
 import TransportDetailsDrawer from './TransportDetailsDrawer'
 import TransportRecordPage from './TransportRecordPage'
 import { LOCATIONS, VANS, getShiftLabel, getShiftOptionsForMainLocation, isShiftAllowedForMainLocation } from '../data/eocConstants'
-import { hardDeleteDerivedAssignment, syncDerivedAssignmentForUser } from '../services/assignmentService'
-import { hashPin } from '../utils/pinHash'
-import { PIN_LENGTH, PIN_VERSION, generateSecurePin, isObviousPin, isValidPin, normalizePin } from '../utils/pinPolicy'
-import { findDuplicatePinUser } from '../services/pinConflictService'
+import { PIN_LENGTH, generateSecurePin, isObviousPin, isValidPin, normalizePin } from '../utils/pinPolicy'
 import { notifySuccess } from '../utils/toast'
 import { showConfirmDialog, showPromptDialog } from '../utils/dialogs'
-import { writeAuditLog as writeAuditEntry } from '../services/notificationService'
-import { assertExpectedVersion, formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
+import { formatVersionConflictMessage, getVersionNumber } from '../services/versioning'
 import { isSecureSessionUser, performSecurityAccountAction } from '../services/securityAccountActions'
 import { buildManagedUserQueryPlan, mergeManagedUserDocumentGroups } from '../services/userManagementQueryModel'
 import { subscribeMergedQueryRows } from '../services/scopedSnapshotService'
@@ -422,10 +418,6 @@ function SupervisorDashboard({
     return unsub
   }, [isAdmin])
 
-  const writeAuditLog = async ({ action, collectionPath, documentId, reason, extra = {} }) => {
-    await writeAuditEntry({ action, collectionPath, documentId, reason, actorUser: user, extra })
-  }
-
   const promptDeleteReason = async (label) => {
     const reason = await showPromptDialog(`Enter reason for ${label}:`, {
       title: 'Reason Required',
@@ -504,26 +496,10 @@ function SupervisorDashboard({
     if (blockIfOffline('generating a PIN')) return
     setGeneratingPin(true)
     try {
-      // A secure session must not query credential hashes from the browser.
-      // The protected create/reset action performs the authoritative duplicate
-      // check on the server and safely rejects the rare collision at save time.
-      if (isSecureSessionUser(user)) {
-        const candidate = generateSecurePin()
-        setUserForm(prev => ({ ...prev, pin: candidate }))
-        setShowUserPin(true)
-        return
-      }
-      for (let attempt = 0; attempt < 12; attempt += 1) {
-        const candidate = generateSecurePin()
-        const duplicateUser = await findDuplicatePinUser(candidate, {
-          excludeUserId: editingUser === 'new' ? null : userForm.id
-        })
-        if (duplicateUser) continue
-        setUserForm(prev => ({ ...prev, pin: candidate }))
-        setShowUserPin(true)
-        return
-      }
-      alert('Unable to generate an unused PIN. Please try again.')
+      // The protected server action performs the authoritative duplicate check.
+      const candidate = generateSecurePin()
+      setUserForm(prev => ({ ...prev, pin: candidate }))
+      setShowUserPin(true)
     } catch (error) {
       alert(error?.message || 'Unable to generate a PIN.')
     } finally {
@@ -536,7 +512,6 @@ function SupervisorDashboard({
 
     const isNewUser = editingUser === 'new'
     const hasPinInput = String(userForm.pin || '').trim().length > 0
-    const secureManagement = isSecureSessionUser(user)
 
     if (!String(userForm.name || '').trim()) {
       alert('Please fill in the required name field.')
@@ -647,17 +622,6 @@ function SupervisorDashboard({
         mainLocation: normalizedLocation,
         locationId: normalizedLocationId
       })
-      const pinHash = hasPinInput && !secureManagement ? await hashPin(userForm.pin) : null
-      if (hasPinInput && !secureManagement) {
-        const duplicateUser = await findDuplicatePinUser(userForm.pin, {
-          excludeUserId: isNewUser ? null : appUserId
-        })
-        if (duplicateUser) {
-          alert(`That PIN is already assigned to ${duplicateUser.name || duplicateUser.id}. Choose a different PIN.`)
-          return
-        }
-      }
-
       const payload = {
         name: userForm.name,
         role: normalizedRole,
@@ -670,112 +634,31 @@ function SupervisorDashboard({
         vanIds: isBhtRole(normalizedRole) ? normalizedVanIds : [],
         active: userForm.active === true,
         authorizedLocations,
-        issueLocationIds,
-        updatedAt: serverTimestamp()
+        issueLocationIds
       }
-      if (pinHash) {
-        payload.pinHash = pinHash
-        payload.pinVersion = PIN_VERSION
-        payload.pinUpdatedAt = serverTimestamp()
+      const profilePatch = {
+        name: payload.name,
+        role: payload.role,
+        site: payload.site,
+        location: payload.location,
+        house: payload.house,
+        locationId: payload.locationId,
+        shiftId: payload.shiftId,
+        vanId: payload.vanId,
+        vanIds: payload.vanIds,
+        active: payload.active,
+        authorizedLocations: payload.authorizedLocations,
+        issueLocationIds: payload.issueLocationIds
       }
-
-      if (secureManagement) {
-        const profilePatch = {
-          name: payload.name,
-          role: payload.role,
-          site: payload.site,
-          location: payload.location,
-          house: payload.house,
-          locationId: payload.locationId,
-          shiftId: payload.shiftId,
-          vanId: payload.vanId,
-          vanIds: payload.vanIds,
-          active: payload.active,
-          authorizedLocations: payload.authorizedLocations,
-          issueLocationIds: payload.issueLocationIds
-        }
-        const result = await performSecurityAccountAction({
-          action: isNewUser ? 'create_profile' : 'save_profile',
-          targetProfileId: appUserId,
-          ...(isNewUser ? {} : { expectedVersion: Number(userForm._version || 0) }),
-          profilePatch,
-          ...(hasPinInput ? { newPin: userForm.pin } : {})
-        })
-        if (result.status !== 'completed') throw new Error('Protected staff account actions are not enabled yet.')
-        notifySuccess(result.allDevicesRevoked ? 'User saved and active sessions ended' : 'User saved successfully')
-        setEditingUser(null)
-        setShowUserPin(false)
-        loadUsers()
-        return
-      }
-
-      let userProfileSaved = false
-      const persistUserAndAssignment = async () => {
-        await runTransaction(db, async (transaction) => {
-          const userRef = doc(db, 'users', appUserId)
-          const latestSnap = await transaction.get(userRef)
-          let nextVersion = 1
-
-          if (editingUser === 'new') {
-            if (latestSnap.exists()) throw new Error('A user with this ID already exists.')
-          } else {
-            if (!latestSnap.exists()) throw new Error('User record no longer exists.')
-            const latest = latestSnap.data()
-            const versionCheck = assertExpectedVersion({
-              expectedVersion: userForm._version,
-              currentVersion: getVersionNumber(latest),
-              documentId: appUserId,
-              recordLabel: 'User'
-            })
-            nextVersion = versionCheck.nextVersion
-          }
-
-          if (editingUser === 'new') {
-            transaction.set(userRef, {
-              ...payload,
-              version: 1,
-              createdAt: serverTimestamp()
-            })
-          } else {
-            transaction.update(userRef, {
-              ...payload,
-              version: nextVersion
-            })
-          }
-
-        })
-        userProfileSaved = true
-
-        await syncDerivedAssignmentForUser(appUserId, {
-          name: userForm.name,
-          role: normalizedRole,
-          locationId: normalizedLocationId,
-          shiftId: normalizedShiftId,
-          vanId: primaryVanId,
-          vanIds: normalizedVanIds,
-          active: userForm.active === true
-        })
-      }
-
-      try {
-        await persistUserAndAssignment()
-      } catch (persistError) {
-        if (userProfileSaved) {
-          console.error('User saved but derived assignment sync failed:', persistError)
-          alert('User profile saved, but the BHT assignment sync was denied by Firestore rules. Deploy the latest rules, then edit and save this user once more.')
-          setEditingUser(null)
-          setShowUserPin(false)
-          loadUsers()
-          return
-        }
-        if (persistError?.code === 'permission-denied' && isAdminRole(user?.role)) {
-          alert('Admin save was denied by Firestore rules. Confirm the PIN-compatible rules are deployed.')
-          return
-        }
-        throw persistError
-      }
-
-      notifySuccess('User saved successfully')
+      const result = await performSecurityAccountAction({
+        action: isNewUser ? 'create_profile' : 'save_profile',
+        targetProfileId: appUserId,
+        ...(isNewUser ? {} : { expectedVersion: Number(userForm._version || 0) }),
+        profilePatch,
+        ...(hasPinInput ? { newPin: userForm.pin } : {})
+      })
+      if (result.status !== 'completed') throw new Error('Protected staff account actions are not enabled yet.')
+      notifySuccess(result.allDevicesRevoked ? 'User saved and active sessions ended' : 'User saved successfully')
       setEditingUser(null)
       setShowUserPin(false)
       loadUsers()
@@ -799,43 +682,14 @@ function SupervisorDashboard({
     const targetUser = users.find(candidate => candidate.id === userId)
 
     try {
-      if (isSecureSessionUser(user)) {
-        const result = await performSecurityAccountAction({
-          action: 'soft_delete',
-          targetProfileId: userId,
-          expectedVersion: getVersionNumber(targetUser),
-          reason
-        })
-        if (result.status !== 'completed') throw new Error('Protected staff account actions are not enabled yet.')
-        notifySuccess('User soft-deleted and active sessions ended')
-        loadUsers()
-        return
-      }
-      await updateDoc(doc(db, 'users', userId), {
-        deleted: true,
-        deletedAt: serverTimestamp(),
-        deletedByUserId: user?.id || null,
-        deletedByName: user?.name || null,
-        deleteReason: reason,
-        active: false,
-        updatedAt: serverTimestamp()
-      })
-      await syncDerivedAssignmentForUser(userId, {
-        name: targetUser?.name || userId,
-        role: targetUser?.role || 'bht',
-        locationId: targetUser?.locationId || null,
-        shiftId: targetUser?.shiftId || '',
-        vanId: targetUser?.vanId || '',
-        vanIds: normalizeVanIdList(targetUser?.vanIds, targetUser?.vanId),
-        active: false
-      })
-      await writeAuditLog({
+      const result = await performSecurityAccountAction({
         action: 'soft_delete',
-        collectionPath: 'users',
-        documentId: userId,
+        targetProfileId: userId,
+        expectedVersion: getVersionNumber(targetUser),
         reason
       })
-      notifySuccess('User soft-deleted')
+      if (result.status !== 'completed') throw new Error('Protected staff account actions are not enabled yet.')
+      notifySuccess('User soft-deleted and active sessions ended')
       loadUsers()
     } catch (error) {
       console.error('Error deleting user:', error)
@@ -889,21 +743,15 @@ function SupervisorDashboard({
     if (!reason) return
 
     try {
-      const batch = writeBatch(db)
-      const auditRef = doc(collection(db, 'auditLogs'))
-      batch.set(auditRef, {
+      const targetUser = users.find(candidate => candidate.id === userId)
+      const result = await performSecurityAccountAction({
         action: 'hard_delete',
-        collectionPath: 'users',
-        documentId: userId,
-        performedByUserId: user?.id || null,
-        performedByName: user?.name || null,
-        reason,
-        createdAt: serverTimestamp()
+        targetProfileId: userId,
+        expectedVersion: getVersionNumber(targetUser),
+        reason
       })
-      batch.delete(doc(db, 'users', userId))
-      await batch.commit()
-      await hardDeleteDerivedAssignment(userId)
-      notifySuccess('User hard-deleted')
+      if (result.status !== 'completed') throw new Error('Protected staff account actions are not enabled yet.')
+      notifySuccess('User hard-deleted and active sessions ended')
       loadUsers()
     } catch (error) {
       console.error('Error hard deleting user:', error)
@@ -1856,7 +1704,7 @@ function SupervisorDashboard({
                         </div>
                         <div>
                           <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>PIN Storage</div>
-                          <div style={{ fontSize: '14px' }}>{managedUser.pinHash ? 'Configured' : 'Not configured'}</div>
+                          <div style={{ fontSize: '14px' }}>Configured</div>
                         </div>
                         <div>
                           <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Role</div>

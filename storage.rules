@@ -6,11 +6,6 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function strictAuthEnabled() {
-      return firestore.exists(/databases/(default)/documents/appSettings/authPolicy)
-        && firestore.get(/databases/(default)/documents/appSettings/authPolicy).data.authScopeEnforced == true;
-    }
-
     function workflowSecurityEnabled(workflowId) {
       return signedIn()
         && 'workflowSecurityVersion' in request.auth.token
@@ -65,14 +60,9 @@ service firebase.storage {
         && strictLocationAllowed(locationId);
     }
 
-    function locationAllowed(locationId) {
-      return signedIn() && (!strictAuthEnabled() || strictLocationAllowed(locationId));
-    }
-
     function workflowLocationAllowed(workflowId, locationId) {
       return workflowSecurityEnabled(workflowId)
-        ? currentWorkflowSession(locationId)
-        : locationAllowed(locationId);
+        && currentWorkflowSession(locationId);
     }
 
     function strictAttachmentReadable(locationId, issueId, attachmentId) {
@@ -89,11 +79,9 @@ service firebase.storage {
 
     match /issueAttachments/{locationId}/{issueId}/{fileName} {
       allow get: if signedIn()
-        && (
-          workflowSecurityEnabled('issues_feedback_audit')
-            ? (currentWorkflowSession(locationId) && strictAttachmentReadable(locationId, issueId, resource.metadata.attachmentId))
-            : (!strictAuthEnabled() || strictAttachmentReadable(locationId, issueId, resource.metadata.attachmentId))
-        );
+        && workflowSecurityEnabled('issues_feedback_audit')
+        && currentWorkflowSession(locationId)
+        && strictAttachmentReadable(locationId, issueId, resource.metadata.attachmentId);
       allow list: if false;
       allow create, update: if workflowLocationAllowed('issues_feedback_audit', locationId)
         && request.resource.size > 0

@@ -11,7 +11,10 @@ async function revokeDesktopProfile() {
   }
   const response = await fetch(url, {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      authorization: 'Bearer owner',
+      'content-type': 'application/json'
+    },
     body: JSON.stringify({
       fields: {
         securityVersion: { integerValue: '2' },

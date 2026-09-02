@@ -138,25 +138,41 @@ export default function useScopedIssues({
       })
     }
 
-    const unsubOverdue = onSnapshot(
-      query(collection(db, 'eocTasks'), where('status', '==', 'overdue')),
-      (snap) => {
-        const rows = snap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .filter(task => inEocScope(task.locationId))
-        rows.sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''))
-        setOverdueTasks(rows)
-      },
-      (err) => {
-        console.error('Scoped overdue EOC task listener failed:', err)
-        setOverdueTasks([])
-      }
-    )
+    const overdueUnsubs = []
+    if (!waitingForVerifiedScope) {
+      const overdueQueryLocations = canUseExactIssueQuery ? exactLocations : [null]
+      const overdueBuckets = []
+      overdueQueryLocations.forEach((locationId, index) => {
+        const constraints = [where('status', '==', 'overdue')]
+        if (locationId) constraints.unshift(where('locationId', '==', locationId))
+        const unsub = onSnapshot(
+          query(collection(db, 'eocTasks'), ...constraints),
+          (snap) => {
+            overdueBuckets[index] = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+            const merged = new Map()
+            overdueBuckets.flat().filter(Boolean).forEach(task => {
+              if (inEocScope(task.locationId)) merged.set(task.id, task)
+            })
+            setOverdueTasks(Array.from(merged.values()).sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '')))
+          },
+          (err) => {
+            console.error('Scoped overdue EOC task listener failed:', err)
+            overdueBuckets[index] = []
+            const merged = new Map()
+            overdueBuckets.flat().filter(Boolean).forEach(task => {
+              if (inEocScope(task.locationId)) merged.set(task.id, task)
+            })
+            setOverdueTasks(Array.from(merged.values()).sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '')))
+          }
+        )
+        overdueUnsubs.push(unsub)
+      })
+    }
 
     return () => {
       issueUnsubs.forEach(unsub => unsub())
       resolvedUnsubs.forEach(unsub => unsub())
-      unsubOverdue()
+      overdueUnsubs.forEach(unsub => unsub())
     }
   }, [admin, enabled, exactLocations, includeResolved, inEocScope, inIssueScope, resolvedLimit, waitingForVerifiedScope])
 

@@ -1,7 +1,16 @@
 # Security Foundation Canary and Rollback Gate
 
-Last updated: 2026-08-31
-Status: Exact three-profile cumulative canary complete through Settings; first Lone Mountain account passed two-device/logout checks, real-phone offline shell correction verified locally and awaiting release/retest
+Last updated: 2026-09-01
+Status: Historical canary/rollback record; secure login is all-active, strict authorization is enabled, and compatibility login is retired
+
+## Current closeout boundary
+
+- Every staff PIN login now uses the server-verified custom-token session path. There is no non-enrolled compatibility fallback and Anonymous Authentication is not used.
+- Current sessions remain independent per device, persist across browser close/reopen for an absolute maximum of 84 hours, and are checked against the live profile/security version.
+- Firestore and Storage require current mapped sessions and workflow scope. Account/PIN/access actions and protected operational mutations use server Functions.
+- App Check remains monitoring-only and unenforced.
+- The former staff-rollout, compatibility-cutover, compatibility-browser, Anonymous Storage smoke, and pre-secure core-reset commands were removed at retirement so they cannot reopen a downgraded path.
+- The detailed canary stages below are retained as historical evidence. Their rollout/cutover commands are no longer current operating instructions.
 
 ## Current completed-canary boundary
 
@@ -12,11 +21,11 @@ Status: Exact three-profile cumulative canary complete through Settings; first L
 - Final coordinated rollback snapshot: `C:\Users\markv\Documents\Codex\SPRC-release-backups\sprc-security-canary-2026-08-30T17-40-46-357Z.json`, SHA-256 `77c264534fab063f5aa6861c8f913b398c2a8f29b09b6ca495a5eb54b70a56da`.
 - Every cumulative stage completed a guarded rollback and reactivation. The final reactivation revoked prior canary sessions so the next canary login receives only current claims.
 - App Check remains monitoring-only and unenforced. The completed 24-hour aggregate contains all six protected endpoint groups across 63 samples, all with token absence recorded. This is sufficient monitoring evidence but is not approval or proof for enforcement.
-- Non-canary staff remain on compatibility login. Global strict authorization, Anonymous Authentication as a shortcut, broad enrollment, and compatibility retirement remain off.
+- Superseded after closeout: non-canary compatibility login and global strict-authorization-off were temporary rollout boundaries.
 
-## Real-staff rollout stages
+## Historical real-staff rollout stages
 
-The synthetic canary tool remains fixed to its three test profiles. Do not repurpose it for staff. Real-staff cohorts use the separate `security:staff-rollout` command and always keep `rolloutState: production_canary`, the full tested workflow list, compatibility fallback for non-enrolled profiles, global strict authorization off, and App Check enforcement off.
+The synthetic canary and former guarded staff-rollout command were used only during the staged transition. They kept strict authorization off and preserved compatibility fallback until each cohort passed. That command is retired and removed after all-active/strict closeout; the sequence below is historical evidence, not a current procedure.
 
 1. **Choose one exact location and BHT/tech group.** Run the read-only candidate report. It returns only matching staff names/IDs plus readiness reasons; it makes no writes. Start with the smallest operational house cohort and never include more than 12 profiles.
 2. **Preview the exact profile list.** Preview rechecks active status, the single-home-location contract, unique server or safely migratable legacy PIN storage, identity mapping integrity, current synthetic-canary configuration, full workflow coverage, strict-auth off, and App Check enforcement off. It writes a privacy-minimized rollback file outside the repository and prints its SHA-256 checksum and exact enrollment phrase.
@@ -26,15 +35,7 @@ The synthetic canary tool remains fixed to its three test profiles. Do not repur
 6. **Exercise cohort rollback and re-enrollment.** The exact backup removes only that cohort from both allowlists, increments target security versions again, closes all target sessions, revokes refresh tokens, records audit evidence, and returns those staff to compatibility PIN login without deleting identity, PIN credential, offline, session, or audit history. Re-preview before re-enrollment; never reuse a stale backup for a different cohort.
 7. **Advance one cohort at a time.** Record exact evidence in the Master Plan and Progress Log. Do not begin another location until the current location passes observation and rollback/re-enrollment. Compatibility retirement is still a later separate release after all active staff cohorts are stable.
 
-Read-only candidate discovery:
-
-`npm run security:staff-rollout -- --mode=candidates --project=sprc-tx-l --location=<exact-location-id>`
-
-Exact-cohort preview:
-
-`npm run security:staff-rollout -- --mode=preview --project=sprc-tx-l --location=<exact-location-id> --profile-ids=<comma-separated-profile-ids> --backup-dir=<absolute-path-outside-repo>`
-
-The preview prints the exact `enroll`, `status`, and `rollback` arguments. Never guess a confirmation phrase, hand-edit the protected allowlists, or use a backup for a different location/profile set.
+Historical previews printed exact enroll/status/rollback arguments and wrote protected backups outside the repository. Those backups remain evidence only; do not reuse them or recover the retired command from Git history.
 
 ### First real cohort
 
@@ -64,7 +65,7 @@ The original Test House canary has already been activated for exactly `test_supe
 7. The valid non-enrolled synthetic BHT correctly stayed outside secure identity/session enrollment, but the prior client returned to the PIN screen on reload. The narrow versioned compatibility marker/restore correction passed the Node 22 production-shaped emulator/browser gate, was deployed Hosting-only from an isolated `f067ccc` release worktree, passed the live login/reload check, and was merged through `1028347`. Read-only production evidence confirmed no secure identity mapping and zero secure sessions for that profile.
 8. The existing release evidence records two completed rollback/reactivation drills for this exact release and cohort. A later privacy-minimized production audit readback directly confirmed the immutable activation/rollback/activation/rollback/activation sequence. Current configuration still exactly matches the verified rollback anchor, and the separate two-device cutoff test proves live revocation. Identity/Users is therefore complete; do not repeat the disruptive production rollback merely to duplicate this evidence.
 
-The production-shaped emulator rehearsals are now executable as `npm run test:security-client:emulator` and `npm run test:security-compatibility:emulator` inside the Node 22 Firebase emulator wrapper. They prove the secure RES admin-create/BHT-login path and that a valid non-enrolled staff member retains only the existing compatibility session, not a stable secure identity/session/workflow claim. These local results do not replace the live canary.
+The current production-shaped emulator rehearsal is `npm run test:security-client:emulator`. The former non-enrolled compatibility rehearsal was retired with its runtime path and is retained only in Git history.
 
 Before resuming the live browser journey, run the read-only status check with the current verified rollback snapshot and its exact SHA-256:
 
@@ -80,7 +81,7 @@ The guarded `security:canary` **activate** mode was designed for the original ab
 2. Run the complete local test matrix with the declared Node.js 22 runtime.
 3. Back up the current Firebase rules, Functions, Hosting release, indexes, Auth/provider settings, and the protected configuration documents without changing them.
 4. Select synthetic or explicitly approved canary staff and locations. Never silently enroll real staff.
-   The first approved cohort is exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`. Production configuration must use `rolloutState: production_canary` plus this exact `enabledProfileIds` allowlist. A valid non-enrolled PIN stays on the unchanged compatibility login and creates no secure identity/session artifacts.
+   The first approved cohort was exactly `test_supervisor`, `test_bht_shift_1`, and `test_bht_shift_2`. At that historical stage, production used `rolloutState: production_canary` plus that exact allowlist and kept non-enrolled staff on compatibility login.
 5. Start with the identity/users workflow and protected account actions for every canary staff member and manager. Do not let a legacy profile edit bypass the required session revocation while another workflow trusts the secure session.
    Only `beginStaffPinSessionV2` and `manageStaffSecurityV4` are reachable for this first canary. Protected offline replay, transport creation, EOC submission, and issue mutation remain private and disabled until their own workflow canaries.
 6. Include temporary backup-access creation/revocation/expiry and issue-access changes. Confirm each scope change signs out every affected device and the next PIN login receives only the exact current scope.

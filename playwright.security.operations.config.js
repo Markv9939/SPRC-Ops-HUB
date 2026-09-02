@@ -9,10 +9,6 @@ export default defineConfig({
     ...baseConfig.use,
     baseURL: 'http://127.0.0.1:4183'
   },
-  webServer: {
-    command: 'node scripts/startSecurityE2eServer.js --port=4183',
-    url: 'http://127.0.0.1:4183',
-    reuseExistingServer: false,
-    timeout: 120_000
-  }
+  globalSetup: './tests/e2e/support/securityViteGlobalServer.js',
+  webServer: undefined
 })

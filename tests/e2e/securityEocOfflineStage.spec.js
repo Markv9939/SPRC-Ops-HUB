@@ -5,7 +5,9 @@ const projectId = process.env.GCLOUD_PROJECT || 'sprc-ops-hub-phase3-e2e'
 
 async function emulatorDocument(path) {
   const host = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080'
-  const response = await fetch(`http://${host}/v1/projects/${projectId}/databases/(default)/documents/${path}`)
+  const response = await fetch(`http://${host}/v1/projects/${projectId}/databases/(default)/documents/${path}`, {
+    headers: { authorization: 'Bearer owner' }
+  })
   if (!response.ok) throw new Error(`Unable to read emulator document ${path}: ${response.status}`)
   return response.json()
 }

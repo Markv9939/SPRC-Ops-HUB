@@ -87,7 +87,25 @@ async function issueToken({ uid, profileId, sessionId, securityVersion = 3 }) {
     if (error.code !== 'auth/user-not-found') throw error
     await adminAuth.createUser({ uid })
   }
-  return adminAuth.createCustomToken(uid, { profileId, sessionId, securityVersion, sessionVersion: 2, role: 'bht' })
+  await adminDb.doc(`staffSessions/${sessionId}`).set({
+    active: true,
+    authUid: uid,
+    profileId,
+    securityVersion,
+    expiresAt: new Date(Date.now() + 60_000)
+  })
+  return adminAuth.createCustomToken(uid, {
+    profileId,
+    sessionId,
+    securityVersion,
+    sessionVersion: 2,
+    role: 'bht',
+    authorizedLocations: ['OTC'],
+    issueLocationIds: ['test_house'],
+    locationId: 'test_house',
+    workflowSecurityVersion: 6,
+    secureWorkflows: ['identity_users']
+  })
 }
 
 async function seedMappedProfile(profileId, uid, data = profile()) {

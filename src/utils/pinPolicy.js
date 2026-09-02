@@ -1,5 +1,4 @@
 export const PIN_LENGTH = 6
-export const PIN_VERSION = 'v2_sha256_6digit'
 
 const OBVIOUS_PINS = new Set([
   '012345',

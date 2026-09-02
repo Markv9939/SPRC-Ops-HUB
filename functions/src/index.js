@@ -1,4 +1,3 @@
-import crypto from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
@@ -24,13 +23,13 @@ import { workflowSecurityEnabled } from './workflowSecurityModel.js'
 import { createProtectedTransport } from './transportSecurityService.js'
 import { ACCESS_SCOPE_ACTIONS, performDormantAccessScopeAction } from './accessScopeSecurityService.js'
 import { mutateProtectedIssue, submitProtectedEoc } from './operationalMutationSecurityService.js'
+import { normalizeStaffPin, verifyServerPinCredential } from './staffPinCredentialModel.js'
 
 initializeApp()
 const db = getFirestore()
 const bucket = () => getStorage().bucket()
-const PIN_PEPPER = 'sprc-pin-v2-6digit'
-const PIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000
-const PIN_MAX_ATTEMPTS = 5
+const ADMIN_REAUTH_WINDOW_MS = 15 * 60 * 1000
+const ADMIN_REAUTH_MAX_ATTEMPTS = 5
 const STAFF_PIN_AUTH_SECRET = defineSecret('STAFF_PIN_AUTH_SECRET')
 const EOC_ASSIGNMENT_SHIFTS = new Set([
   'shift_1',
@@ -96,54 +95,6 @@ function eocOperationId(value) {
   if (!operationId) throw new HttpsError('invalid-argument', 'A unique operation ID is required.')
   return operationId
 }
-
-export async function establishPinSessionHandler(request) {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'A Firebase session is required.')
-  const profileId = cleanId(request.data?.profileId)
-  const pin = String(request.data?.pin || '').trim()
-  if (!profileId || !/^\d{6}$/.test(pin)) throw new HttpsError('invalid-argument', 'Profile and six-digit PIN are required.')
-  const profileRef = db.doc(`users/${profileId}`)
-  const mappingRef = db.doc(`usersByAuthUid/${request.auth.uid}`)
-  const rateKey = crypto.createHash('sha256').update(request.auth.uid).digest('hex').slice(0, 32)
-  const rateRef = db.doc(`securityRateLimits/pinSession_${rateKey}`)
-  const nowMs = Date.now()
-  return db.runTransaction(async transaction => {
-    const [profileSnap, rateSnap] = await Promise.all([transaction.get(profileRef), transaction.get(rateRef)])
-    const profile = profileSnap.data() || {}
-    const rate = rateSnap.data() || {}
-    const lockedUntilMs = rate.lockedUntil?.toMillis?.() || 0
-    if (lockedUntilMs > nowMs) throw new HttpsError('resource-exhausted', 'Too many failed attempts. Try again later.')
-    const valid = profileSnap.exists && profile.active === true && profile.deleted !== true && profile.pinHash === hashPin(pin)
-    if (!valid) {
-      const windowStartedMs = rate.windowStartedAt?.toMillis?.() || 0
-      const inWindow = windowStartedMs > 0 && nowMs - windowStartedMs < PIN_ATTEMPT_WINDOW_MS
-      const failedAttempts = (inWindow ? Number(rate.failedAttempts || 0) : 0) + 1
-      transaction.set(rateRef, {
-        failedAttempts,
-        windowStartedAt: inWindow ? rate.windowStartedAt : Timestamp.fromMillis(nowMs),
-        lockedUntil: failedAttempts >= PIN_MAX_ATTEMPTS ? Timestamp.fromMillis(nowMs + PIN_ATTEMPT_WINDOW_MS) : null,
-        lastFailedAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp()
-      }, { merge: true })
-      return { valid: false, locked: failedAttempts >= PIN_MAX_ATTEMPTS }
-    }
-    transaction.set(mappingRef, {
-      userId: profileId,
-      linkedBy: 'verified_pin_session',
-      linkedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-      version: 1
-    }, { merge: true })
-    transaction.set(rateRef, { failedAttempts: 0, lockedUntil: null, lastSucceededAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
-    return { valid: true, profileId, role: profile.role || '' }
-  }).then((result) => {
-    if (result.locked) throw new HttpsError('resource-exhausted', 'Too many failed attempts. Try again later.')
-    if (!result.valid) throw new HttpsError('permission-denied', 'PIN verification failed.')
-    return { profileId: result.profileId, role: result.role }
-  })
-}
-
-export const establishPinSession = onCall({ region: 'us-central1' }, establishPinSessionHandler)
 
 const SECURITY_RUNTIME_SERVICE_ACCOUNT = 'sprc-security-runtime@sprc-tx-l.iam.gserviceaccount.com'
 
@@ -812,7 +763,7 @@ export const previewEocTemplatePurge = onCall({ region: 'us-central1', enforceAp
 
 export async function purgeEocTemplateHandler(request) {
   const actor = await requireMappedActor(request, ['admin'])
-  const pinActor = await requireAdminPin(request)
+  const pinActor = await requireAdminReauthentication(request)
   if (pinActor.id !== actor.id) throw new HttpsError('permission-denied', 'Use your own admin profile and PIN for this action.')
   const templateId = cleanId(request.data?.templateId)
   const operationId = eocOperationId(request.data?.operationId)
@@ -848,45 +799,50 @@ export async function purgeEocTemplateHandler(request) {
   })
 }
 
-export const purgeEocTemplate = onCall({ region: 'us-central1', enforceAppCheck: false }, purgeEocTemplateHandler)
+export const purgeEocTemplate = onCall({ region: 'us-central1', enforceAppCheck: false, secrets: [STAFF_PIN_AUTH_SECRET] }, purgeEocTemplateHandler)
 
-function hashPin(pin) {
-  return crypto.createHash('sha256').update(`${PIN_PEPPER}:${String(pin || '').trim()}`).digest('hex')
-}
-
-async function requireAdminPin(request) {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'A Firebase session is required.')
-  const profileId = String(request.data?.adminProfileId || '').trim()
-  const pin = String(request.data?.pin || '').trim()
-  if (!/^\d{6}$/.test(pin) || !profileId) throw new HttpsError('invalid-argument', 'Admin profile and six-digit PIN are required.')
-  const profileRef = db.doc(`users/${profileId}`)
-  const rateKey = crypto.createHash('sha256').update(profileId).digest('hex').slice(0, 32)
-  const rateRef = db.doc(`securityRateLimits/privacyRemoval_${rateKey}`)
+async function requireAdminReauthentication(request) {
+  let pin
+  try { pin = normalizeStaffPin(request.data?.currentPin ?? request.data?.pin) } catch {
+    throw new HttpsError('invalid-argument', 'Your current six-digit admin PIN is required.')
+  }
   const nowMs = Date.now()
+  let actor
+  try {
+    actor = await loadMappedActor({ db, requestAuth: request.auth, nowMs, requireCurrentSession: true })
+  } catch (error) {
+    if (error instanceof StaffAccountSecurityError) throw new HttpsError(error.code, error.message)
+    throw error
+  }
+  if (actor.role !== 'admin') throw new HttpsError('permission-denied', 'Admin access is required.')
+  const requestedProfileId = String(request.data?.adminProfileId || actor.id).trim()
+  if (requestedProfileId !== actor.id) throw new HttpsError('permission-denied', 'Use your own admin profile and PIN for this action.')
+  const credentialSnapshot = await db.doc(`staffPinCredentials/${actor.id}`).get()
+  const pinValid = credentialSnapshot.exists
+    && credentialSnapshot.data()?.active === true
+    && await verifyServerPinCredential(pin, STAFF_PIN_AUTH_SECRET.value(), credentialSnapshot.data())
+  const rateRef = db.doc(`securityRateLimits/adminReauth_${cleanId(actor.id)}`)
   const result = await db.runTransaction(async transaction => {
-    const [profileSnap, rateSnap] = await Promise.all([transaction.get(profileRef), transaction.get(rateRef)])
-    const profile = profileSnap.data()
+    const rateSnap = await transaction.get(rateRef)
     const rate = rateSnap.data() || {}
     const lockedUntilMs = rate.lockedUntil?.toMillis?.() || 0
     if (lockedUntilMs > nowMs) return { locked: true }
-
-    const valid = profileSnap.exists && profile?.active === true && profile?.role === 'admin' && profile?.pinHash === hashPin(pin)
-    if (valid) {
+    if (pinValid) {
       transaction.set(rateRef, { failedAttempts: 0, lockedUntil: null, lastSucceededAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
-      return { actor: { id: profileId, name: profile.name || 'Admin' } }
+      return { actor: { id: actor.id, name: actor.name || 'Admin' } }
     }
 
     const windowStartedMs = rate.windowStartedAt?.toMillis?.() || 0
-    const inWindow = windowStartedMs > 0 && nowMs - windowStartedMs < PIN_ATTEMPT_WINDOW_MS
+    const inWindow = windowStartedMs > 0 && nowMs - windowStartedMs < ADMIN_REAUTH_WINDOW_MS
     const failedAttempts = (inWindow ? Number(rate.failedAttempts || 0) : 0) + 1
     transaction.set(rateRef, {
       failedAttempts,
       windowStartedAt: inWindow ? rate.windowStartedAt : Timestamp.fromMillis(nowMs),
-      lockedUntil: failedAttempts >= PIN_MAX_ATTEMPTS ? Timestamp.fromMillis(nowMs + PIN_ATTEMPT_WINDOW_MS) : null,
+      lockedUntil: failedAttempts >= ADMIN_REAUTH_MAX_ATTEMPTS ? Timestamp.fromMillis(nowMs + ADMIN_REAUTH_WINDOW_MS) : null,
       lastFailedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp()
     }, { merge: true })
-    return { locked: failedAttempts >= PIN_MAX_ATTEMPTS }
+    return { locked: failedAttempts >= ADMIN_REAUTH_MAX_ATTEMPTS }
   })
   if (result.locked) throw new HttpsError('resource-exhausted', 'Too many failed attempts. Try again later.')
   if (!result.actor) throw new HttpsError('permission-denied', 'Admin PIN verification failed.')
@@ -907,7 +863,7 @@ async function appendAttachmentHistory({ issueId, attachmentId, eventType, actor
 }
 
 export async function emergencyPrivacyRemoveHandler(request) {
-  const actor = await requireAdminPin(request)
+  const actor = await requireAdminReauthentication(request)
   const issueId = String(request.data?.issueId || '').trim()
   const attachmentId = String(request.data?.attachmentId || '').trim()
   const reason = String(request.data?.reason || '').trim()
@@ -923,7 +879,7 @@ export async function emergencyPrivacyRemoveHandler(request) {
   return { removed: true }
 }
 
-export const emergencyPrivacyRemove = onCall({ region: 'us-central1', enforceAppCheck: false }, emergencyPrivacyRemoveHandler)
+export const emergencyPrivacyRemove = onCall({ region: 'us-central1', enforceAppCheck: false, secrets: [STAFF_PIN_AUTH_SECRET] }, emergencyPrivacyRemoveHandler)
 
 export async function runPhotoRetentionCleanup({ now = Timestamp.now(), batchLimit = 100 } = {}) {
   const issuesSnap = await db.collection('eocIssues').where('photoDeletionDueAt', '<=', now).limit(batchLimit).get()

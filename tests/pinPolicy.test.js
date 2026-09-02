@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { hashPin } from '../src/utils/pinHash.js'
 import {
   PIN_LENGTH,
-  PIN_VERSION,
   generateSecurePin,
   isObviousPin,
   isValidPin,
@@ -13,7 +10,6 @@ import {
 
 test('six-digit PIN policy validates and normalizes consistently', () => {
   assert.equal(PIN_LENGTH, 6)
-  assert.equal(PIN_VERSION, 'v2_sha256_6digit')
   assert.equal(normalizePin('12a34-567'), '123456')
   assert.equal(isValidPin('482915'), true)
   assert.equal(isValidPin('48291'), false)
@@ -34,12 +30,4 @@ test('secure generator returns allowed six-digit PINs', () => {
     assert.equal(isObviousPin(pin), false)
     assert.equal(Number(pin) >= 100000 && Number(pin) <= 999999, true)
   }
-})
-
-test('PIN hashing uses the v2 six-digit marker', async () => {
-  const pin = '482915'
-  const expected = createHash('sha256')
-    .update(`sprc-pin-v2-6digit:${pin}`)
-    .digest('hex')
-  assert.equal(await hashPin(pin), expected)
 })

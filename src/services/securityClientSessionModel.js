@@ -1,6 +1,5 @@
 export const SECURITY_CLIENT_SESSION_VERSION = 3
 export const SECURITY_SERVER_SESSION_VERSION = 2
-export const SECURITY_COMPATIBILITY_SESSION_VERSION = 1
 export const SECURITY_SESSION_MAX_MS = 84 * 60 * 60 * 1000
 export const SECURITY_SESSION_STORAGE_KEY = 'sprc_staff_session_v3'
 export const SECURITY_DEVICE_STORAGE_KEY = 'sprc_staff_device_v3'
@@ -18,23 +17,6 @@ function stringArray(value) {
 function normalizedRole(value) {
   const role = String(value || '').trim().toLowerCase()
   return role === 'tech' ? 'bht' : role
-}
-
-export function toSecurityCompatibilityUser(user = {}) {
-  return {
-    ...user,
-    securityCompatibilityVersion: SECURITY_COMPATIBILITY_SESSION_VERSION
-  }
-}
-
-export function isSecurityCompatibilityUser(user) {
-  if (!user || user.securityCompatibilityVersion !== SECURITY_COMPATIBILITY_SESSION_VERSION) return false
-  if (Number(user.securitySessionVersion || 0) === SECURITY_CLIENT_SESSION_VERSION) return false
-  return Boolean(String(user.id || '').trim()) && ALLOWED_ROLES.has(normalizedRole(user.role))
-}
-
-export function compatibilitySessionRequiresFreshLogin(user, authPolicy = {}) {
-  return authPolicy.authScopeEnforced === true && isSecurityCompatibilityUser(user)
 }
 
 function requiredInteger(value) {
